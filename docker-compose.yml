@@ -30,5 +30,22 @@ services:
       DATABASE_PASSWORD: store_listing
       REDIS_URL: redis://redis:6379/0
 
+  trend-service:
+    build:
+      context: ./trend-service
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: store_listing
+      DATABASE_USER: store_listing
+      DATABASE_PASSWORD: store_listing
+      JWT_PUBLICKEY_LOCATION: ""
+      QUARKUS_PROFILE: dev
+
 volumes:
   postgres_data:
