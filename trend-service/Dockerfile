@@ -1,5 +1,5 @@
 # Build stage
-FROM registry.access.redhat.com/ubi9/openjdk-25 AS builder
+FROM registry.access.redhat.com/hi/openjdk:latest-builder AS builder
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ RUN cd /app/trend-service && \
     mvn package -DskipTests -Dquarkus.package.type=fast-jar
 
 # Runtime stage
-FROM registry.access.redhat.com/hi/openjdk:25
+FROM registry.access.redhat.com/hi/openjdk:latest-runtime
 
 WORKDIR /app
 
