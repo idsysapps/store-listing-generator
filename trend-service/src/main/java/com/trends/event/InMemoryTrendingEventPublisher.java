@@ -45,7 +45,7 @@ public class InMemoryTrendingEventPublisher implements TrendingEventPublisher {
                 }
 
                 @Override
-                public void onError(Throwable error) {
+                public void onFailure(Throwable error) {
                     emitter.fail(error);
                     subscribers.remove(subscriber);
                 }
