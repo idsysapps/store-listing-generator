@@ -2,9 +2,9 @@ package com.trends.event;
 
 import com.trends.dto.TrendUpdate;
 import io.smallrye.mutiny.Multi;
+import io.smallrye.mutiny.subscription.Cancellable;
 import io.smallrye.mutiny.subscription.MultiSubscriber;
 import io.smallrye.mutiny.subscription.SerializedSubscriber;
-import io.smallrye.mutiny.subscription.Subscriptions;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -35,7 +35,7 @@ public class InMemoryTrendingEventPublisher implements TrendingEventPublisher {
         return Multi.createFrom(). emitter(emitter -> {
             SerializedSubscriber<TrendUpdate> subscriber = new SerializedSubscriber<>(new MultiSubscriber<>() {
                 @Override
-                public void onSubscribe(Subscriptions subscription) {
+                public void onSubscribe(Cancellable cancellable) {
                     subscribers.add(subscriber);
                 }
 
