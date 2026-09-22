@@ -3,6 +3,7 @@ FROM registry.access.redhat.com/hi/openjdk:latest-builder AS builder
 
 USER root
 RUN dnf install -y maven && dnf clean all
+RUN mkdir -p /app/trend-service/target && chown -R ${CONTAINER_DEFAULT_USER}:${CONTAINER_DEFAULT_USER} /app
 USER ${CONTAINER_DEFAULT_USER}
 
 WORKDIR /app
