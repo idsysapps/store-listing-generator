@@ -1,5 +1,5 @@
 # Build stage
-FROM registry.access.redhat.com/hi/openjdk:25 AS builder
+FROM registry.access.redhat.com/ubi9/openjdk-25 AS builder
 
 WORKDIR /app
 
