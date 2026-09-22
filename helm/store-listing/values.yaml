@@ -1,0 +1,57 @@
+createNamespace: true
+
+config:
+  databaseName: store_listing
+  redisUrl: redis://store-listing-store-listing-redis:6379/0
+  quarkusProfile: prod
+
+secrets:
+  databaseUser: store_listing
+  databasePassword: store_listing
+  jwtPublicKeyLocation: ""
+  jwtIssuer: https://costbook.example.com
+
+postgres:
+  image: registry.access.redhat.com/ubi9/postgresql-16
+  storage: 1Gi
+  persistentVolumeClaim:
+    create: true
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+redis:
+  image: registry.access.redhat.com/ubi9/redis-7
+  resources:
+    limits:
+      cpu: 250m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+app:
+  image: quay.io/idsysapps/store-listing-generator:latest
+  replicas: 1
+  resources:
+    limits:
+      cpu: 250m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+trendService:
+  image: quay.io/idsysapps/trend-service:latest
+  replicas: 1
+  resources:
+    limits:
+      cpu: 250m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi

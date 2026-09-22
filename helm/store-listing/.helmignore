@@ -1,0 +1,22 @@
+.helmignore
+# Patterns to ignore when building packages.
+*.toml
+*.yaml.bak
+*.tmp
+*.orig
+*~
+
+# Git
+.git
+.gitignore
+
+# CI
+.github
+.gitlab-ci.yml
+.helmignore
+
+# Development
+*.md
+tests/
+Makefile
+docker-compose.yml
