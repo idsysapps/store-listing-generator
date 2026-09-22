@@ -106,6 +106,7 @@ class TestDatabaseClient:
         mock_cursor.fetchone.return_value = (42,)
 
         mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
 
         with patch.object(DatabaseClient, "connect", return_value=mock_conn):
@@ -119,6 +120,7 @@ class TestDatabaseClient:
         mock_cursor.fetchone.return_value = (99,)
 
         mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
 
         with patch.object(DatabaseClient, "connect", return_value=mock_conn):
