@@ -167,7 +167,7 @@
 
     <profiles>
         <profile>
-            <id>native</profile>
+            <id>native</id>
             <activation>
                 <property>
                     <name>native</name>
