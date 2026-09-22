@@ -5,8 +5,8 @@ RUN dnf install -y maven && dnf clean all
 
 WORKDIR /app
 
-COPY trend-service/pom.xml /app/trend-service/
-COPY trend-service/src /app/trend-service/src
+COPY pom.xml /app/trend-service/
+COPY src /app/trend-service/src
 
 RUN cd /app/trend-service && \
     mvn package -DskipTests -Dquarkus.package.type=fast-jar
