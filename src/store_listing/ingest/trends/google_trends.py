@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import pandas as pd
@@ -90,7 +90,7 @@ class GoogleTrendsClient:
                     score=score,
                     delta=delta,
                     region=region if isinstance(region, str) else str(region),
-                    fetched_at=datetime.now(timezone.utc),
+                    fetched_at=datetime.now(UTC),
                 ))
         return results
 
