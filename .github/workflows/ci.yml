@@ -9,11 +9,15 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
-    container: ubi9/python:3.13
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
 
       - name: Install uv
         run: pip install uv

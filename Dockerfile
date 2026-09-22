@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/python:3.13
+FROM registry.access.redhat.com/ubi9/python-313
 
 WORKDIR /app
 
