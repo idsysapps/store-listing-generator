@@ -2,7 +2,7 @@
 FROM registry.access.redhat.com/ubi9/openjdk-25 AS builder
 
 USER root
-RUN dnf install -y maven && dnf clean all
+RUN microdnf install -y maven && microdnf clean all
 RUN mkdir -p /app/trend-service/target && chown -R ${CONTAINER_DEFAULT_USER}:${CONTAINER_DEFAULT_USER} /app
 USER ${CONTAINER_DEFAULT_USER}
 
