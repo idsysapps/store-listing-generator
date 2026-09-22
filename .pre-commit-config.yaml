@@ -19,3 +19,11 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
+
+      - id: validate-pom-xml
+        name: Validate Maven pom.xml
+        entry: xmllint --noout
+        language: system
+        pass_filenames: true
+        types: [xml]
+        files: ^.*/pom\.xml$
