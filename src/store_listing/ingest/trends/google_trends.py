@@ -22,31 +22,29 @@ class DatabaseClient:
         return psycopg2.connect(**self.connection_params)
 
     def insert_trend_query(self, seed_keyword: str, query: str) -> int:
-        with self.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO trend_queries (seed_keyword, query)
-                    VALUES (%s, %s)
-                    ON CONFLICT (seed_keyword, query) DO UPDATE SET created_at = CURRENT_TIMESTAMP
-                    RETURNING id
-                    """,
-                    (seed_keyword, query),
-                )
-                return cur.fetchone()[0]
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO trend_queries (seed_keyword, query)
+                VALUES (%s, %s)
+                ON CONFLICT (seed_keyword, query) DO UPDATE SET created_at = CURRENT_TIMESTAMP
+                RETURNING id
+                """,
+                (seed_keyword, query),
+            )
+            return cur.fetchone()[0]
 
     def insert_trend_score(self, query_id: int, score: int, delta: int, region: str) -> int:
-        with self.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO trend_scores (query_id, score, delta, region)
-                    VALUES (%s, %s, %s, %s)
-                    RETURNING id
-                    """,
-                    (query_id, score, delta, region),
-                )
-                return cur.fetchone()[0]
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO trend_scores (query_id, score, delta, region)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (query_id, score, delta, region),
+            )
+            return cur.fetchone()[0]
 
 
 class GoogleTrendsClient:
