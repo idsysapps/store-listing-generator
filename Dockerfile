@@ -1,4 +1,5 @@
-FROM python:3.13-slim
+# Build stage
+FROM registry.access.redhat.com/hi/python:3.14-builder AS builder
 
 WORKDIR /app
 
@@ -7,6 +8,13 @@ RUN pip install uv && uv sync --no-dev --no-install-project
 
 COPY src/ ./src/
 COPY tests/ ./tests/
+
+# Runtime stage
+FROM registry.access.redhat.com/hi/python:3.14
+
+WORKDIR /app
+
+COPY --from=builder /app /app
 
 ENV PYTHONPATH=/app
 

@@ -1,4 +1,7 @@
-FROM maven:3.9-eclipse-temurin-17 AS builder
+# Build stage
+FROM registry.access.redhat.com/hi/openjdk:25-builder AS builder
+
+RUN dnf install -y maven && dnf clean all
 
 WORKDIR /app
 
@@ -8,10 +11,8 @@ COPY trend-service/src /app/trend-service/src
 RUN cd /app/trend-service && \
     mvn package -DskipTests -Dquarkus.package.type=fast-jar
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.4
-
-RUN microdnf install -y java-17-runtime && \
-    microdnf clean all
+# Runtime stage
+FROM registry.access.redhat.com/hi/openjdk:25
 
 WORKDIR /app
 
