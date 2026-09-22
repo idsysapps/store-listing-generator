@@ -1,4 +1,3 @@
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -92,7 +91,7 @@ class TestDatabaseClient:
             mock_connect.return_value = mock_conn
 
             db_client = DatabaseClient(host="localhost", database="test")
-            conn = db_client.connect()
+            db_client.connect()
 
             mock_connect.assert_called_once_with(
                 host="localhost",

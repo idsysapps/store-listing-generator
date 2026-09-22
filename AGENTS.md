@@ -335,6 +335,24 @@ Use conventional commits:
 
 **Include issue number in commit body:** `(closes #123)`
 
+### Pre-Commit Lint Check
+
+**Always run lint checks before committing to reduce CI failures:**
+
+```bash
+# Install pre-commit hooks (one-time)
+pre-commit install
+
+# Run linting manually before committing
+uv run ruff check .
+uv run ruff format --check .
+
+# Or use pre-commit
+pre-commit run --all-files
+```
+
+**Never skip or bypass lint checks.** If ruff reports issues, fix them before committing.
+
 ---
 
 ## CI/CD Standards

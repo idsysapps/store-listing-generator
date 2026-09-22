@@ -1,11 +1,14 @@
-from datetime import datetime
-from typing import Any
+import logging
+from datetime import datetime, timezone
+from typing import Any, ClassVar
 
 import pandas as pd
 import psycopg2
 from pytrends.request import TrendReq
 
 from .schemas import TrendHarvestRequest, TrendResult
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseClient:
@@ -48,9 +51,9 @@ class DatabaseClient:
 
 
 class GoogleTrendsClient:
-    DEFAULT_SEEDS = ["funny t-shirt", "hoodie", "gift", "mom humor", "gym fitness"]
+    DEFAULT_SEEDS: ClassVar[list[str]] = ["funny t-shirt", "hoodie", "gift", "mom humor", "gym fitness"]
 
-    def __init__(self, db_client: DatabaseClient | None = None):
+    def __init__(self, db_client: DatabaseClient | None = None) -> None:
         self.pytrends = TrendReq(hl="en-US", tz=360)
         self.db_client = db_client or DatabaseClient()
 
@@ -87,7 +90,7 @@ class GoogleTrendsClient:
                     score=score,
                     delta=delta,
                     region=region if isinstance(region, str) else str(region),
-                    fetched_at=datetime.utcnow(),
+                    fetched_at=datetime.now(timezone.utc),
                 ))
         return results
 
@@ -115,7 +118,8 @@ class GoogleTrendsClient:
                     )
                     all_results.append(result)
                     
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to fetch trends for seed %s: %s", seed, e)
                 continue
                 
         return all_results
