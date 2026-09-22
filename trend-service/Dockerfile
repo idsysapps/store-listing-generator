@@ -1,5 +1,5 @@
 # Build stage
-FROM registry.access.redhat.com/hi/openjdk:latest-builder AS builder
+FROM registry.access.redhat.com/ubi9/openjdk-25 AS builder
 
 USER root
 RUN dnf install -y maven && dnf clean all
