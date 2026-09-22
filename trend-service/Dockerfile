@@ -1,7 +1,5 @@
 # Build stage
-FROM registry.access.redhat.com/hi/openjdk:25-builder AS builder
-
-RUN microdnf install -y maven && microdnf clean all
+FROM registry.access.redhat.com/ubi9/openjdk-25:1.22 AS builder
 
 WORKDIR /app
 
