@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: registry.access.redhat.com/ubi9/postgresql-16
+    environment:
+      POSTGRESQL_USER: store_listing
+      POSTGRESQL_PASSWORD: store_listing
+      POSTGRESQL_DATABASE: store_listing
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/pgsql/data
+
+  redis:
+    image: registry.access.redhat.com/ubi9/redis-7
+    ports:
+      - "6379:6379"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: store_listing
+      DATABASE_USER: store_listing
+      DATABASE_PASSWORD: store_listing
+      REDIS_URL: redis://redis:6379/0
+
+volumes:
+  postgres_data:

@@ -1,11 +1,14 @@
-from datetime import datetime
-from typing import Any
+import logging
+from datetime import UTC, datetime
+from typing import Any, ClassVar
 
 import pandas as pd
 import psycopg2
 from pytrends.request import TrendReq
 
 from .schemas import TrendHarvestRequest, TrendResult
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseClient:
@@ -22,37 +25,43 @@ class DatabaseClient:
         return psycopg2.connect(**self.connection_params)
 
     def insert_trend_query(self, seed_keyword: str, query: str) -> int:
-        with self.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO trend_queries (seed_keyword, query)
-                    VALUES (%s, %s)
-                    ON CONFLICT (seed_keyword, query) DO UPDATE SET created_at = CURRENT_TIMESTAMP
-                    RETURNING id
-                    """,
-                    (seed_keyword, query),
-                )
-                return cur.fetchone()[0]
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO trend_queries (seed_keyword, query)
+                VALUES (%s, %s)
+                ON CONFLICT (seed_keyword, query) DO UPDATE SET created_at = CURRENT_TIMESTAMP
+                RETURNING id
+                """,
+                (seed_keyword, query),
+            )
+            result = cur.fetchone()
+            if result is None:
+                msg = "Failed to insert trend query"
+                raise RuntimeError(msg)
+            return result[0]
 
     def insert_trend_score(self, query_id: int, score: int, delta: int, region: str) -> int:
-        with self.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO trend_scores (query_id, score, delta, region)
-                    VALUES (%s, %s, %s, %s)
-                    RETURNING id
-                    """,
-                    (query_id, score, delta, region),
-                )
-                return cur.fetchone()[0]
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO trend_scores (query_id, score, delta, region)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (query_id, score, delta, region),
+            )
+            result = cur.fetchone()
+            if result is None:
+                msg = "Failed to insert trend score"
+                raise RuntimeError(msg)
+            return result[0]
 
 
 class GoogleTrendsClient:
-    DEFAULT_SEEDS = ["funny t-shirt", "hoodie", "gift", "mom humor", "gym fitness"]
+    DEFAULT_SEEDS: ClassVar[list[str]] = ["funny t-shirt", "hoodie", "gift", "mom humor", "gym fitness"]
 
-    def __init__(self, db_client: DatabaseClient | None = None):
+    def __init__(self, db_client: DatabaseClient | None = None) -> None:
         self.pytrends = TrendReq(hl="en-US", tz=360)
         self.db_client = db_client or DatabaseClient()
 
@@ -89,7 +98,7 @@ class GoogleTrendsClient:
                     score=score,
                     delta=delta,
                     region=region if isinstance(region, str) else str(region),
-                    fetched_at=datetime.utcnow(),
+                    fetched_at=datetime.now(UTC),
                 ))
         return results
 
@@ -117,7 +126,8 @@ class GoogleTrendsClient:
                     )
                     all_results.append(result)
                     
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to fetch trends for seed %s: %s", seed, e)
                 continue
                 
         return all_results

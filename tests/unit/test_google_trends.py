@@ -1,4 +1,3 @@
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -68,7 +67,7 @@ class TestGoogleTrendsClient:
         mock_db_client.insert_trend_score.return_value = 1
 
         mock_region_data = pd.DataFrame({
-            "hoodie": [30, 35],
+            "hoodie": [30],
         }, index=["US"])
 
         with patch.object(client, "_build_payload") as mock_payload:
@@ -92,7 +91,7 @@ class TestDatabaseClient:
             mock_connect.return_value = mock_conn
 
             db_client = DatabaseClient(host="localhost", database="test")
-            conn = db_client.connect()
+            db_client.connect()
 
             mock_connect.assert_called_once_with(
                 host="localhost",
@@ -103,28 +102,28 @@ class TestDatabaseClient:
             )
 
     def test_insert_trend_query_returns_id(self) -> None:
-        with patch.object(DatabaseClient, "connect") as mock_connect:
-            mock_conn = MagicMock()
-            mock_cursor = MagicMock()
-            mock_cursor.fetchone.return_value = (42,)
-            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
-            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-            mock_connect.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (42,)
 
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
             db_client = DatabaseClient()
             result = db_client.insert_trend_query("hoodie", "funny hoodie")
 
             assert result == 42
 
     def test_insert_trend_score_returns_id(self) -> None:
-        with patch.object(DatabaseClient, "connect") as mock_connect:
-            mock_conn = MagicMock()
-            mock_cursor = MagicMock()
-            mock_cursor.fetchone.return_value = (99,)
-            mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
-            mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-            mock_connect.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (99,)
 
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
             db_client = DatabaseClient()
             result = db_client.insert_trend_score(query_id=1, score=75, delta=10, region="US")
 
