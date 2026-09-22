@@ -1,6 +1,10 @@
 # Build stage
 FROM registry.access.redhat.com/hi/openjdk:latest-builder AS builder
 
+USER root
+RUN dnf install -y maven && dnf clean all
+USER ${CONTAINER_DEFAULT_USER}
+
 WORKDIR /app
 
 COPY pom.xml /app/trend-service/
