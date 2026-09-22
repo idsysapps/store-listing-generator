@@ -45,6 +45,33 @@ jobs:
           files: ./coverage.xml
           fail_ci_if_error: false
 
+  build-only:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Python app
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          dockerfile: Dockerfile
+          push: false
+          tags: quay.io/idsysapps/store-listing-generator:pr-test
+
+      - name: Build trend-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./trend-service
+          dockerfile: Dockerfile
+          push: false
+          tags: quay.io/idsysapps/trend-service:pr-test
+
   build-and-push:
     needs: lint-and-test
     runs-on: ubuntu-latest
