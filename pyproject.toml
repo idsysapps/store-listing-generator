@@ -36,6 +36,10 @@ testpaths = ["tests"]
 
 [tool.pyright]
 pythonVersion = "3.11"
+include = ["src"]
+exclude = ["**/__pycache__"]
+reportMissingImports = true
+reportMissingTypeStubs = false
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/store_listing"]

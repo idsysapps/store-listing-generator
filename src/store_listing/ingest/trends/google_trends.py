@@ -35,7 +35,11 @@ class DatabaseClient:
                 """,
                 (seed_keyword, query),
             )
-            return cur.fetchone()[0]
+            result = cur.fetchone()
+            if result is None:
+                msg = "Failed to insert trend query"
+                raise RuntimeError(msg)
+            return result[0]
 
     def insert_trend_score(self, query_id: int, score: int, delta: int, region: str) -> int:
         with self.connect() as conn, conn.cursor() as cur:
@@ -47,7 +51,11 @@ class DatabaseClient:
                 """,
                 (query_id, score, delta, region),
             )
-            return cur.fetchone()[0]
+            result = cur.fetchone()
+            if result is None:
+                msg = "Failed to insert trend score"
+                raise RuntimeError(msg)
+            return result[0]
 
 
 class GoogleTrendsClient:
