@@ -2,7 +2,7 @@
 name = "store-listing-generator"
 version = "0.1.0"
 description = "Automated E-Commerce Apparel Trend Mining & Publishing System"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "pytrends>=4.9.2",
     "pandas>=2.2.0",
@@ -28,14 +28,14 @@ build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py313"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.pyright]
-pythonVersion = "3.14"
+pythonVersion = "3.13"
 include = ["src"]
 exclude = ["**/__pycache__"]
 reportMissingImports = true
