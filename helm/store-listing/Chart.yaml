@@ -1,0 +1,14 @@
+apiVersion: v2
+name: store-listing
+description: Store Listing Generator - Kubernetes deployment for OpenShift
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - store-listing
+  - trends
+  - celery
+  - quarkus
+home: https://github.com/idsysapps/store-listing-generator
+sources:
+  - https://github.com/idsysapps/store-listing-generator

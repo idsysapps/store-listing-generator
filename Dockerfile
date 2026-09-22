@@ -4,7 +4,9 @@ FROM registry.access.redhat.com/hi/python:3.14-builder AS builder
 WORKDIR /app
 
 COPY pyproject.toml uv.lock* ./
-RUN pip install uv && uv sync --no-dev --no-install-project
+RUN pip install --user uv && \
+    export PATH="$HOME/.local/bin:$PATH" && \
+    uv sync --no-dev --no-install-project
 
 COPY src/ ./src/
 COPY tests/ ./tests/
