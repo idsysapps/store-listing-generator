@@ -12,7 +12,14 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseClient:
-    def __init__(self, host: str = "localhost", port: int = 5432, database: str = "store_listing", user: str | None = None, password: str | None = None):
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 5432,
+        database: str = "store_listing",
+        user: str | None = None,
+        password: str | None = None,
+    ):
         self.connection_params = {
             "host": host,
             "port": port,
@@ -59,13 +66,21 @@ class DatabaseClient:
 
 
 class GoogleTrendsClient:
-    DEFAULT_SEEDS: ClassVar[list[str]] = ["funny t-shirt", "hoodie", "gift", "mom humor", "gym fitness"]
+    DEFAULT_SEEDS: ClassVar[list[str]] = [
+        "funny t-shirt",
+        "hoodie",
+        "gift",
+        "mom humor",
+        "gym fitness",
+    ]
 
     def __init__(self, db_client: DatabaseClient | None = None) -> None:
         self.pytrends = TrendReq(hl="en-US", tz=360)
         self.db_client = db_client or DatabaseClient()
 
-    def _build_payload(self, keyword: str, timeframe: str = "today 3-m", geo: str = "US") -> dict[str, Any]:
+    def _build_payload(
+        self, keyword: str, timeframe: str = "today 3-m", geo: str = "US"
+    ) -> dict[str, Any]:
         self.pytrends.build_payload([keyword], timeframe=timeframe, geo=geo)
         return {
             "interest_by_region": self.pytrends.interest_by_region(),
@@ -84,27 +99,31 @@ class GoogleTrendsClient:
             return 100 if latest > 0 else 0
         return int(((latest - previous) / previous) * 100)
 
-    def fetch_trending(self, keyword: str, timeframe: str = "today 3-m", geo: str = "US") -> list[TrendResult]:
+    def fetch_trending(
+        self, keyword: str, timeframe: str = "today 3-m", geo: str = "US"
+    ) -> list[TrendResult]:
         payload = self._build_payload(keyword, timeframe, geo)
         region_data = payload["interest_by_region"]
-        
+
         results = []
         for region, row in region_data.iterrows():
             if keyword in row and pd.notna(row[keyword]) and row[keyword] > 0:
                 score = int(row[keyword])
                 delta = self._calculate_delta(region_data, keyword)
-                results.append(TrendResult(
-                    query=keyword,
-                    score=score,
-                    delta=delta,
-                    region=region if isinstance(region, str) else str(region),
-                    fetched_at=datetime.now(UTC),
-                ))
+                results.append(
+                    TrendResult(
+                        query=keyword,
+                        score=score,
+                        delta=delta,
+                        region=region if isinstance(region, str) else str(region),
+                        fetched_at=datetime.now(UTC),
+                    )
+                )
         return results
 
     def harvest_and_store(self, request: TrendHarvestRequest) -> list[TrendResult]:
         all_results: list[TrendResult] = []
-        
+
         for seed in request.seed_keywords:
             try:
                 results = self.fetch_trending(
@@ -112,7 +131,7 @@ class GoogleTrendsClient:
                     timeframe=request.timeframe,
                     geo=request.region,
                 )
-                
+
                 for result in results:
                     query_id = self.db_client.insert_trend_query(
                         seed_keyword=seed,
@@ -125,9 +144,9 @@ class GoogleTrendsClient:
                         region=result.region,
                     )
                     all_results.append(result)
-                    
+
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to fetch trends for seed %s: %s", seed, e)
                 continue
-                
+
         return all_results

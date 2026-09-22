@@ -30,13 +30,9 @@ class TrendResult(BaseModel):
 class TrendHarvestRequest(BaseModel):
     seed_keywords: list[str] = Field(
         default=["funny t-shirt", "hoodie", "gift"],
-        description="Seed keywords to generate trend queries"
+        description="Seed keywords to generate trend queries",
     )
     timeframe: str = Field(
-        default="today 3-m",
-        description="Timeframe for trend data (pytrends format)"
+        default="today 3-m", description="Timeframe for trend data (pytrends format)"
     )
-    region: str = Field(
-        default="US",
-        description="Geographic region for trends"
-    )
+    region: str = Field(default="US", description="Geographic region for trends")

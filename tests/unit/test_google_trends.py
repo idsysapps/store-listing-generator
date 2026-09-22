@@ -17,9 +17,12 @@ class TestGoogleTrendsClient:
         return GoogleTrendsClient(db_client=mock_db_client)
 
     def test_fetch_trending_returns_trend_results(self, client: GoogleTrendsClient) -> None:
-        mock_region_data = pd.DataFrame({
-            "funny t-shirt": [45, 50, 55],
-        }, index=["US", "CA", "UK"])
+        mock_region_data = pd.DataFrame(
+            {
+                "funny t-shirt": [45, 50, 55],
+            },
+            index=["US", "CA", "UK"],
+        )
 
         with patch.object(client, "_build_payload") as mock_payload:
             mock_payload.return_value = {
@@ -45,17 +48,21 @@ class TestGoogleTrendsClient:
             assert results == []
 
     def test_calculate_delta_returns_percentage(self, client: GoogleTrendsClient) -> None:
-        data = pd.DataFrame({
-            "test": [100, 150, 200],
-        })
+        data = pd.DataFrame(
+            {
+                "test": [100, 150, 200],
+            }
+        )
 
         delta = client._calculate_delta(data, "test")
         assert delta == 33
 
     def test_calculate_delta_handles_zero_previous(self, client: GoogleTrendsClient) -> None:
-        data = pd.DataFrame({
-            "test": [0, 50, 100],
-        })
+        data = pd.DataFrame(
+            {
+                "test": [0, 50, 100],
+            }
+        )
 
         delta = client._calculate_delta(data, "test")
         assert delta == 100
@@ -66,9 +73,12 @@ class TestGoogleTrendsClient:
         mock_db_client.insert_trend_query.return_value = 1
         mock_db_client.insert_trend_score.return_value = 1
 
-        mock_region_data = pd.DataFrame({
-            "hoodie": [30],
-        }, index=["US"])
+        mock_region_data = pd.DataFrame(
+            {
+                "hoodie": [30],
+            },
+            index=["US"],
+        )
 
         with patch.object(client, "_build_payload") as mock_payload:
             mock_payload.return_value = {
