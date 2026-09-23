@@ -204,13 +204,44 @@ jobs:
         run: |
           if [[ "$IS_MASTER" == "true" ]]; then
             mkdir -p /tmp/gh-pages/master
+            # Fetch existing gh-pages to preserve historical chart versions
+            git fetch origin gh-pages 2>/dev/null || true
+            if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+              git worktree add /tmp/gh-pages-worktree gh-pages 2>/dev/null || true
+              if [ -d /tmp/gh-pages-worktree/master ]; then
+                cp /tmp/gh-pages-worktree/master/*.tgz /tmp/gh-pages/master/ 2>/dev/null || true
+                cp /tmp/gh-pages-worktree/master/index.yaml /tmp/gh-pages/master/index.yaml.existing 2>/dev/null || true
+              fi
+              git worktree remove --force /tmp/gh-pages-worktree 2>/dev/null || true
+            fi
             cp /tmp/helm-repo/*.tgz /tmp/gh-pages/master/
-            helm repo index /tmp/gh-pages/master --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/master"
+            if [ -f /tmp/gh-pages/master/index.yaml.existing ]; then
+              helm repo index /tmp/gh-pages/master --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/master" --merge /tmp/gh-pages/master/index.yaml.existing
+              rm -f /tmp/gh-pages/master/index.yaml.existing
+            else
+              helm repo index /tmp/gh-pages/master --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/master"
+            fi
             test -s /tmp/gh-pages/master/index.yaml || { echo "index.yaml is empty"; exit 1; }
           else
             mkdir -p /tmp/gh-pages
+            git fetch origin gh-pages 2>/dev/null || true
+            if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+              git worktree add /tmp/gh-pages-worktree gh-pages 2>/dev/null || true
+              if [ -f /tmp/gh-pages-worktree/index.yaml ] && [ -z "$DEST_DIR" ]; then
+                cp /tmp/gh-pages-worktree/index.yaml /tmp/gh-pages/index.yaml.existing 2>/dev/null || true
+              fi
+              if [ -z "$DEST_DIR" ]; then
+                cp /tmp/gh-pages-worktree/*.tgz /tmp/gh-pages/ 2>/dev/null || true
+              fi
+              git worktree remove --force /tmp/gh-pages-worktree 2>/dev/null || true
+            fi
             cp /tmp/helm-repo/*.tgz /tmp/gh-pages/
-            helm repo index /tmp/gh-pages --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}"
+            if [ -f /tmp/gh-pages/index.yaml.existing ]; then
+              helm repo index /tmp/gh-pages --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}" --merge /tmp/gh-pages/index.yaml.existing
+              rm -f /tmp/gh-pages/index.yaml.existing
+            else
+              helm repo index /tmp/gh-pages --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}"
+            fi
             test -s /tmp/gh-pages/index.yaml || { echo "index.yaml is empty"; exit 1; }
           fi
 
