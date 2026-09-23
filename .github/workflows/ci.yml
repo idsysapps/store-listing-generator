@@ -194,7 +194,7 @@ jobs:
       - name: Package chart
         run: |
           mkdir -p /tmp/helm-repo
-          helm package helm/store-listing/ -f helm/store-listing/values.yaml --destination /tmp/helm-repo
+          helm package helm/store-listing/ --destination /tmp/helm-repo
 
       - name: Checkout gh-pages branch
         run: |
