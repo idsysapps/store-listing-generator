@@ -200,10 +200,17 @@ jobs:
 
       - name: Prepare gh-pages directory
         run: |
+          echo "DEBUG: /tmp/helm-repo contents:"
+          ls -la /tmp/helm-repo/
+          echo "DEBUG: /tmp/helm-repo/*.tgz files:"
+          ls -la /tmp/helm-repo/*.tgz 2>&1 || true
           if [[ "$IS_MASTER" == "true" ]]; then
             mkdir -p /tmp/gh-pages/master
             rm -f /tmp/gh-pages/master/index.yaml
+            echo "DEBUG: Running helm repo index with URL https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/master"
             helm repo index /tmp/helm-repo --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/master" > /tmp/gh-pages/master/index.yaml
+            echo "DEBUG: index.yaml contents after helm repo index:"
+            cat /tmp/gh-pages/master/index.yaml || echo "EMPTY OR MISSING"
             cp /tmp/helm-repo/*.tgz /tmp/gh-pages/master/
           else
             mkdir -p /tmp/gh-pages
