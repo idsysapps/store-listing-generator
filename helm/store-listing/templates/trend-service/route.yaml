@@ -15,4 +15,4 @@ spec:
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
-  wildcardPolicy: Subdomain
+  wildcardPolicy: None

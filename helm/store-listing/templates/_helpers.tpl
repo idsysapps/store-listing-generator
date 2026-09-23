@@ -44,7 +44,7 @@ Create a default fully qualified app name for trend-service.
 Common labels.
 */}}
 {{- define "store-listing.labels" -}}
-helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "-" }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: {{ .Chart.Name }}
 {{- end }}
