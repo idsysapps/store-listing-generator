@@ -2,11 +2,12 @@ from celery import Celery
 from celery.schedules import crontab
 
 from store_listing.ingest.trends import DatabaseClient, GoogleTrendsClient, TrendHarvestRequest
+from store_listing.orchestration import celery_redis_url
 
 celery_app = Celery(
     "store_listing",
-    broker="redis://localhost:6379/0",
-    backend="redis://localhost:6379/0",
+    broker=celery_redis_url(),
+    backend=celery_redis_url(),
 )
 
 celery_app.conf.update(

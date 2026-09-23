@@ -6,6 +6,10 @@ metadata:
   labels:
     {{- include "store-listing.labels" . | nindent 4 }}
     app.kubernetes.io/component: trend-service
+{{- $jwtSecretName := .Values.secrets.jwtSecretName }}
+{{- if .Values.secrets.jwtPublicKey }}
+{{- $jwtSecretName = printf "%s-jwt" (include "store-listing.fullname" .) }}
+{{- end }}
 spec:
   replicas: {{ .Values.trendService.replicas }}
   selector:
@@ -51,22 +55,17 @@ spec:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: DATABASE_PASSWORD
+            {{- if $jwtSecretName }}
             - name: JWT_PUBLICKEY_LOCATION
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "store-listing.fullname" . }}-secrets
-                  key: JWT_PUBLICKEY_LOCATION
+              value: /etc/jwt/publicKey.pem
+            - name: MP_JWT_VERIFY_PUBLICKEY_LOCATION
+              value: /etc/jwt/publicKey.pem
+            {{- end }}
             - name: JWT_ISSUER
               valueFrom:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: JWT_ISSUER
-            - name: MP_JWT_VERIFY_PUBLICKEY_LOCATION
-              value: ""
-            - name: MP_JWT_VERIFY_PUBLICKEY
-              value: ""
-            - name: SMALLRYE_JWT_VERIFY_KEY_LOCATION
-              value: ""
             - name: QUARKUS_PROFILE
               valueFrom:
                 configMapKeyRef:
@@ -90,3 +89,18 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.trendService.resources | nindent 12 }}
+          {{- if $jwtSecretName }}
+          volumeMounts:
+            - name: jwt-public-key
+              mountPath: /etc/jwt
+              readOnly: true
+          {{- end }}
+      {{- if $jwtSecretName }}
+      volumes:
+        - name: jwt-public-key
+          secret:
+            secretName: {{ $jwtSecretName }}
+            items:
+              - key: publicKey.pem
+                path: publicKey.pem
+      {{- end }}

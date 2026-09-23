@@ -26,6 +26,8 @@ spec:
           args:
             - --bind
             - 0.0.0.0
+            - --protected-mode
+            - "no"
           ports:
             - containerPort: 6379
               name: redis
