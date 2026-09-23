@@ -139,8 +139,9 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory /tmp/gh-pages
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -201,6 +202,8 @@ jobs:
           git clone --branch gh-pages https://github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages 2>/dev/null || (
             git clone https://github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages
             git -C /tmp/gh-pages checkout --orphan gh-pages
+            git -C /tmp/gh-pages config user.name "github-actions[bot]"
+            git -C /tmp/gh-pages config user.email "github-actions[bot]@users.noreply.github.com"
             git -C /tmp/gh-pages commit --allow-empty -m "Initial gh-pages"
             git -C /tmp/gh-pages push origin gh-pages
           )
@@ -221,6 +224,8 @@ jobs:
       - name: Push to gh-pages
         run: |
           cd /tmp/gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "$COMMIT_MSG"
           git push
