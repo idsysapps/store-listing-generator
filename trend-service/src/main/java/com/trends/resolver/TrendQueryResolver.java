@@ -7,6 +7,8 @@ import com.trends.repository.TrendQueryRepository;
 import io.quarkus.security.Authenticated;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.graphql.GraphQLApi;
+import org.eclipse.microprofile.graphql.Query;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -15,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@GraphQLApi
 @ApplicationScoped
 public class TrendQueryResolver {
 
@@ -24,6 +27,7 @@ public class TrendQueryResolver {
     TrendQueryRepository trendQueryRepository;
 
     @Authenticated
+    @Query("trendQueries")
     public TrendQueryConnection getTrendQueries(int limit, int offset) {
         LOG.debugf("Fetching trend queries: limit=%d, offset=%d", limit, offset);
 
@@ -44,6 +48,7 @@ public class TrendQueryResolver {
     }
 
     @Authenticated
+    @Query("trendSummary")
     public TrendSummary getTrendSummary(String query) {
         LOG.debugf("Fetching trend summary for query: %s", query);
 
@@ -80,6 +85,7 @@ public class TrendQueryResolver {
     }
 
     @Authenticated
+    @Query("topTrends")
     public List<TrendSummary> getTopTrends(int limit) {
         LOG.debugf("Fetching top trends: limit=%d", limit);
 
@@ -104,6 +110,7 @@ public class TrendQueryResolver {
     }
 
     @Authenticated
+    @Query("trendHistory")
     public List<TrendScore> getTrendHistory(String query, int days) {
         LOG.debugf("Fetching trend history: query=%s, days=%d", query, days);
         return trendQueryRepository.findScoresByQuery(query, days);
