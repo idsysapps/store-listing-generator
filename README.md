@@ -147,6 +147,41 @@ uv run pytest tests/unit/test_google_trends.py
 uv run pytest -k "test_fetch"
 ```
 
+## Helm Deployment
+
+The application can be deployed to Kubernetes/OpenShift using the Helm chart in `helm/store-listing/`.
+
+### Installing from GitHub Pages
+
+```bash
+# Add the Helm repository (master/development builds)
+helm repo add store-listing-generator https://idsysapps.github.io/store-listing-generator/master
+
+# Update dependencies
+helm repo update
+
+# Install from master branch (latest development build)
+helm install store-listing store-listing-generator/store-listing
+
+# Install a specific release version
+helm install store-listing https://idsysapps.github.io/store-listing-generator/store-listing-<version>.tgz
+```
+
+### Helm Chart Repository URLs
+
+| Branch | URL | Description |
+|--------|-----|-------------|
+| `master` | `https://idsysapps.github.io/store-listing-generator/master` | Development builds with latest changes |
+| Releases | `https://idsysapps.github.io/store-listing-generator` | Official releases via GitHub Releases |
+
+### Development Builds (master)
+
+Master builds publish charts with version `0.1.0-master+sha<sha>` and use Docker digest references for images, ensuring `helm upgrade` always triggers pod redeployment.
+
+### Release Builds
+
+Release builds (triggered by git tags like `v0.1.8`) publish to the root URL with semantic versions and use immutable Docker tag references.
+
 ## CI/CD
 
 All CI workflows are located in `.github/workflows/`.
@@ -156,7 +191,8 @@ All CI workflows are located in `.github/workflows/`.
 | Job | Trigger | Purpose |
 |-----|---------|---------|
 | `lint-and-test` | All pushes and PRs | Runs ruff, pyright, and pytest |
-| `build` | Push to master only | Builds Docker image (validates build only, no push) |
+| `build-and-push` | Push to master or tag | Builds and pushes Docker images to Quay.io |
+| `helm-chart-publish` | After build-and-push | Publishes Helm chart to GitHub Pages |
 
 ### Running CI Locally
 
