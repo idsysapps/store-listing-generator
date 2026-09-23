@@ -12,7 +12,7 @@ secrets:
   jwtIssuer: https://costbook.example.com
 
 postgres:
-  image: registry.access.redhat.com/ubi9/postgresql-16
+  image: registry.access.redhat.com/hi/postgresql:latest
   storage: 1Gi
   persistentVolumeClaim:
     create: true
@@ -25,7 +25,7 @@ postgres:
       memory: 512Mi
 
 redis:
-  image: registry.access.redhat.com/ubi9/redis-7
+  image: registry.access.redhat.com/hi/valkey:latest
   resources:
     limits:
       cpu: 250m

@@ -66,7 +66,7 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: QUARKUS_PROFILE
-            - name: JAVA_OPTS
+            - name: JAVA_TOOL_OPTIONS
               value: "-Xms256m -Xmx512m"
             - name: QUARKUS_HTTP_PORT
               value: "8081"
