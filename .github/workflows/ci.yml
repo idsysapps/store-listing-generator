@@ -77,6 +77,9 @@ jobs:
     needs: lint-and-test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    outputs:
+      app_digest: ${{ steps.build_app.outputs.digest }}
+      trend_digest: ${{ steps.build_trend.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -106,6 +109,7 @@ jobs:
           fi
 
       - name: Build and push Python app
+        id: build_app
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -116,6 +120,7 @@ jobs:
             quay.io/idsysapps/store-listing-generator:${{ steps.tags.outputs.app_tag }}
 
       - name: Build and push trend-service
+        id: build_trend
         uses: docker/build-push-action@v6
         with:
           context: ./trend-service
@@ -172,12 +177,6 @@ jobs:
           echo "COMMIT_MSG=chore: release chart ${VERSION}" >> $GITHUB_ENV
           echo "IS_MASTER=false" >> $GITHUB_ENV
 
-      - name: Get Docker digest for master builds
-        if: github.ref == 'refs/heads/master'
-        run: |
-          DIGEST=$(docker inspect quay.io/idsysapps/store-listing-generator:latest --format='{{index .RepoDigests 0}}' | cut -d'@' -f2)
-          echo "DIGEST=${DIGEST}" >> $GITHUB_ENV
-
       - name: Update Chart.yaml
         run: |
           yq e ".version = \"$VERSION\" | .appVersion = \"$IMAGE_TAG\"" \
@@ -186,34 +185,34 @@ jobs:
       - name: Override image reference in values
         run: |
           if [[ "$IS_MASTER" == "true" ]]; then
-            yq e ".app.image = \"quay.io/idsysapps/store-listing-generator@${DIGEST}\" | .trendService.image = \"quay.io/idsysapps/trend-service@${DIGEST}\"" \
+            yq e ".app.image = \"quay.io/idsysapps/store-listing-generator@${APP_DIGEST}\" | .trendService.image = \"quay.io/idsysapps/trend-service@${TREND_DIGEST}\"" \
               helm/store-listing/values.yaml > tmp.yaml && mv tmp.yaml helm/store-listing/values.yaml
           else
             yq e ".app.image = \"quay.io/idsysapps/store-listing-generator:${IMAGE_TAG}\" | .trendService.image = \"quay.io/idsysapps/trend-service:${IMAGE_TAG}\"" \
               helm/store-listing/values.yaml > tmp.yaml && mv tmp.yaml helm/store-listing/values.yaml
           fi
+        env:
+          APP_DIGEST: ${{ needs.build-and-push.outputs.app_digest }}
+          TREND_DIGEST: ${{ needs.build-and-push.outputs.trend_digest }}
 
       - name: Package chart
         run: |
           mkdir -p /tmp/helm-repo
           helm package helm/store-listing/ --destination /tmp/helm-repo
-          sync
-          sleep 2
 
       - name: Prepare gh-pages directory
         run: |
           if [[ "$IS_MASTER" == "true" ]]; then
             mkdir -p /tmp/gh-pages/master
-            rm -f /tmp/gh-pages/master/index.yaml
-            helm repo index /tmp/helm-repo --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/master" > /tmp/gh-pages/master/index.yaml
             cp /tmp/helm-repo/*.tgz /tmp/gh-pages/master/
+            helm repo index /tmp/gh-pages/master --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/master"
+            test -s /tmp/gh-pages/master/index.yaml || { echo "index.yaml is empty"; exit 1; }
           else
             mkdir -p /tmp/gh-pages
-            rm -f /tmp/gh-pages/index.yaml
-            helm repo index /tmp/helm-repo --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}" > /tmp/gh-pages/index.yaml
             cp /tmp/helm-repo/*.tgz /tmp/gh-pages/
+            helm repo index /tmp/gh-pages --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}"
+            test -s /tmp/gh-pages/index.yaml || { echo "index.yaml is empty"; exit 1; }
           fi
-          wc -c /tmp/gh-pages/*/index.yaml /tmp/gh-pages/index.yaml 2>/dev/null || true
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
