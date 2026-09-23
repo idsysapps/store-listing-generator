@@ -69,6 +69,7 @@ spec:
             - store_listing.orchestration.tasks
             - beat
             - --loglevel=info
+            - --schedule=/tmp/celerybeat-schedule
           env:
             - name: DATABASE_HOST
               valueFrom:
