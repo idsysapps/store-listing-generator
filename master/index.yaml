@@ -3,7 +3,7 @@ entries:
   store-listing:
   - apiVersion: v2
     appVersion: latest-sha7b92f18
-    created: "2026-09-23T19:04:26.893249444Z"
+    created: "2026-09-23T19:19:00.545735433Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: 130c7ee67fad48fa9c7d05f7e6f57a93934ba7468891d727e4c336456f27a840
     home: https://github.com/idsysapps/store-listing-generator
@@ -19,4 +19,22 @@ entries:
     urls:
     - https://idsysapps.github.io/store-listing-generator/master/store-listing-0.1.0-master+sha7b92f18.tgz
     version: 0.1.0-master+sha7b92f18
-generated: "2026-09-23T19:04:26.892095578Z"
+  - apiVersion: v2
+    appVersion: latest-shacfe6977
+    created: "2026-09-23T19:19:00.546238097Z"
+    description: Store Listing Generator - Kubernetes deployment for OpenShift
+    digest: bc1443db6b7c4f4b4e7578a304cd3078e946ed42f3d940ad71491856c4a51570
+    home: https://github.com/idsysapps/store-listing-generator
+    keywords:
+    - store-listing
+    - trends
+    - celery
+    - quarkus
+    name: store-listing
+    sources:
+    - https://github.com/idsysapps/store-listing-generator
+    type: application
+    urls:
+    - https://idsysapps.github.io/store-listing-generator/master/store-listing-0.1.0-master+shacfe6977.tgz
+    version: 0.1.0-master+shacfe6977
+generated: "2026-09-23T19:19:00.544995579Z"
