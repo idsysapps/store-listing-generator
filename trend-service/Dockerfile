@@ -21,9 +21,9 @@ WORKDIR /app
 
 COPY --from=builder /app/trend-service/target/quarkus-app /app/trend-service/target/quarkus-app/
 
-ENV JAVA_OPTS="-Xms256m -Xmx512m"
+ENV JAVA_TOOL_OPTIONS="-Xms256m -Xmx512m"
 ENV QUARKUS_HTTP_PORT=8081
 
 EXPOSE 8081
 
-CMD ["/app/trend-service/target/quarkus-app/bin/run"]
+CMD ["java", "-jar", "/app/trend-service/target/quarkus-app/quarkus-run.jar"]

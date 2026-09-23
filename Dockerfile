@@ -18,6 +18,7 @@ WORKDIR /app
 
 COPY --from=builder /app /app
 
-ENV PYTHONPATH=/app
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH=/app/src
 
 CMD ["python", "-m", "store_listing.orchestration.tasks"]

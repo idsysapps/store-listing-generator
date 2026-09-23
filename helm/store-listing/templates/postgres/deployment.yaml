@@ -20,35 +20,6 @@ spec:
         app.kubernetes.io/name: {{ include "store-listing.postgres.fullname" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      initContainers:
-        - name: init-db
-          image: {{ .Values.postgres.image }}
-          env:
-            - name: PGDATABASE
-              value: {{ .Values.config.databaseName }}
-            - name: PGUSER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "store-listing.fullname" . }}-secrets
-                  key: POSTGRESQL_USER
-            - name: PGPASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "store-listing.fullname" . }}-secrets
-                  key: POSTGRESQL_PASSWORD
-          command:
-            - sh
-            - -c
-            - |
-              psql -h $(DATABASE_HOST) -U $(PGUSER) -d postgres -c "CREATE DATABASE {{ .Values.config.databaseName }};" || true
-              psql -h $(DATABASE_HOST) -U $(PGUSER) -d {{ .Values.config.databaseName }} -f /tmp/schema.sql
-          env:
-            - name: DATABASE_HOST
-              value: {{ include "store-listing.postgres.fullname" . }}
-          volumeMounts:
-            - name: schema
-              mountPath: /tmp/schema.sql
-              subPath: schema.sql
       containers:
         - name: postgres
           image: {{ .Values.postgres.image }}
@@ -56,26 +27,37 @@ spec:
             - containerPort: 5432
               name: postgres
           env:
-            - name: POSTGRESQL_USER
+            - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: POSTGRESQL_USER
-            - name: POSTGRESQL_PASSWORD
+            - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: POSTGRESQL_PASSWORD
-            - name: POSTGRESQL_DATABASE
+            - name: POSTGRES_DB
               value: {{ .Values.config.databaseName }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 30
+            periodSeconds: 10
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
           volumeMounts:
             - name: postgres-data
-              mountPath: /var/lib/pgsql/data
+              mountPath: /var/lib/postgresql/data
             - name: schema
-              mountPath: /tmp/schema.sql
-              subPath: schema.sql
+              mountPath: /docker-entrypoint-initdb.d
       volumes:
         - name: postgres-data
           {{- if .Values.postgres.persistentVolumeClaim.create }}
