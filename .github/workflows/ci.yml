@@ -141,7 +141,6 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global --add safe.directory /tmp/gh-pages
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -197,18 +196,7 @@ jobs:
           mkdir -p /tmp/helm-repo
           helm package helm/store-listing/ --destination /tmp/helm-repo
 
-      - name: Checkout gh-pages branch
-        run: |
-          git clone --branch gh-pages https://x-access-token:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages 2>/dev/null || (
-            git clone https://x-access-token:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages
-            git -C /tmp/gh-pages checkout --orphan gh-pages
-            git -C /tmp/gh-pages config user.name "github-actions[bot]"
-            git -C /tmp/gh-pages config user.email "github-actions[bot]@users.noreply.github.com"
-            git -C /tmp/gh-pages commit --allow-empty -m "Initial gh-pages"
-            git -C /tmp/gh-pages push origin gh-pages
-          )
-
-      - name: Update gh-pages index
+      - name: Prepare gh-pages directory
         run: |
           if [[ -n "$DEST_DIR" ]]; then
             mkdir -p /tmp/gh-pages/master
@@ -216,20 +204,18 @@ jobs:
             mv /tmp/new-index.yaml /tmp/gh-pages/master/index.yaml
             mv /tmp/helm-repo/*.tgz /tmp/gh-pages/master/
           else
+            mkdir -p /tmp/gh-pages
             helm repo index /tmp/helm-repo --url "https://$GITHUB_REPOSITORY_OWNER.github.io/$GITHUB_REPOSITORY_NAME" --merge /tmp/gh-pages/index.yaml > /tmp/new-index.yaml
             mv /tmp/new-index.yaml /tmp/gh-pages/index.yaml
             mv /tmp/helm-repo/*.tgz /tmp/gh-pages/
           fi
 
-      - name: Push to gh-pages
-        run: |
-          cd /tmp/gh-pages
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git
-          git add -A
-          git commit -m "$COMMIT_MSG"
-          git push
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: /tmp/gh-pages
+          commit_message: ${{ env.COMMIT_MSG }}
 
       - name: Create GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
