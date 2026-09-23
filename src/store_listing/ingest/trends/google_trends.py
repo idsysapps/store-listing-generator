@@ -1,14 +1,32 @@
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol, TypeVar, cast, runtime_checkable
 
 import pandas as pd
 import psycopg2
+import requests
+from pytrends.exceptions import ResponseError
 from pytrends.request import TrendReq
 
 from .schemas import TrendHarvestRequest, TrendResult
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+@runtime_checkable
+class TrendRequestGateway(Protocol):
+    cookies: dict[str, str]
+
+    def build_payload(self, keywords: list[str], timeframe: str, geo: str) -> None: ...
+
+    def interest_by_region(self) -> pd.DataFrame: ...
+
+    def trending_searches(self) -> pd.DataFrame: ...
+
+    def GetGoogleCookie(self) -> dict[str, str]: ...
 
 
 class DatabaseClient:
@@ -74,17 +92,63 @@ class GoogleTrendsClient:
         "gym fitness",
     ]
 
-    def __init__(self, db_client: DatabaseClient | None = None) -> None:
-        self.pytrends = TrendReq(hl="en-US", tz=360)
+    def __init__(
+        self,
+        db_client: DatabaseClient | None = None,
+        trend_req: TrendRequestGateway | None = None,
+        max_retries: int = 3,
+        backoff_factor: float = 2.0,
+        request_timeout: tuple[int, int] = (5, 30),
+        consent_max_retries: int = 2,
+    ) -> None:
+        self.max_retries = max_retries
+        self.backoff_factor = backoff_factor
+        self.request_timeout = request_timeout
+        self.consent_max_retries = consent_max_retries
+        self.pytrends: TrendRequestGateway = trend_req or cast(
+            TrendRequestGateway,
+            TrendReq(
+                hl="en-US",
+                tz=360,
+                timeout=request_timeout,
+                retries=max_retries,
+                backoff_factor=int(backoff_factor),
+            ),
+        )
         self.db_client = db_client or DatabaseClient()
+
+    def refresh_cookies(self) -> None:
+        """Google's consent/NID cookie expires; fetch a fresh one and retry."""
+        self.pytrends.cookies.update(self.pytrends.GetGoogleCookie())
+
+    def _call_with_retry(self, func: Callable[[], T]) -> T:
+        last_error: Exception | None = None
+        for attempt in range(self.consent_max_retries + 1):
+            try:
+                return func()
+            except ResponseError as e:
+                status = getattr(e.response, "status_code", None)
+                if status == 404 and attempt < self.consent_max_retries:
+                    self.refresh_cookies()
+                    continue
+                raise
+            except requests.RequestException as e:
+                if attempt >= self.consent_max_retries:
+                    raise
+                self.refresh_cookies()
+                last_error = e
+        assert last_error is not None
+        raise last_error
 
     def _build_payload(
         self, keyword: str, timeframe: str = "today 3-m", geo: str = "US"
     ) -> dict[str, Any]:
-        self.pytrends.build_payload([keyword], timeframe=timeframe, geo=geo)
+        self._call_with_retry(
+            lambda: self.pytrends.build_payload([keyword], timeframe=timeframe, geo=geo)
+        )
         return {
-            "interest_by_region": self.pytrends.interest_by_region(),
-            "trending_searches": self.pytrends.trending_searches(),
+            "interest_by_region": self._call_with_retry(self.pytrends.interest_by_region),
+            "trending_searches": self._call_with_retry(self.pytrends.trending_searches),
         }
 
     def _calculate_delta(self, current_data: pd.DataFrame, keyword: str) -> int:
