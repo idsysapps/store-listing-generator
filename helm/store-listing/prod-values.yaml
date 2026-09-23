@@ -6,7 +6,8 @@ config:
 secrets:
   databaseUser: store_listing
   databasePassword: ""
-  jwtPublicKeyLocation: ""
+  jwtPublicKey: ""
+  jwtSecretName: store-listing-jwt
   jwtIssuer: https://costbook.example.com
 
 postgres:
