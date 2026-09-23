@@ -198,18 +198,23 @@ jobs:
 
       - name: Prepare gh-pages directory
         run: |
+          set -x
           echo "DEBUG: IS_MASTER=$IS_MASTER, DEST_DIR=$DEST_DIR"
           echo "DEBUG: Contents of /tmp/helm-repo before:"
           ls -la /tmp/helm-repo/
           if [[ "$IS_MASTER" == "true" ]]; then
             mkdir -p /tmp/gh-pages/master
             rm -f /tmp/gh-pages/master/index.yaml
-            helm repo index /tmp/helm-repo --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY_NAME}/master" | tee /tmp/gh-pages/master/index.yaml
+            echo "DEBUG: Running helm repo index command"
+            helm repo index /tmp/helm-repo --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY_NAME}/master"
+            helm repo index /tmp/helm-repo --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY_NAME}/master" > /tmp/gh-pages/master/index.yaml
+            echo "DEBUG: helm repo index completed"
+            cat /tmp/gh-pages/master/index.yaml
             ls -la /tmp/gh-pages/master/
           else
             mkdir -p /tmp/gh-pages
             rm -f /tmp/gh-pages/index.yaml
-            helm repo index /tmp/helm-repo --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY_NAME}" | tee /tmp/gh-pages/index.yaml
+            helm repo index /tmp/helm-repo --url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY_NAME}" > /tmp/gh-pages/index.yaml
             ls -la /tmp/gh-pages/
           fi
 
