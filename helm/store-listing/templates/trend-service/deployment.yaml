@@ -61,6 +61,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: JWT_ISSUER
+            - name: MP_JWT_VERIFY_PUBLICKEY_LOCATION
+              value: ""
+            - name: MP_JWT_VERIFY_PUBLICKEY
+              value: ""
+            - name: SMALLRYE_JWT_VERIFY_KEY_LOCATION
+              value: ""
             - name: QUARKUS_PROFILE
               valueFrom:
                 configMapKeyRef:
