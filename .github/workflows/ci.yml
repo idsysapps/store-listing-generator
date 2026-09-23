@@ -199,8 +199,8 @@ jobs:
 
       - name: Checkout gh-pages branch
         run: |
-          git clone --branch gh-pages https://github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages 2>/dev/null || (
-            git clone https://github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages
+          git clone --branch gh-pages https://x-access-token:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages 2>/dev/null || (
+            git clone https://x-access-token:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages
             git -C /tmp/gh-pages checkout --orphan gh-pages
             git -C /tmp/gh-pages config user.name "github-actions[bot]"
             git -C /tmp/gh-pages config user.email "github-actions[bot]@users.noreply.github.com"
@@ -226,6 +226,7 @@ jobs:
           cd /tmp/gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git
           git add -A
           git commit -m "$COMMIT_MSG"
           git push
