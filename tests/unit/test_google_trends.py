@@ -2,9 +2,43 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+import requests
+from pytrends.exceptions import ResponseError
 
 from store_listing.ingest.trends.google_trends import DatabaseClient, GoogleTrendsClient
 from store_listing.ingest.trends.schemas import TrendHarvestRequest, TrendResult
+
+
+class FakeTrendReq:
+    def __init__(self, errors=None) -> None:
+        self.errors = list(errors or [])
+        self.build_payload_calls = 0
+        self.interest_by_region_calls = 0
+        self.cookie_fetches = 0
+        self.cookies = {}
+
+    def build_payload(self, *args, **kwargs) -> None:
+        self.build_payload_calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+
+    def interest_by_region(self) -> pd.DataFrame:
+        self.interest_by_region_calls += 1
+        return pd.DataFrame({"funny t-shirt": [45]}, index=["US"])
+
+    def trending_searches(self) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def GetGoogleCookie(self) -> dict[str, str]:
+        self.cookie_fetches += 1
+        return self.cookies
+
+
+def response_404() -> ResponseError:
+    class _Resp:
+        status_code = 404
+
+    return ResponseError.from_response(_Resp())
 
 
 class TestGoogleTrendsClient:
@@ -14,7 +48,11 @@ class TestGoogleTrendsClient:
 
     @pytest.fixture
     def client(self, mock_db_client: MagicMock) -> GoogleTrendsClient:
-        return GoogleTrendsClient(db_client=mock_db_client)
+        return GoogleTrendsClient(
+            db_client=mock_db_client,
+            trend_req=FakeTrendReq(),
+            consent_max_retries=2,
+        )
 
     def test_fetch_trending_returns_trend_results(self, client: GoogleTrendsClient) -> None:
         mock_region_data = pd.DataFrame(
@@ -138,3 +176,72 @@ class TestDatabaseClient:
             result = db_client.insert_trend_score(query_id=1, score=75, delta=10, region="US")
 
             assert result == 99
+
+
+class TestPytrendsHardening:
+    @pytest.fixture
+    def mock_db_client(self) -> MagicMock:
+        return MagicMock(spec=DatabaseClient)
+
+    def test_constructor_passes_timeout_and_retry_to_pytrends(
+        self, mock_db_client: MagicMock
+    ) -> None:
+        with patch("store_listing.ingest.trends.google_trends.TrendReq") as mock_trend_req:
+            GoogleTrendsClient(
+                db_client=mock_db_client,
+                max_retries=4,
+                backoff_factor=3.0,
+                request_timeout=(5, 30),
+            )
+
+            mock_trend_req.assert_called_once_with(
+                hl="en-US",
+                tz=360,
+                timeout=(5, 30),
+                retries=4,
+                backoff_factor=3.0,
+            )
+
+    def test_404_refreshes_cookies_then_succeeds(self, mock_db_client: MagicMock) -> None:
+        fake = FakeTrendReq(errors=[response_404()])
+        client = GoogleTrendsClient(
+            db_client=mock_db_client,
+            trend_req=fake,
+            consent_max_retries=2,
+        )
+
+        results = client.fetch_trending("funny t-shirt")
+
+        assert len(results) == 1
+        assert fake.build_payload_calls == 2
+        assert fake.cookie_fetches == 1
+
+    def test_transient_network_error_refreshes_and_retries(self, mock_db_client: MagicMock) -> None:
+        fake = FakeTrendReq(errors=[requests.exceptions.ConnectionError("boom")])
+        client = GoogleTrendsClient(
+            db_client=mock_db_client,
+            trend_req=fake,
+            consent_max_retries=2,
+        )
+
+        results = client.fetch_trending("funny t-shirt")
+
+        assert len(results) == 1
+        assert fake.build_payload_calls == 2
+        assert fake.cookie_fetches == 1
+
+    def test_repeated_404_exhausts_and_harvest_continues(self, mock_db_client: MagicMock) -> None:
+        fake = FakeTrendReq(errors=[response_404(), response_404(), response_404()])
+        client = GoogleTrendsClient(
+            db_client=mock_db_client,
+            trend_req=fake,
+            consent_max_retries=2,
+        )
+
+        with patch("store_listing.ingest.trends.google_trends.logger.warning") as mock_warning:
+            results = client.harvest_and_store(TrendHarvestRequest(seed_keywords=["funny t-shirt"]))
+
+        assert results == []
+        assert fake.build_payload_calls == 3
+        assert fake.cookie_fetches == 2
+        mock_warning.assert_called_once()
