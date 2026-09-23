@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: ['master']
+    tags: ['v*.*.*']
   pull_request:
     branches: ['**']
 
@@ -48,7 +49,7 @@ jobs:
   build-and-push:
     needs: lint-and-test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,13 +64,29 @@ jobs:
           username: ${{ secrets.QUAY_IO_USERNAME }}
           password: ${{ secrets.QUAY_IO_TOKEN }}
 
+      - name: Determine image tags
+        id: tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "app_tag=v${VERSION}" >> $GITHUB_OUTPUT
+            echo "trend_tag=v${VERSION}" >> $GITHUB_OUTPUT
+            echo "push_tags=latest,v${VERSION}" >> $GITHUB_OUTPUT
+          else
+            echo "app_tag=latest" >> $GITHUB_OUTPUT
+            echo "trend_tag=latest" >> $GITHUB_OUTPUT
+            echo "push_tags=latest" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push Python app
         uses: docker/build-push-action@v6
         with:
           context: .
           dockerfile: Dockerfile
           push: true
-          tags: quay.io/idsysapps/store-listing-generator:latest
+          tags: |
+            quay.io/idsysapps/store-listing-generator:latest
+            quay.io/idsysapps/store-listing-generator:${{ steps.tags.outputs.app_tag }}
 
       - name: Build and push trend-service
         uses: docker/build-push-action@v6
@@ -77,4 +94,120 @@ jobs:
           context: ./trend-service
           dockerfile: Dockerfile
           push: true
-          tags: quay.io/idsysapps/trend-service:latest
+          tags: |
+            quay.io/idsysapps/trend-service:latest
+            quay.io/idsysapps/trend-service:${{ steps.tags.outputs.trend_tag }}
+
+  helm-chart-publish:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.35.1/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: Set version and image tag for master
+        if: github.ref == 'refs/heads/master'
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          echo "VERSION=0.1.0-master+sha${SHA}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=latest-sha${SHA}" >> $GITHUB_ENV
+          echo "DEST_DIR=master" >> $GITHUB_ENV
+          echo "COMMIT_MSG=chore: publish master chart 0.1.0-master+sha${SHA}" >> $GITHUB_ENV
+          echo "IS_MASTER=true" >> $GITHUB_ENV
+
+      - name: Set version and image tag for tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=v${VERSION}" >> $GITHUB_ENV
+          echo "DEST_DIR=" >> $GITHUB_ENV
+          echo "COMMIT_MSG=chore: release chart ${VERSION}" >> $GITHUB_ENV
+          echo "IS_MASTER=false" >> $GITHUB_ENV
+
+      - name: Get Docker digest for master builds
+        if: github.ref == 'refs/heads/master'
+        run: |
+          DIGEST=$(docker inspect quay.io/idsysapps/store-listing-generator:latest --format='{{index .RepoDigests 0}}' | cut -d'@' -f2)
+          echo "DIGEST=${DIGEST}" >> $GITHUB_ENV
+
+      - name: Update Chart.yaml
+        run: |
+          yq e ".version = \"$VERSION\" | .appVersion = \"$IMAGE_TAG\"" \
+            helm/store-listing/Chart.yaml > tmp.yaml && mv tmp.yaml helm/store-listing/Chart.yaml
+
+      - name: Override image reference in values
+        run: |
+          if [[ "$IS_MASTER" == "true" ]]; then
+            yq e ".app.image = \"quay.io/idsysapps/store-listing-generator@${DIGEST}\" | .trendService.image = \"quay.io/idsysapps/trend-service@${DIGEST}\"" \
+              helm/store-listing/values.yaml > tmp.yaml && mv tmp.yaml helm/store-listing/values.yaml
+          else
+            yq e ".app.image = \"quay.io/idsysapps/store-listing-generator:${IMAGE_TAG}\" | .trendService.image = \"quay.io/idsysapps/trend-service:${IMAGE_TAG}\"" \
+              helm/store-listing/values.yaml > tmp.yaml && mv tmp.yaml helm/store-listing/values.yaml
+          fi
+
+      - name: Package chart
+        run: |
+          mkdir -p /tmp/helm-repo
+          helm package helm/store-listing/ -f helm/store-listing/values.yaml --destination /tmp/helm-repo
+
+      - name: Checkout gh-pages branch
+        run: |
+          git clone --branch gh-pages https://github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages 2>/dev/null || (
+            git clone https://github.com/$GITHUB_REPOSITORY.git /tmp/gh-pages
+            git -C /tmp/gh-pages checkout --orphan gh-pages
+            git -C /tmp/gh-pages commit --allow-empty -m "Initial gh-pages"
+            git -C /tmp/gh-pages push origin gh-pages
+          )
+
+      - name: Update gh-pages index
+        run: |
+          if [[ -n "$DEST_DIR" ]]; then
+            mkdir -p /tmp/gh-pages/master
+            helm repo index /tmp/helm-repo --url "https://$GITHUB_REPOSITORY_OWNER.github.io/$GITHUB_REPOSITORY_NAME/master" --merge /tmp/gh-pages/master/index.yaml > /tmp/new-index.yaml || echo "# index" > /tmp/new-index.yaml
+            mv /tmp/new-index.yaml /tmp/gh-pages/master/index.yaml
+            mv /tmp/helm-repo/*.tgz /tmp/gh-pages/master/
+          else
+            helm repo index /tmp/helm-repo --url "https://$GITHUB_REPOSITORY_OWNER.github.io/$GITHUB_REPOSITORY_NAME" --merge /tmp/gh-pages/index.yaml > /tmp/new-index.yaml
+            mv /tmp/new-index.yaml /tmp/gh-pages/index.yaml
+            mv /tmp/helm-repo/*.tgz /tmp/gh-pages/
+          fi
+
+      - name: Push to gh-pages
+        run: |
+          cd /tmp/gh-pages
+          git add -A
+          git commit -m "$COMMIT_MSG"
+          git push
+
+      - name: Create GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /tmp/helm-repo/*.tgz
+          generate_release_notes: true
+
+      - name: Commit Chart.yaml back (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          git add helm/store-listing/Chart.yaml
+          git commit --amend --no-edit
+          git push
