@@ -200,12 +200,20 @@ jobs:
         run: |
           if [[ -n "$DEST_DIR" ]]; then
             mkdir -p /tmp/gh-pages/master
-            helm repo index /tmp/helm-repo --url "https://$GITHUB_REPOSITORY_OWNER.github.io/$GITHUB_REPOSITORY_NAME/master" --merge /tmp/gh-pages/master/index.yaml > /tmp/new-index.yaml || echo "# index" > /tmp/new-index.yaml
+            if [[ -f /tmp/gh-pages/master/index.yaml ]]; then
+              helm repo index /tmp/helm-repo --url "https://$GITHUB_REPOSITORY_OWNER.github.io/$GITHUB_REPOSITORY_NAME/master" --merge /tmp/gh-pages/master/index.yaml > /tmp/new-index.yaml
+            else
+              helm repo index /tmp/helm-repo --url "https://$GITHUB_REPOSITORY_OWNER.github.io/$GITHUB_REPOSITORY_NAME/master" > /tmp/new-index.yaml
+            fi
             mv /tmp/new-index.yaml /tmp/gh-pages/master/index.yaml
             mv /tmp/helm-repo/*.tgz /tmp/gh-pages/master/
           else
             mkdir -p /tmp/gh-pages
-            helm repo index /tmp/helm-repo --url "https://$GITHUB_REPOSITORY_OWNER.github.io/$GITHUB_REPOSITORY_NAME" --merge /tmp/gh-pages/index.yaml > /tmp/new-index.yaml
+            if [[ -f /tmp/gh-pages/index.yaml ]]; then
+              helm repo index /tmp/helm-repo --url "https://$GITHUB_REPOSITORY_OWNER.github.io/$GITHUB_REPOSITORY_NAME" --merge /tmp/gh-pages/index.yaml > /tmp/new-index.yaml
+            else
+              helm repo index /tmp/helm-repo --url "https://$GITHUB_REPOSITORY_OWNER.github.io/$GITHUB_REPOSITORY_NAME" > /tmp/new-index.yaml
+            fi
             mv /tmp/new-index.yaml /tmp/gh-pages/index.yaml
             mv /tmp/helm-repo/*.tgz /tmp/gh-pages/
           fi
