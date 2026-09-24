@@ -1,4 +1,5 @@
 import logging
+import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Protocol, TypeVar, cast, runtime_checkable
@@ -32,18 +33,18 @@ class TrendRequestGateway(Protocol):
 class DatabaseClient:
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 5432,
-        database: str = "store_listing",
+        host: str | None = None,
+        port: int | None = None,
+        database: str | None = None,
         user: str | None = None,
         password: str | None = None,
     ):
         self.connection_params = {
-            "host": host,
-            "port": port,
-            "database": database,
-            "user": user,
-            "password": password,
+            "host": host or os.environ.get("DATABASE_HOST") or "localhost",
+            "port": port if port is not None else int(os.environ.get("DATABASE_PORT") or 5432),
+            "database": database or os.environ.get("DATABASE_NAME") or "store_listing",
+            "user": user if user is not None else os.environ.get("DATABASE_USER"),
+            "password": password if password is not None else os.environ.get("DATABASE_PASSWORD"),
         }
 
     def connect(self) -> psycopg2.extensions.connection:
