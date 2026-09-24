@@ -2,8 +2,26 @@ apiVersion: v1
 entries:
   store-listing:
   - apiVersion: v2
+    appVersion: latest-sha47141c6
+    created: "2026-09-24T18:19:35.459065401Z"
+    description: Store Listing Generator - Kubernetes deployment for OpenShift
+    digest: a7fb3ca0726217c69f4e6e2c47e930dd54a6a8ac807634eb21f3554e97c19797
+    home: https://github.com/idsysapps/store-listing-generator
+    keywords:
+    - store-listing
+    - trends
+    - celery
+    - quarkus
+    name: store-listing
+    sources:
+    - https://github.com/idsysapps/store-listing-generator
+    type: application
+    urls:
+    - https://idsysapps.github.io/store-listing-generator/master/store-listing-0.1.0-master.129+sha47141c6.tgz
+    version: 0.1.0-master.129+sha47141c6
+  - apiVersion: v2
     appVersion: latest-sha2dc0c39
-    created: "2026-09-24T17:45:34.245394047Z"
+    created: "2026-09-24T18:19:35.458618344Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: a03d68e4fdee367b5908e107171a964096b761c2419ebb909d6fc558dab0e35e
     home: https://github.com/idsysapps/store-listing-generator
@@ -21,7 +39,7 @@ entries:
     version: 0.1.0-master.126+sha2dc0c39
   - apiVersion: v2
     appVersion: latest-sha4e98d46
-    created: "2026-09-24T17:45:34.245044237Z"
+    created: "2026-09-24T18:19:35.458244966Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: 4be920b4b30d4371ab8ae45271a89ee9b3eb425ea73f3a7ee45b1fbded7a8577
     home: https://github.com/idsysapps/store-listing-generator
@@ -39,7 +57,7 @@ entries:
     version: 0.1.0-master.124+sha4e98d46
   - apiVersion: v2
     appVersion: latest-sha7bc4525
-    created: "2026-09-24T17:45:34.244653157Z"
+    created: "2026-09-24T18:19:35.457820545Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: a804593c61a334231d27374699aa5268b539e51243353708289e447e22d822dd
     home: https://github.com/idsysapps/store-listing-generator
@@ -57,7 +75,7 @@ entries:
     version: 0.1.0-master.122+sha7bc4525
   - apiVersion: v2
     appVersion: latest-sha79501b6
-    created: "2026-09-24T17:45:34.244233534Z"
+    created: "2026-09-24T18:19:35.457381199Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: 4e95eb7067fc7f83d5887fcee26b860d85622bc5133f3bd654829a453abb1da3
     home: https://github.com/idsysapps/store-listing-generator
@@ -75,7 +93,7 @@ entries:
     version: 0.1.0-master.120+sha79501b6
   - apiVersion: v2
     appVersion: latest-sha0004fe3
-    created: "2026-09-24T17:45:34.24386053Z"
+    created: "2026-09-24T18:19:35.456624633Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: 354360a51de4d49649c9c4877a0cdc581d90626b5d52585ab4dffca0bf77a0bd
     home: https://github.com/idsysapps/store-listing-generator
@@ -93,7 +111,7 @@ entries:
     version: 0.1.0-master.115+sha0004fe3
   - apiVersion: v2
     appVersion: latest-sha6d516b2
-    created: "2026-09-24T17:45:34.240242069Z"
+    created: "2026-09-24T18:19:35.451320542Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: 9db618dc8da3860c77461a68d327597aaa855f48618120af63abea484a207efc
     home: https://github.com/idsysapps/store-listing-generator
@@ -111,7 +129,7 @@ entries:
     version: 0.1.0-master+sha6d516b2
   - apiVersion: v2
     appVersion: latest-sha6e6d31a
-    created: "2026-09-24T17:45:34.240852565Z"
+    created: "2026-09-24T18:19:35.452099504Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: a5d5071845483456c455dd057ec3a5bc56e5a2bb5fb8a633657af954f15d072c
     home: https://github.com/idsysapps/store-listing-generator
@@ -129,7 +147,7 @@ entries:
     version: 0.1.0-master+sha6e6d31a
   - apiVersion: v2
     appVersion: latest-sha7b92f18
-    created: "2026-09-24T17:45:34.241978196Z"
+    created: "2026-09-24T18:19:35.452791208Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: 130c7ee67fad48fa9c7d05f7e6f57a93934ba7468891d727e4c336456f27a840
     home: https://github.com/idsysapps/store-listing-generator
@@ -147,7 +165,7 @@ entries:
     version: 0.1.0-master+sha7b92f18
   - apiVersion: v2
     appVersion: latest-shaacf4090
-    created: "2026-09-24T17:45:34.242570585Z"
+    created: "2026-09-24T18:19:35.453526347Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: 8a80dcfab048d4b72e3fe6e60835212a2df2f1a7040b3cf8275783e1e2d027b1
     home: https://github.com/idsysapps/store-listing-generator
@@ -165,7 +183,7 @@ entries:
     version: 0.1.0-master+shaacf4090
   - apiVersion: v2
     appVersion: latest-shacfe6977
-    created: "2026-09-24T17:45:34.242985952Z"
+    created: "2026-09-24T18:19:35.454239576Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: bc1443db6b7c4f4b4e7578a304cd3078e946ed42f3d940ad71491856c4a51570
     home: https://github.com/idsysapps/store-listing-generator
@@ -183,7 +201,7 @@ entries:
     version: 0.1.0-master+shacfe6977
   - apiVersion: v2
     appVersion: latest-shadc3b464
-    created: "2026-09-24T17:45:34.243421609Z"
+    created: "2026-09-24T18:19:35.455178579Z"
     description: Store Listing Generator - Kubernetes deployment for OpenShift
     digest: 25499e038d145f9de3a959092ec89b2536b2cfd74bb12766a0bd5b627a3b4882
     home: https://github.com/idsysapps/store-listing-generator
@@ -199,4 +217,4 @@ entries:
     urls:
     - https://idsysapps.github.io/store-listing-generator/master/store-listing-0.1.0-master+shadc3b464.tgz
     version: 0.1.0-master+shadc3b464
-generated: "2026-09-24T17:45:34.239561589Z"
+generated: "2026-09-24T18:19:35.450455247Z"
