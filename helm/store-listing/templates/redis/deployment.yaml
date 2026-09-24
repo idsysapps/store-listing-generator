@@ -20,6 +20,8 @@ spec:
         app.kubernetes.io/name: {{ include "store-listing.redis.fullname" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      securityContext:
+        fsGroup: 1000880000
       containers:
         - name: redis
           image: {{ .Values.redis.image }}
@@ -33,3 +35,14 @@ spec:
               name: redis
           resources:
             {{- toYaml .Values.redis.resources | nindent 12 }}
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          {{- if .Values.redis.persistentVolumeClaim.create }}
+          persistentVolumeClaim:
+            claimName: {{ include "store-listing.redis.fullname" . }}-pvc
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
