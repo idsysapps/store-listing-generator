@@ -4,6 +4,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ include "store-listing.postgres.fullname" . }}-pvc
   namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
   labels:
     {{- include "store-listing.labels" . | nindent 4 }}
 spec:
