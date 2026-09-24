@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -146,6 +147,49 @@ class TestDatabaseClient:
                 host="localhost",
                 port=5432,
                 database="test",
+                user=None,
+                password=None,
+            )
+
+    def test_connect_uses_env_when_no_args_passed(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "DATABASE_HOST": "store-listing-store-listing-postgres",
+                    "DATABASE_PORT": "5432",
+                    "DATABASE_NAME": "store_listing",
+                    "DATABASE_USER": "store_listing",
+                    "DATABASE_PASSWORD": "store_listing",
+                },
+            ),
+            patch("store_listing.ingest.trends.google_trends.psycopg2.connect") as mock_connect,
+        ):
+            mock_connect.return_value = MagicMock()
+
+            DatabaseClient().connect()
+
+            mock_connect.assert_called_once_with(
+                host="store-listing-store-listing-postgres",
+                port=5432,
+                database="store_listing",
+                user="store_listing",
+                password="store_listing",
+            )
+
+    def test_explicit_args_override_env(self) -> None:
+        with (
+            patch.dict(os.environ, {"DATABASE_HOST": "env-host"}),
+            patch("store_listing.ingest.trends.google_trends.psycopg2.connect") as mock_connect,
+        ):
+            mock_connect.return_value = MagicMock()
+
+            DatabaseClient(host="explicit-host").connect()
+
+            mock_connect.assert_called_once_with(
+                host="explicit-host",
+                port=5432,
+                database="store_listing",
                 user=None,
                 password=None,
             )
