@@ -7,14 +7,20 @@ public class TrendSummary {
     private Integer latestScore;
     private Integer velocity;
     private List<RegionScore> topRegions;
+    private String source;
 
     public TrendSummary() {}
 
     public TrendSummary(String query, Integer latestScore, Integer velocity, List<RegionScore> topRegions) {
+        this(query, latestScore, velocity, topRegions, null);
+    }
+
+    public TrendSummary(String query, Integer latestScore, Integer velocity, List<RegionScore> topRegions, String source) {
         this.query = query;
         this.latestScore = latestScore;
         this.velocity = velocity;
         this.topRegions = topRegions;
+        this.source = source;
     }
 
     public String getQuery() {
@@ -47,5 +53,13 @@ public class TrendSummary {
 
     public void setTopRegions(List<RegionScore> topRegions) {
         this.topRegions = topRegions;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
     }
 }

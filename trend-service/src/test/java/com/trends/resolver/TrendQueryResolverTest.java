@@ -85,6 +85,22 @@ class TrendQueryResolverTest {
     }
 
     @Test
+    void testGetTrendSummary_ExposesSourceFromLatestScore() {
+        TrendQuery trendQuery = new TrendQuery("hoodie", "funny hoodie");
+        trendQuery.id = 1;
+
+        TrendScore score1 = new TrendScore(trendQuery, 75, 10, "US", "google");
+        TrendScore score2 = new TrendScore(trendQuery, 60, 5, "CA");
+
+        when(trendQueryRepository.findByQuery("funny hoodie")).thenReturn(trendQuery);
+        when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(score1, score2));
+
+        TrendSummary result = trendQueryResolver.getTrendSummary("funny hoodie");
+
+        assertEquals("google", result.getSource());
+    }
+
+    @Test
     void testGetScores_WithNullTrendQuery_ReturnsEmptyList() {
         List<com.trends.domain.TrendScore> result = trendQueryResolver.getScores(null, 10, 0);
         assertTrue(result.isEmpty());

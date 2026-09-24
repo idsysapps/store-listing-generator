@@ -1,0 +1,54 @@
+{{- if .Values.postgres.persistentVolumeClaim.create }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "store-listing.postgres.fullname" . }}-migrate-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    {{- include "store-listing.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        {{- include "store-listing.labels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: {{ .Values.postgres.image }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |-
+              psql -v ON_ERROR_STOP=1 -h {{ include "store-listing.postgres.fullname" . }} \
+                -U "$PGUSER" -d "$PGDATABASE" -f /migrate/migrations.sql
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: POSTGRESQL_PASSWORD
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: POSTGRESQL_USER
+            - name: PGDATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: DATABASE_NAME
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrate
+      volumes:
+        - name: migrations
+          configMap:
+            name: {{ include "store-listing.fullname" . }}-migrations
+{{- end }}
