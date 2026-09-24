@@ -26,6 +26,9 @@ postgres:
 
 redis:
   image: registry.access.redhat.com/hi/valkey:latest
+  storage: 1Gi
+  persistentVolumeClaim:
+    create: true
   resources:
     limits:
       cpu: 250m
