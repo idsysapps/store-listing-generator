@@ -22,6 +22,8 @@ CREATE TABLE trend_scores (
     score INTEGER NOT NULL,
     delta INTEGER DEFAULT 0,
     region VARCHAR(255) DEFAULT 'US',
+    query_type VARCHAR(10) DEFAULT 'interest',
+    trend_direction INTEGER,
     fetched_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
