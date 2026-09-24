@@ -161,10 +161,11 @@ jobs:
         if: github.ref == 'refs/heads/master'
         run: |
           SHA=$(git rev-parse --short HEAD)
-          echo "VERSION=0.1.0-master+sha${SHA}" >> $GITHUB_ENV
+          RUN=$(echo "${GITHUB_RUN_NUMBER}" | sed 's/[^0-9]//g')
+          echo "VERSION=0.1.0-master.${RUN}+sha${SHA}" >> $GITHUB_ENV
           echo "IMAGE_TAG=latest-sha${SHA}" >> $GITHUB_ENV
           echo "DEST_DIR=master" >> $GITHUB_ENV
-          echo "COMMIT_MSG=chore: publish master chart 0.1.0-master+sha${SHA}" >> $GITHUB_ENV
+          echo "COMMIT_MSG=chore: publish master chart 0.1.0-master.${RUN}+sha${SHA}" >> $GITHUB_ENV
           echo "IS_MASTER=true" >> $GITHUB_ENV
 
       - name: Set version and image tag for tag
