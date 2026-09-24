@@ -148,8 +148,16 @@ class GoogleTrendsClient:
         )
         return {
             "interest_by_region": self._call_with_retry(self.pytrends.interest_by_region),
-            "trending_searches": self._call_with_retry(self.pytrends.trending_searches),
+            "trending_searches": self._fetch_trending_searches(),
         }
+
+    def _fetch_trending_searches(self) -> pd.DataFrame:
+        """Best-effort: Google removed the hottrends endpoint (404); never abort the seed."""
+        try:
+            return self._call_with_retry(self.pytrends.trending_searches)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to fetch trending searches (ignored): %s", e)
+            return pd.DataFrame()
 
     def _calculate_delta(self, current_data: pd.DataFrame, keyword: str) -> int:
         if current_data.empty or keyword not in current_data.columns:
@@ -185,8 +193,12 @@ class GoogleTrendsClient:
                 )
         return results
 
-    def harvest_and_store(self, request: TrendHarvestRequest) -> list[TrendResult]:
+    def harvest_and_store(
+        self, request: TrendHarvestRequest
+    ) -> tuple[list[TrendResult], list[str]]:
+        """Harvest requested seeds; return (stored results, failed seed keywords)."""
         all_results: list[TrendResult] = []
+        failed_seeds: list[str] = []
 
         for seed in request.seed_keywords:
             try:
@@ -211,6 +223,6 @@ class GoogleTrendsClient:
 
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to fetch trends for seed %s: %s", seed, e)
-                continue
+                failed_seeds.append(seed)
 
-        return all_results
+        return all_results, failed_seeds

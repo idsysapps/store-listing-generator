@@ -32,11 +32,14 @@ def fetch_daily_trends() -> dict:
     trends_client = GoogleTrendsClient(db_client=db_client)
 
     request = TrendHarvestRequest()
-    results = trends_client.harvest_and_store(request)
+    results, failed_seeds = trends_client.harvest_and_store(request)
 
     return {
-        "status": "success",
+        "status": "failed"
+        if len(failed_seeds) == len(request.seed_keywords)
+        else ("partial" if failed_seeds else "success"),
         "results_count": len(results),
+        "failed_seeds": failed_seeds,
         "seeds": request.seed_keywords,
     }
 
@@ -47,10 +50,13 @@ def fetch_trends_manual(seeds: list[str] | None = None) -> dict:
     trends_client = GoogleTrendsClient(db_client=db_client)
 
     request = TrendHarvestRequest(seed_keywords=seeds or ["funny t-shirt", "hoodie", "gift"])
-    results = trends_client.harvest_and_store(request)
+    results, failed_seeds = trends_client.harvest_and_store(request)
 
     return {
-        "status": "success",
+        "status": "failed"
+        if len(failed_seeds) == len(request.seed_keywords)
+        else ("partial" if failed_seeds else "success"),
         "results_count": len(results),
+        "failed_seeds": failed_seeds,
         "seeds": request.seed_keywords,
     }
