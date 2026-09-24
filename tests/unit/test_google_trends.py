@@ -27,7 +27,10 @@ class FakeTrendReq:
         self.interest_by_region_calls += 1
         return pd.DataFrame({"funny t-shirt": [45]}, index=["US"])
 
-    def trending_searches(self) -> pd.DataFrame:
+    def related_queries(self) -> dict[str, dict[str, pd.DataFrame]]:
+        return {}
+
+    def interest_over_time(self) -> pd.DataFrame:
         return pd.DataFrame()
 
     def GetGoogleCookie(self) -> dict[str, str]:
@@ -66,7 +69,6 @@ class TestGoogleTrendsClient:
         with patch.object(client, "_build_payload") as mock_payload:
             mock_payload.return_value = {
                 "interest_by_region": mock_region_data,
-                "trending_searches": pd.DataFrame(),
             }
 
             results = client.fetch_trending("funny t-shirt")
@@ -80,7 +82,6 @@ class TestGoogleTrendsClient:
         with patch.object(client, "_build_payload") as mock_payload:
             mock_payload.return_value = {
                 "interest_by_region": empty_df,
-                "trending_searches": pd.DataFrame(),
             }
 
             results = client.fetch_trending("nonexistent keyword")
@@ -122,7 +123,6 @@ class TestGoogleTrendsClient:
         with patch.object(client, "_build_payload") as mock_payload:
             mock_payload.return_value = {
                 "interest_by_region": mock_region_data,
-                "trending_searches": pd.DataFrame(),
             }
 
             request = TrendHarvestRequest(seed_keywords=["hoodie"])
@@ -292,37 +292,4 @@ class TestPytrendsHardening:
         assert failed_seeds == ["funny t-shirt"]
         assert fake.build_payload_calls == 3
         assert fake.cookie_fetches == 2
-        mock_warning.assert_called_once()
-
-    def test_trending_searches_failure_does_not_abort_harvest(
-        self, mock_db_client: MagicMock
-    ) -> None:
-        """Trending-searches 404 (Google removed hottrends endpoint) must not kill the seed.
-
-        Only interest_by_region feeds trends; a trending_searches failure must
-        degrade to an empty frame and still store the region data.
-        """
-
-        class Trending404(FakeTrendReq):
-            def trending_searches(self) -> pd.DataFrame:
-                raise response_404()
-
-        fake = Trending404()
-        client = GoogleTrendsClient(
-            db_client=mock_db_client,
-            trend_req=fake,
-            consent_max_retries=0,
-        )
-        mock_db_client.insert_trend_query.return_value = 1
-        mock_db_client.insert_trend_score.return_value = 1
-
-        with patch("store_listing.ingest.trends.google_trends.logger.warning") as mock_warning:
-            results, failed_seeds = client.harvest_and_store(
-                TrendHarvestRequest(seed_keywords=["funny t-shirt"])
-            )
-
-        assert len(results) == 1
-        assert failed_seeds == []
-        mock_db_client.insert_trend_query.assert_called_once()
-        mock_db_client.insert_trend_score.assert_called_once()
         mock_warning.assert_called_once()

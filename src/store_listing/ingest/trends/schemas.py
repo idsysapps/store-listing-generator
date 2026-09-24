@@ -1,6 +1,9 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+QueryType = Literal["interest", "rising", "top"]
 
 
 class TrendQuery(BaseModel):
@@ -16,6 +19,8 @@ class TrendScore(BaseModel):
     score: int
     delta: int = 0
     region: str = Field(default="US", max_length=255)
+    query_type: QueryType = "interest"
+    trend_direction: int | None = None
     fetched_at: datetime | None = None
 
 
@@ -24,6 +29,8 @@ class TrendResult(BaseModel):
     score: int
     delta: int
     region: str = "US"
+    query_type: QueryType = "interest"
+    trend_direction: int | None = None
     fetched_at: datetime
 
 
