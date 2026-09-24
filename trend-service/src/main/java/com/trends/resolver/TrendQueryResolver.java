@@ -60,11 +60,12 @@ public class TrendQueryResolver {
         List<TrendScore> latestScores = trendQueryRepository.findLatestScoresByQueryId(trendQuery.id, 10);
 
         if (latestScores.isEmpty()) {
-            return new TrendSummary(query, 0, 0, List.of());
+            return new TrendSummary(query, 0, 0, List.of(), null);
         }
 
         TrendScore latest = latestScores.get(0);
         Integer velocity = latest.delta != null ? latest.delta : 0;
+        String source = latest.source != null ? latest.source : "google";
 
         Map<String, Integer> regionScores = latestScores.stream()
                 .collect(Collectors.groupingBy(
@@ -81,7 +82,7 @@ public class TrendQueryResolver {
                 .map(e -> new RegionScore(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());
 
-        return new TrendSummary(query, latest.score, velocity, topRegions);
+        return new TrendSummary(query, latest.score, velocity, topRegions, source);
     }
 
     @Authenticated
