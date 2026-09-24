@@ -15,7 +15,7 @@ class TrendScore(BaseModel):
     query_id: int
     score: int
     delta: int = 0
-    region: str = Field(default="US", max_length=10)
+    region: str = Field(default="US", max_length=255)
     fetched_at: datetime | None = None
 
 

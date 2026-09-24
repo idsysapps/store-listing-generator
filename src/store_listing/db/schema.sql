@@ -21,7 +21,7 @@ CREATE TABLE trend_scores (
     query_id INTEGER NOT NULL REFERENCES trend_queries(id) ON DELETE CASCADE,
     score INTEGER NOT NULL,
     delta INTEGER DEFAULT 0,
-    region VARCHAR(10) DEFAULT 'US',
+    region VARCHAR(255) DEFAULT 'US',
     fetched_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
