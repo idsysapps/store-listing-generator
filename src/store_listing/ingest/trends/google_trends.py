@@ -11,6 +11,8 @@ import requests
 from pytrends.exceptions import ResponseError
 from pytrends.request import TrendReq
 
+from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate, compute_promotion_score
+
 from .schemas import QueryType, TrendHarvestRequest, TrendResult
 
 logger = logging.getLogger(__name__)
@@ -77,22 +79,170 @@ class DatabaseClient:
         delta: int,
         region: str,
         query_type: QueryType = "interest",
+        source: str = "google",
         trend_direction: int | None = None,
     ) -> int:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO trend_scores (query_id, score, delta, region, query_type, trend_direction)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO trend_scores (query_id, score, delta, region, query_type, source, trend_direction)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
-                (query_id, score, delta, region, query_type, trend_direction),
+                (query_id, score, delta, region, query_type, source, trend_direction),
             )
             result = cur.fetchone()
             if result is None:
                 msg = "Failed to insert trend score"
                 raise RuntimeError(msg)
             return result[0]
+
+    def upsert_seed_candidate(
+        self,
+        source_seed: str,
+        query: str,
+        source: str,
+        query_type: str,
+        score: int,
+        delta: int,
+        promotion_score: int,
+    ) -> int | None:
+        """Insert or refresh a pending candidate; leave promoted/rejected rows untouched."""
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO seed_candidates
+                    (query, source_seed, source, query_type, score, delta, promotion_score)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (query) DO UPDATE SET
+                    source_seed = EXCLUDED.source_seed,
+                    score = EXCLUDED.score,
+                    delta = EXCLUDED.delta,
+                    promotion_score = EXCLUDED.promotion_score
+                WHERE seed_candidates.status = 'pending'
+                RETURNING id
+                """,
+                (query, source_seed, source, query_type, score, delta, promotion_score),
+            )
+            result = cur.fetchone()
+            if result is not None:
+                return result[0]
+            cur.execute("SELECT id FROM seed_candidates WHERE query = %s", (query,))
+            row = cur.fetchone()
+            return None if row is None else row[0]
+
+    def list_pending_candidates(self) -> list[SeedCandidate]:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, query, source, query_type, score, delta, promotion_score, status
+                FROM seed_candidates
+                WHERE status = 'pending'
+                ORDER BY promotion_score DESC
+                """
+            )
+            rows = cur.fetchall()
+        return [
+            SeedCandidate(
+                id=row[0],
+                query=row[1],
+                source=row[2],
+                query_type=row[3],
+                score=row[4],
+                delta=row[5],
+                promotion_score=row[6],
+                status=row[7],
+            )
+            for row in rows
+        ]
+
+    def cross_seed_counts(self) -> dict[str, int]:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT query, COUNT(DISTINCT source_seed) AS seed_count
+                FROM seed_candidates
+                WHERE status = 'pending'
+                GROUP BY query
+                """
+            )
+            return {row[0]: row[1] for row in cur.fetchall()}
+
+    def list_active_seeds(self) -> list[ActiveSeed]:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, query, promotion_score
+                FROM active_seeds
+                WHERE archived_at IS NULL
+                ORDER BY promotion_score DESC
+                """
+            )
+            return [
+                ActiveSeed(id=row[0], query=row[1], promotion_score=row[2])
+                for row in cur.fetchall()
+            ]
+
+    def count_active_seeds(self) -> int:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM active_seeds WHERE archived_at IS NULL")
+            row = cur.fetchone()
+            return 0 if row is None else int(row[0])
+
+    def list_historic_rising_top(
+        self,
+    ) -> list[tuple[str, str, str, str, int, int]]:
+        """Pre-population source: existing trend_scores with rising/top signals."""
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT tq.seed_keyword, tq.query, ts.query_type, ts.source, ts.score, ts.delta
+                FROM trend_scores ts
+                JOIN trend_queries tq ON tq.id = ts.query_id
+                WHERE ts.query_type IN ('rising', 'top')
+                """
+            )
+            return [(row[0], row[1], row[2], row[3], row[4], row[5]) for row in cur.fetchall()]
+
+    def insert_active_seed(
+        self, query: str, promotion_score: int, candidate_id: int | None
+    ) -> int | None:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO active_seeds (query, promotion_score, promoted_from_candidate_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (query) DO NOTHING
+                RETURNING id
+                """,
+                (query, promotion_score, candidate_id),
+            )
+            row = cur.fetchone()
+            return None if row is None else row[0]
+
+    def promote_candidate(self, candidate_id: int) -> int:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE seed_candidates
+                SET status = 'promoted', promoted_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (candidate_id,),
+            )
+            return cur.rowcount
+
+    def archive_active_seed(self, query: str) -> int:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE active_seeds
+                SET archived_at = CURRENT_TIMESTAMP
+                WHERE query = %s AND archived_at IS NULL
+                """,
+                (query,),
+            )
+            return cur.rowcount
 
 
 class GoogleTrendsClient:
@@ -340,8 +490,10 @@ class GoogleTrendsClient:
                         delta=result.delta,
                         region=result.region,
                         query_type=result.query_type,
+                        source=result.source,
                         trend_direction=result.trend_direction,
                     )
+                    self._upsert_candidate(seed, result)
                     all_results.append(result)
 
             except Exception as e:  # noqa: BLE001
@@ -349,3 +501,20 @@ class GoogleTrendsClient:
                 failed_seeds.append(seed)
 
         return all_results, failed_seeds
+
+    def _upsert_candidate(self, seed: str, result: TrendResult) -> None:
+        """Feed the unified seed pool: rising/top discoveries (not the seed itself)."""
+        if result.query_type not in ("rising", "top") or result.query == seed:
+            return
+        promotion_score = compute_promotion_score(
+            result.source, result.query_type, result.score, result.delta
+        )
+        self.db_client.upsert_seed_candidate(
+            source_seed=seed,
+            query=result.query,
+            source=result.source,
+            query_type=result.query_type,
+            score=result.score,
+            delta=result.delta,
+            promotion_score=promotion_score,
+        )
