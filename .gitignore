@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Maven / Quarkus
+trend-service/target/
+
+# Stray empty file at repo root
+Novelty
+
+# OS
+.DS_Store
