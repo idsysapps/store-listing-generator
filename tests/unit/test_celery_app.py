@@ -185,3 +185,106 @@ def test_beat_schedule_registers_harvest_and_promotion(redis_url: str) -> None:
         == "store_listing.orchestration.tasks.fetch_daily_trends"
     )
     assert beat["seed-promotion"]["task"] == "store_listing.orchestration.tasks.promote_seeds"
+
+
+def _reload(redis_url: str):
+    with patch.dict(os.environ, {"REDIS_URL": redis_url}):
+        return importlib.import_module("store_listing.orchestration.tasks")
+
+
+def test_fetch_tiktok_trends_harvests_active_seeds(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="mom humor", promotion_score=0),
+        ActiveSeed(id=2, query="pickleball", promotion_score=0),
+    ]
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([object()], [])
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "TikTokClient", return_value=client_mock),
+    ):
+        result = module.fetch_tiktok_trends.run()
+
+    request = client_mock.harvest_and_store.call_args.args[0]
+    assert request.seed_keywords == ["mom humor", "pickleball"]
+    assert result["status"] == "success"
+
+
+def test_fetch_tiktok_trends_partial_when_some_fail(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="pickleball", promotion_score=0)
+    ]
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([object()], ["#shirttok"])
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "TikTokClient", return_value=client_mock),
+    ):
+        result = module.fetch_tiktok_trends.run()
+
+    assert result["status"] == "partial"
+
+
+def test_fetch_pinterest_trends_harvests_active_seeds(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="pickleball", promotion_score=0)
+    ]
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([object()], [])
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "PinterestClient", return_value=client_mock),
+    ):
+        result = module.fetch_pinterest_trends.run()
+
+    request = client_mock.harvest_and_store.call_args.args[0]
+    assert request.seed_keywords == ["pickleball"]
+    assert result["status"] == "success"
+
+
+def test_fetch_marketplace_suggestions_runs_both_sources(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="mom humor", promotion_score=0),
+        ActiveSeed(id=2, query="gift", promotion_score=0),
+    ]
+    harvester_mock = MagicMock()
+    harvester_mock.harvest_and_store.return_value = ([object()], [])
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "AutocompleteHarvester", return_value=harvester_mock),
+    ):
+        result = module.fetch_marketplace_suggestions.run()
+
+    request = harvester_mock.harvest_and_store.call_args.args[0]
+    assert request.seed_keywords == ["mom humor", "gift"]
+    assert result["status"] == "success"
+
+
+def test_beat_schedule_registers_micro_trend_tasks(redis_url: str) -> None:
+    module = _reload(redis_url)
+    beat = module.celery_app.conf.beat_schedule
+
+    assert (
+        beat["tiktok-micro-trends"]["task"]
+        == "store_listing.orchestration.tasks.fetch_tiktok_trends"
+    )
+    assert (
+        beat["pinterest-micro-trends"]["task"]
+        == "store_listing.orchestration.tasks.fetch_pinterest_trends"
+    )
+    assert (
+        beat["marketplace-suggestions"]["task"]
+        == "store_listing.orchestration.tasks.fetch_marketplace_suggestions"
+    )

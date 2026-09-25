@@ -29,6 +29,10 @@ services:
       DATABASE_USER: store_listing
       DATABASE_PASSWORD: store_listing
       REDIS_URL: redis://redis:6379/0
+      APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
+      APIFY_ACTOR_TIKTOK_HASHTAG: ${APIFY_ACTOR_TIKTOK_HASHTAG:-}
+      APIFY_ACTOR_PINTEREST: ${APIFY_ACTOR_PINTEREST:-}
+      ETSY_SUGGEST_URL: ${ETSY_SUGGEST_URL:-}
 
   trend-service:
     build:
