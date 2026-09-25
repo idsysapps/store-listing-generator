@@ -1,11 +1,16 @@
 """TikTok micro-trend harvester.
 
-Scrapes video captions, co-occurring hashtags, and sounds under target seeds
-(#shirttok, #momhumor, #pickleball, #gymhumor). Uses an Apify actor when
+Derives hashtags and sounds from target seeds. Uses an Apify actor when
 APIFY_API_TOKEN is set; otherwise falls back to a free web scrape of the public
 tag pages (best-effort). Discoveries are written to the unified trend store
 (trend_queries + trend_scores with ``source='tiktok'``) and fed to the seed
 pool via ``seed_candidates``.
+
+Cost guardrails (Apify bills per returned video, not per run):
+- ``TIKTOK_RESULTS_PER_PAGE`` caps the actor's input (default 20); the paid
+  actor is otherwise uncapped and can return ~50+ videos per tag.
+- Tags come from the active seed set only. Set ``TIKTOK_EXTRA_HASHTAGS`` to add
+  curated tags; there are no hardcoded targets.
 """
 
 from __future__ import annotations
@@ -29,13 +34,7 @@ from .schemas import TrendHarvestRequest, TrendResult
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIKTOK_ACTOR: Final[str] = "clockworks/tiktok-hashtag-scraper"
-
-TARGET_HASHTAGS: Final[tuple[str, ...]] = (
-    "#shirttok",
-    "#momhumor",
-    "#pickleball",
-    "#gymhumor",
-)
+DEFAULT_TIKTOK_RESULTS_PER_PAGE: Final[int] = 20
 
 _SCRIPT_RE = re.compile(
     r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
@@ -135,12 +134,19 @@ class ApifyTikTokGateway:
     def _api_actor_ref(self) -> str:
         return self.actor_id.replace("/", "~")
 
+    @staticmethod
+    def _results_per_page() -> int:
+        return int(os.environ.get("TIKTOK_RESULTS_PER_PAGE") or DEFAULT_TIKTOK_RESULTS_PER_PAGE)
+
     def scrape_hashtag(self, hashtag: str) -> list[TikTokItem]:
         run = (
             self._apify()
             .actor(self._api_actor_ref())
             .call(
-                run_input={"hashtags": [hashtag.lstrip("#")]},
+                run_input={
+                    "hashtags": [hashtag.lstrip("#")],
+                    "resultsPerPage": self._results_per_page(),
+                },
                 run_timeout=timedelta(minutes=4),
             )
         )
@@ -214,7 +220,9 @@ class TikTokClient:
     def target_hashtags(self, seed_keywords: list[str]) -> list[str]:
         tags = [self._normalize_hashtag(seed) for seed in seed_keywords]
         tags = [tag for tag in tags if tag != "#"]
-        return list(dict.fromkeys([*tags, *TARGET_HASHTAGS]))
+        extra = os.environ.get("TIKTOK_EXTRA_HASHTAGS") or ""
+        extra_tags = [self._normalize_hashtag(tag) for tag in extra.split(",") if tag.strip()]
+        return list(dict.fromkeys([*tags, *extra_tags]))
 
     def harvest_and_store(
         self, request: TrendHarvestRequest

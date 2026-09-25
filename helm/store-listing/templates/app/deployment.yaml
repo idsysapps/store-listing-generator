@@ -71,6 +71,21 @@ spec:
               value: {{ .Values.config.etsySuggestUrl | default "" | quote }}
             - name: APIFY_ACTOR_X
               value: {{ .Values.config.xActorId | default "" | quote }}
+            - name: TIKTOK_RESULTS_PER_PAGE
+              value: {{ .Values.config.tiktokResultsPerPage | default 20 | quote }}
+            - name: SOURCE_HEALTH_ENABLED
+              value: {{ .Values.config.sourceHealthEnabled | default true | quote }}
+            - name: HEALTH_FAILURE_THRESHOLD
+              value: {{ .Values.config.healthFailureThreshold | default 2 | quote }}
+            - name: HEALTH_EMPTY_THRESHOLD
+              value: {{ .Values.config.healthEmptyThreshold | default 3 | quote }}
+            - name: GITHUB_REPO
+              value: {{ .Values.config.githubRepo | default "" | quote }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: GITHUB_TOKEN
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -127,5 +142,20 @@ spec:
               value: {{ .Values.config.etsySuggestUrl | default "" | quote }}
             - name: APIFY_ACTOR_X
               value: {{ .Values.config.xActorId | default "" | quote }}
+            - name: TIKTOK_RESULTS_PER_PAGE
+              value: {{ .Values.config.tiktokResultsPerPage | default 20 | quote }}
+            - name: SOURCE_HEALTH_ENABLED
+              value: {{ .Values.config.sourceHealthEnabled | default true | quote }}
+            - name: HEALTH_FAILURE_THRESHOLD
+              value: {{ .Values.config.healthFailureThreshold | default 2 | quote }}
+            - name: HEALTH_EMPTY_THRESHOLD
+              value: {{ .Values.config.healthEmptyThreshold | default 3 | quote }}
+            - name: GITHUB_REPO
+              value: {{ .Values.config.githubRepo | default "" | quote }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: GITHUB_TOKEN
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}

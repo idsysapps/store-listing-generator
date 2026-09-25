@@ -87,3 +87,19 @@ INSERT INTO active_seeds (query, promotion_score) VALUES
     ('novelty socks', 0),
     ('personalized gifts', 0)
 ON CONFLICT (query) DO NOTHING;
+
+-- Table: source_health
+-- Per-source harvest health so the fix loop opens GitHub issues automatically
+-- after repeated failures/empties (see orchestration/source_health.py).
+CREATE TABLE source_health (
+    source VARCHAR(20) PRIMARY KEY,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    consecutive_empty INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    last_error_at TIMESTAMP WITH TIME ZONE,
+    last_success_at TIMESTAMP WITH TIME ZONE,
+    issue_open BOOLEAN NOT NULL DEFAULT FALSE,
+    last_issue_url TEXT,
+    last_issue_number INTEGER,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

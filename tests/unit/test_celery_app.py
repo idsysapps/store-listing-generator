@@ -328,3 +328,122 @@ def test_beat_schedule_registers_micro_trend_tasks(redis_url: str) -> None:
         == "store_listing.orchestration.tasks.fetch_marketplace_suggestions"
     )
     assert beat["x-micro-trends"]["task"] == "store_listing.orchestration.tasks.fetch_x_trends"
+
+
+def test_beat_schedule_tiktok_micro_trends_runs_weekly(redis_url: str) -> None:
+    """TikTok micro-trend harvest runs weekly (Sunday) to cap Apify spend."""
+    module = _reload(redis_url)
+    beat = module.celery_app.conf.beat_schedule
+
+    schedule = beat["tiktok-micro-trends"]["schedule"]
+    assert schedule.minute == {10}
+    assert schedule.hour == {6}
+    assert schedule.day_of_week == {0}
+
+
+class FakeHealthTracker:
+    def __init__(self) -> None:
+        self.outcomes: list[tuple[str, str, str | None]] = []
+
+    def record(self, source: str, outcome: str, *, error: str | None = None) -> None:
+        self.outcomes.append((source, outcome, error))
+
+
+def _reload_with_health(redis_url: str):
+    with patch.dict(os.environ, {"REDIS_URL": redis_url, "SOURCE_HEALTH_ENABLED": "true"}):
+        module = importlib.import_module("store_listing.orchestration.tasks")
+    return importlib.reload(module)
+
+
+def test_health_reports_failure_when_harvest_raises(redis_url: str) -> None:
+    module = _reload_with_health(redis_url)
+    tracker = FakeHealthTracker()
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = []
+
+    with (
+        patch("store_listing.orchestration.source_health.build_tracker", return_value=tracker),
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(
+            module.GoogleTrendsClient, "harvest_and_store", side_effect=RuntimeError("boom")
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        module.fetch_daily_trends.run()
+
+    assert tracker.outcomes[0] == ("google", "failure", "boom")
+
+
+def test_health_reports_empty_when_no_results(redis_url: str) -> None:
+    module = _reload_with_health(redis_url)
+    tracker = FakeHealthTracker()
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = []
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([], [])
+
+    with (
+        patch("store_listing.orchestration.source_health.build_tracker", return_value=tracker),
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "GoogleTrendsClient", return_value=client_mock),
+    ):
+        module.fetch_daily_trends.run()
+
+    assert ("google", "empty", None) in tracker.outcomes
+
+
+def test_health_reports_success_when_results_present(redis_url: str) -> None:
+    module = _reload_with_health(redis_url)
+    tracker = FakeHealthTracker()
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = []
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([object()], [])
+
+    with (
+        patch("store_listing.orchestration.source_health.build_tracker", return_value=tracker),
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "GoogleTrendsClient", return_value=client_mock),
+    ):
+        module.fetch_daily_trends.run()
+
+    assert ("google", "success", None) in tracker.outcomes
+
+
+def test_health_tracks_tiktok_source_by_tag(redis_url: str) -> None:
+    module = _reload_with_health(redis_url)
+    tracker = FakeHealthTracker()
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="pickleball", promotion_score=0)
+    ]
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([], ["#pickleball"])
+
+    with (
+        patch("store_listing.orchestration.source_health.build_tracker", return_value=tracker),
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "TikTokClient", return_value=client_mock),
+    ):
+        result = module.fetch_tiktok_trends.run()
+
+    assert result["status"] == "failed"
+    assert tracker.outcomes[0][0] == "tiktok"
+    assert tracker.outcomes[0][1] == "failure"
+
+
+def test_health_disabled_runs_task_without_tracking(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = []
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([object()], [])
+
+    with (
+        patch("store_listing.orchestration.source_health.build_tracker", return_value=None),
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "GoogleTrendsClient", return_value=client_mock),
+    ):
+        result = module.fetch_daily_trends.run()
+
+    assert result["status"] == "success"

@@ -531,10 +531,12 @@ async def test_uspsto_search_returns_trademarks():
     with pytest.fail("Not implemented: USPTO search"):
         result = await client.search_class_025("test slogan")
 
+
 # GREEN: Minimum code to pass
 class USPTOClient:
     async def search_class_025(self, query: str) -> list[Trademark]:
         return []
+
 
 # REFACTOR: Clean up (types, error handling, docs)
 ```
@@ -567,12 +569,13 @@ Every page/dialog should have a Page Object:
 # tests/e2e/approval_dashboard_page.py
 from playwright.async_api import Page
 
+
 class ApprovalDashboardPage:
     APPROVE_BTN = "[data-testid='btn-approve']"
-    
+
     def __init__(self, page: Page):
         self.page = page
-    
+
     async def approve_slogan(self, slogan_id: str) -> None:
         await self.page.wait_for_selector(f"[data-testid='slogan-{slogan_id}']")
         await self.page.click(self.APPROVE_BTN)

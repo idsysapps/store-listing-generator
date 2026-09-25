@@ -17,6 +17,7 @@ from store_listing.orchestration.promotion import (
     compute_promotion_score,
     enforce_cap,
 )
+from store_listing.orchestration.source_health import with_source_health
 
 celery_app = Celery(
     "store_listing",
@@ -43,7 +44,7 @@ celery_app.conf.beat_schedule = {
     },
     "tiktok-micro-trends": {
         "task": "store_listing.orchestration.tasks.fetch_tiktok_trends",
-        "schedule": crontab(hour=6, minute=10),
+        "schedule": crontab(hour=6, minute=10, day_of_week=0),
     },
     "pinterest-micro-trends": {
         "task": "store_listing.orchestration.tasks.fetch_pinterest_trends",
@@ -92,6 +93,7 @@ def _bulk_status(results_count: int, failed_targets: list[str], seeds: list[str]
 
 
 @celery_app.task
+@with_source_health("google")
 def fetch_daily_trends() -> dict:
     db_client = DatabaseClient()
     trends_client = GoogleTrendsClient(db_client=db_client)
@@ -103,6 +105,7 @@ def fetch_daily_trends() -> dict:
 
 
 @celery_app.task
+@with_source_health("google")
 def fetch_trends_manual(seeds: list[str] | None = None) -> dict:
     db_client = DatabaseClient()
     trends_client = GoogleTrendsClient(db_client=db_client)
@@ -114,6 +117,7 @@ def fetch_trends_manual(seeds: list[str] | None = None) -> dict:
 
 
 @celery_app.task
+@with_source_health("tiktok")
 def fetch_tiktok_trends() -> dict:
     """Harvest TikTok hashtag/sound micro-trends from the active seed set."""
     db_client = DatabaseClient()
@@ -123,6 +127,7 @@ def fetch_tiktok_trends() -> dict:
 
 
 @celery_app.task
+@with_source_health("pinterest")
 def fetch_pinterest_trends() -> dict:
     """Harvest Pinterest search/board traction from the active seed set."""
     db_client = DatabaseClient()
@@ -132,6 +137,7 @@ def fetch_pinterest_trends() -> dict:
 
 
 @celery_app.task
+@with_source_health("marketplace")
 def fetch_marketplace_suggestions() -> dict:
     """Collect Amazon + Etsy search autocomplete queries for the active seed set."""
     db_client = DatabaseClient()
@@ -141,6 +147,7 @@ def fetch_marketplace_suggestions() -> dict:
 
 
 @celery_app.task
+@with_source_health("x")
 def fetch_x_trends() -> dict:
     """Harvest X hashtag/keyword conversation trends from the active seed set."""
     db_client = DatabaseClient()

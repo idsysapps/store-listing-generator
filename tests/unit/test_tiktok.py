@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 from store_listing.ingest.trends.schemas import TrendHarvestRequest, TrendResult
 from store_listing.ingest.trends.tiktok import (
     DEFAULT_TIKTOK_ACTOR,
-    TARGET_HASHTAGS,
     ApifyTikTokGateway,
     TikTokClient,
     TikTokItem,
@@ -73,13 +72,23 @@ def make_client(gateway: FakeTikTokGateway) -> TikTokClient:
     return TikTokClient(db_client=MagicMock(), gateway=gateway)
 
 
-def test_target_hashtags_normalize_seeds_and_include_issue_targets() -> None:
+def test_target_hashtags_derives_from_seeds_with_no_fixed_defaults(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("TIKTOK_EXTRA_HASHTAGS", raising=False)
     client = make_client(FakeTikTokGateway())
     tags = client.target_hashtags(["Mom Humor", "gym fitness", "pickleball"])
 
-    assert tags == ["#momhumor", "#gymfitness", "#pickleball", "#shirttok", "#gymhumor"]
-    assert all(tag in tags for tag in TARGET_HASHTAGS)
+    assert tags == ["#momhumor", "#gymfitness", "#pickleball"]
     assert len(tags) == len(set(tags))
+
+
+def test_target_hashtags_appends_env_extra_tags(monkeypatch) -> None:
+    monkeypatch.setenv("TIKTOK_EXTRA_HASHTAGS", "shirttok, gymhumor")
+    client = make_client(FakeTikTokGateway())
+    tags = client.target_hashtags(["mom humor"])
+
+    assert tags == ["#momhumor", "#shirttok", "#gymhumor"]
 
 
 def test_harvest_and_store_writes_hashtag_sound_rows() -> None:
@@ -150,7 +159,7 @@ def test_per_seed_failure_is_captured_and_harvest_continues() -> None:
     db.insert_trend_query.return_value = 1
     gateway = FakeTikTokGateway(
         items_by_hashtag={"#pickleball": [ITEM_A]},
-        failures={"#shirttok"},
+        failures={"#shirt"},
     )
     client = TikTokClient(db_client=db, gateway=gateway)
 
@@ -158,7 +167,7 @@ def test_per_seed_failure_is_captured_and_harvest_continues() -> None:
         TrendHarvestRequest(seed_keywords=["pickleball", "shirt"])
     )
 
-    assert failed == ["#shirttok"]
+    assert failed == ["#shirt"]
     assert len(results) > 0
 
 
@@ -203,6 +212,34 @@ def test_apify_gateway_maps_actor_output() -> None:
     assert call_kwargs["run_input"]["hashtags"] == ["pickleball"]
     actor_id = apify_client_cls.return_value.actor.call_args.args[0]
     assert actor_id == "clockworks~tiktok-hashtag-scraper"
+
+
+def test_apify_gateway_caps_results_per_page_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("TIKTOK_RESULTS_PER_PAGE", raising=False)
+    apify_client_cls = MagicMock()
+    apify_client_cls.return_value.actor.return_value.call.return_value = {
+        "defaultDatasetId": "ds-1"
+    }
+    apify_client_cls.return_value.dataset.return_value.list_items.return_value.items = []
+    gateway = ApifyTikTokGateway(token="tok123", apify_client_cls=apify_client_cls)
+    gateway.scrape_hashtag("#pickleball")
+
+    call_kwargs = apify_client_cls.return_value.actor.return_value.call.call_args.kwargs
+    assert call_kwargs["run_input"]["resultsPerPage"] == 20
+
+
+def test_apify_gateway_results_per_page_env_override(monkeypatch) -> None:
+    monkeypatch.setenv("TIKTOK_RESULTS_PER_PAGE", "5")
+    apify_client_cls = MagicMock()
+    apify_client_cls.return_value.actor.return_value.call.return_value = {
+        "defaultDatasetId": "ds-1"
+    }
+    apify_client_cls.return_value.dataset.return_value.list_items.return_value.items = []
+    gateway = ApifyTikTokGateway(token="tok123", apify_client_cls=apify_client_cls)
+    gateway.scrape_hashtag("#pickleball")
+
+    call_kwargs = apify_client_cls.return_value.actor.return_value.call.call_args.kwargs
+    assert call_kwargs["run_input"]["resultsPerPage"] == 5
 
 
 def test_web_gateway_parses_rehydrated_json() -> None:
