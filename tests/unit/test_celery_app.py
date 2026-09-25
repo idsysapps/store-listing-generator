@@ -189,7 +189,8 @@ def test_beat_schedule_registers_harvest_and_promotion(redis_url: str) -> None:
 
 def _reload(redis_url: str):
     with patch.dict(os.environ, {"REDIS_URL": redis_url}):
-        return importlib.import_module("store_listing.orchestration.tasks")
+        module = importlib.import_module("store_listing.orchestration.tasks")
+        return importlib.reload(module)
 
 
 def test_fetch_tiktok_trends_harvests_active_seeds(redis_url: str) -> None:
@@ -311,14 +312,13 @@ def test_fetch_x_trends_partial_when_some_fail(redis_url: str) -> None:
     assert result["status"] == "partial"
 
 
-def test_beat_schedule_registers_micro_trend_tasks(redis_url: str) -> None:
+def test_beat_schedule_registers_micro_trend_tasks_without_tiktok_by_default(
+    redis_url: str,
+) -> None:
     module = _reload(redis_url)
     beat = module.celery_app.conf.beat_schedule
 
-    assert (
-        beat["tiktok-micro-trends"]["task"]
-        == "store_listing.orchestration.tasks.fetch_tiktok_trends"
-    )
+    assert "tiktok-micro-trends" not in beat
     assert (
         beat["pinterest-micro-trends"]["task"]
         == "store_listing.orchestration.tasks.fetch_pinterest_trends"
@@ -330,15 +330,30 @@ def test_beat_schedule_registers_micro_trend_tasks(redis_url: str) -> None:
     assert beat["x-micro-trends"]["task"] == "store_listing.orchestration.tasks.fetch_x_trends"
 
 
-def test_beat_schedule_tiktok_micro_trends_runs_weekly(redis_url: str) -> None:
-    """TikTok micro-trend harvest runs weekly (Sunday) to cap Apify spend."""
-    module = _reload(redis_url)
-    beat = module.celery_app.conf.beat_schedule
+def test_beat_schedule_tiktok_registered_when_enabled(redis_url: str) -> None:
+    """TikTok micro-trend harvest is opt-in (TIKTOK_ENABLED=true); when enabled
+    it runs weekly (Sunday) to cap Apify spend."""
+    with patch.dict(os.environ, {"REDIS_URL": redis_url, "TIKTOK_ENABLED": "true"}):
+        module = importlib.import_module("store_listing.orchestration.tasks")
+        importlib.reload(module)
 
+    beat = module.celery_app.conf.beat_schedule
+    assert (
+        beat["tiktok-micro-trends"]["task"]
+        == "store_listing.orchestration.tasks.fetch_tiktok_trends"
+    )
     schedule = beat["tiktok-micro-trends"]["schedule"]
     assert schedule.minute == {10}
     assert schedule.hour == {6}
     assert schedule.day_of_week == {0}
+
+
+def test_beat_schedule_tiktok_omitted_when_flag_false(redis_url: str) -> None:
+    with patch.dict(os.environ, {"REDIS_URL": redis_url, "TIKTOK_ENABLED": "false"}):
+        module = importlib.import_module("store_listing.orchestration.tasks")
+        importlib.reload(module)
+
+    assert "tiktok-micro-trends" not in module.celery_app.conf.beat_schedule
 
 
 class FakeHealthTracker:

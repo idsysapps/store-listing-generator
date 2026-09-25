@@ -1,3 +1,5 @@
+import os
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -33,6 +35,11 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
+
+def _tiktok_enabled() -> bool:
+    return os.environ.get("TIKTOK_ENABLED", "false").lower() in ("1", "true", "yes")
+
+
 celery_app.conf.beat_schedule = {
     "daily-trend-harvest": {
         "task": "store_listing.orchestration.tasks.fetch_daily_trends",
@@ -41,10 +48,6 @@ celery_app.conf.beat_schedule = {
     "seed-promotion": {
         "task": "store_listing.orchestration.tasks.promote_seeds",
         "schedule": crontab(hour=6, minute=5),
-    },
-    "tiktok-micro-trends": {
-        "task": "store_listing.orchestration.tasks.fetch_tiktok_trends",
-        "schedule": crontab(hour=6, minute=10, day_of_week=0),
     },
     "pinterest-micro-trends": {
         "task": "store_listing.orchestration.tasks.fetch_pinterest_trends",
@@ -59,6 +62,16 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=6, minute=25),
     },
 }
+
+if _tiktok_enabled():
+    # TikTok is disabled by default: the Apify actor bills per returned video and
+    # the free tag-page path is TLS-blocked from our egress. Re-enable by setting
+    # TIKTOK_ENABLED=true with cost caps (see #86); the harvest runs weekly
+    # (Sunday) so spend stays under Apify's $5/month free tier.
+    celery_app.conf.beat_schedule["tiktok-micro-trends"] = {
+        "task": "store_listing.orchestration.tasks.fetch_tiktok_trends",
+        "schedule": crontab(hour=6, minute=10, day_of_week=0),
+    }
 
 
 def _active_seed_keywords(db_client: DatabaseClient) -> list[str]:
