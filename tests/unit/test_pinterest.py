@@ -185,6 +185,9 @@ def test_apify_gateway_maps_actor_output() -> None:
     apify_client_cls.assert_called_once_with("tok123")
     call_kwargs = apify_client_cls.return_value.actor.return_value.call.call_args.kwargs
     assert call_kwargs["run_input"]["query"] == "pickleball"
+    assert call_kwargs["run_input"]["maxPins"] == 25
+    actor_id = apify_client_cls.return_value.actor.call_args.args[0]
+    assert actor_id == "automation-lab~pinterest-scraper"
 
 
 def test_web_gateway_parses_embedded_state() -> None:
