@@ -12,6 +12,9 @@ data:
   REDIS_URL: {{ .Values.config.redisUrl }}
   QUARKUS_PROFILE: {{ .Values.config.quarkusProfile }}
   GRAPHQL_UI_ENABLED: "false"
+  LLM_BASE_URL: {{ .Values.config.llmBaseUrl | default "https://api.groq.com/openai/v1" | quote }}
+  LLM_MODEL: {{ .Values.config.llmModel | default "llama-3.3-70b-versatile" | quote }}
+  LLM_SEED_CURATION_ENABLED: {{ .Values.config.llmSeedCurationEnabled | default "false" | quote }}
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -121,6 +124,21 @@ data:
         last_issue_number INTEGER,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Table: seed_curation_log
+    -- Tracks LLM and calendar seed curation decisions for audit/tuning
+    CREATE TABLE IF NOT EXISTS seed_curation_log (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER REFERENCES seed_candidates(id),
+        action VARCHAR(20) NOT NULL,
+        reasoning TEXT,
+        event_context VARCHAR(100),
+        llm_model VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_curation_log_action ON seed_curation_log(action);
+    CREATE INDEX IF NOT EXISTS idx_curation_log_event ON seed_curation_log(event_context);
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -211,3 +229,17 @@ data:
         last_issue_number INTEGER,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Table: seed_curation_log (LLM + calendar curation audit trail)
+    CREATE TABLE IF NOT EXISTS seed_curation_log (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER REFERENCES seed_candidates(id),
+        action VARCHAR(20) NOT NULL,
+        reasoning TEXT,
+        event_context VARCHAR(100),
+        llm_model VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_curation_log_action ON seed_curation_log(action);
+    CREATE INDEX IF NOT EXISTS idx_curation_log_event ON seed_curation_log(event_context);

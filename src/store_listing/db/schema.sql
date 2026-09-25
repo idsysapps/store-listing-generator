@@ -103,3 +103,18 @@ CREATE TABLE source_health (
     last_issue_number INTEGER,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Table: seed_curation_log
+-- Tracks LLM and calendar seed curation decisions for audit/tuning
+CREATE TABLE seed_curation_log (
+    id SERIAL PRIMARY KEY,
+    candidate_id INTEGER REFERENCES seed_candidates(id),
+    action VARCHAR(20) NOT NULL,
+    reasoning TEXT,
+    event_context VARCHAR(100),
+    llm_model VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_curation_log_action ON seed_curation_log(action);
+CREATE INDEX idx_curation_log_event ON seed_curation_log(event_context);

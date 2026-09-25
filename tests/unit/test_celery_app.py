@@ -185,6 +185,10 @@ def test_beat_schedule_registers_harvest_and_promotion(redis_url: str) -> None:
         == "store_listing.orchestration.tasks.fetch_daily_trends"
     )
     assert beat["seed-promotion"]["task"] == "store_listing.orchestration.tasks.promote_seeds"
+    assert (
+        beat["seasonal-seed-injection"]["task"]
+        == "store_listing.orchestration.tasks.inject_seasonal_seeds_task"
+    )
 
 
 def _reload(redis_url: str):
@@ -560,3 +564,55 @@ def test_health_disabled_runs_task_without_tracking(redis_url: str) -> None:
         result = module.fetch_daily_trends.run()
 
     assert result["status"] == "success"
+
+
+def test_beat_schedule_seasonal_injection_runs_daily_0555(redis_url: str) -> None:
+    module = _reload(redis_url)
+    schedule = module.celery_app.conf.beat_schedule["seasonal-seed-injection"]["schedule"]
+    assert schedule.minute == {55}
+    assert schedule.hour == {5}
+
+
+def test_beat_schedule_llm_curation_registered_when_enabled(redis_url: str) -> None:
+    with patch.dict(os.environ, {"REDIS_URL": redis_url, "LLM_SEED_CURATION_ENABLED": "true"}):
+        module = importlib.import_module("store_listing.orchestration.tasks")
+        importlib.reload(module)
+
+    beat = module.celery_app.conf.beat_schedule
+    assert (
+        beat["llm-seed-curation"]["task"] == "store_listing.orchestration.tasks.curate_seeds_task"
+    )
+    schedule = beat["llm-seed-curation"]["schedule"]
+    assert schedule.minute == {50}
+    assert schedule.hour == {6}
+
+
+def test_beat_schedule_llm_curation_omitted_by_default(redis_url: str) -> None:
+    module = _reload(redis_url)
+    assert "llm-seed-curation" not in module.celery_app.conf.beat_schedule
+
+
+def test_curate_seeds_task_skips_without_api_key(redis_url: str) -> None:
+    module = _reload(redis_url)
+
+    with patch.dict(os.environ, {"LLM_API_KEY": ""}):
+        result = module.curate_seeds_task.run()
+
+    assert result["status"] == "skipped"
+
+
+def test_inject_seasonal_seeds_task_calls_injector(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch(
+            "store_listing.orchestration.context_seeds.inject_seasonal_seeds",
+            return_value={"status": "success", "injected": 3, "events": ["halloween"]},
+        ) as mock_inject,
+    ):
+        result = module.inject_seasonal_seeds_task.run()
+
+    assert result["status"] == "success"
+    mock_inject.assert_called_once_with(db_mock)

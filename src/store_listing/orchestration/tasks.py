@@ -47,7 +47,15 @@ def _instagram_enabled() -> bool:
     return os.environ.get("INSTAGRAM_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
+def _llm_curation_enabled() -> bool:
+    return os.environ.get("LLM_SEED_CURATION_ENABLED", "false").lower() in ("1", "true", "yes")
+
+
 celery_app.conf.beat_schedule = {
+    "seasonal-seed-injection": {
+        "task": "store_listing.orchestration.tasks.inject_seasonal_seeds_task",
+        "schedule": crontab(hour=5, minute=55),
+    },
     "daily-trend-harvest": {
         "task": "store_listing.orchestration.tasks.fetch_daily_trends",
         "schedule": crontab(hour=6, minute=0),
@@ -95,6 +103,12 @@ if _instagram_enabled():
     celery_app.conf.beat_schedule["instagram-micro-trends"] = {
         "task": "store_listing.orchestration.tasks.fetch_instagram_trends",
         "schedule": crontab(hour=6, minute=40, day_of_week=5),
+    }
+
+if _llm_curation_enabled():
+    celery_app.conf.beat_schedule["llm-seed-curation"] = {
+        "task": "store_listing.orchestration.tasks.curate_seeds_task",
+        "schedule": crontab(hour=6, minute=50),
     }
 
 
@@ -282,3 +296,24 @@ def backfill_seeds_from_candidates() -> dict:
         )
         processed += 1
     return {"status": "success", "candidates_processed": processed}
+
+
+@celery_app.task
+def inject_seasonal_seeds_task() -> dict:
+    """Inject rule-based calendar seeds before harvesters run."""
+    from store_listing.orchestration.context_seeds import inject_seasonal_seeds
+
+    return inject_seasonal_seeds(DatabaseClient())
+
+
+@celery_app.task
+def curate_seeds_task() -> dict:
+    """LLM-driven seed curation: promote, reject, pivot, and inject event seeds."""
+    from store_listing.orchestration.llm_client import configured, get_llm_client, get_llm_model
+    from store_listing.orchestration.seed_curation import curate_seeds
+
+    if not configured():
+        return {"status": "skipped", "reason": "LLM_API_KEY not set"}
+
+    client = get_llm_client()
+    return curate_seeds(DatabaseClient(), client.chat.completions, get_llm_model())

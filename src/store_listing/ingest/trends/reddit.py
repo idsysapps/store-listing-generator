@@ -1,8 +1,11 @@
 """Reddit micro-trend harvester.
 
-Searches Reddit's public JSON endpoints for trending posts matching seed
-keywords. No API key required — Reddit exposes every page as JSON via the
-``.json`` suffix. Rate limit: ~60 requests/minute with a proper User-Agent.
+Uses Reddit's OAuth2 API (oauth.reddit.com) with client_credentials grant
+for server-to-server access. Requires REDDIT_CLIENT_ID and
+REDDIT_CLIENT_SECRET from https://www.reddit.com/prefs/apps (script type).
+
+Rate limit: ~100 requests/minute with OAuth. Tokens expire after 1 hour
+and are refreshed automatically.
 
 Discoveries are written to the unified trend store (trend_queries +
 trend_scores with ``source='reddit'``) and fed to the seed pool via
@@ -12,7 +15,9 @@ trend_scores with ``source='reddit'``) and fed to the seed pool via
 from __future__ import annotations
 
 import logging
+import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final, Protocol, runtime_checkable
@@ -26,13 +31,13 @@ from .schemas import TrendHarvestRequest, TrendResult
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_HEADERS: Final[dict[str, str]] = {
-    "User-Agent": "script:store-listing-bot:v1.0 (by /u/nene-store-generation)"
-}
+_USER_AGENT: Final[str] = "script:store-listing-bot:v1.0 (by /u/nene-store-generation)"
 
-SEARCH_URL: Final[str] = "https://www.reddit.com/search.json"
+_TOKEN_URL: Final[str] = "https://www.reddit.com/api/v1/access_token"
 
-SUBREDDIT_HOT_URL: Final[str] = "https://www.reddit.com/r/{sub}/hot.json"
+SEARCH_URL: Final[str] = "https://oauth.reddit.com/search"
+
+SUBREDDIT_HOT_URL: Final[str] = "https://oauth.reddit.com/r/{sub}/hot"
 
 POD_SUBREDDITS: Final[tuple[str, ...]] = (
     "funny",
@@ -125,18 +130,52 @@ def _extract_posts(payload: dict[str, Any]) -> list[RedditPost]:
     return [_post(child) for child in children if isinstance(child, dict)]
 
 
-class RedditWebGateway:
-    """Free JSON endpoint: no API key, no OAuth."""
+class RedditOAuthGateway:
+    """OAuth2 client_credentials gateway for server-to-server Reddit API access."""
 
-    def __init__(self, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        client_id: str | None = None,
+        client_secret: str | None = None,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self._client_id = client_id or os.environ.get("REDDIT_CLIENT_ID", "")
+        self._client_secret = client_secret or os.environ.get("REDDIT_CLIENT_SECRET", "")
         self._http = client or httpx.Client(
-            headers=_DEFAULT_HEADERS, timeout=15, follow_redirects=True
+            headers={"User-Agent": _USER_AGENT}, timeout=15, follow_redirects=True
         )
+        self._token: str = ""
+        self._token_expires_at: float = 0
+
+    @property
+    def configured(self) -> bool:
+        return bool(self._client_id and self._client_secret)
+
+    def _ensure_token(self) -> None:
+        if self._token and time.monotonic() < self._token_expires_at:
+            return
+        if not self.configured:
+            raise RuntimeError("REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET are required")
+        response = self._http.post(
+            _TOKEN_URL,
+            auth=(self._client_id, self._client_secret),
+            data={"grant_type": "client_credentials"},
+            headers={"User-Agent": _USER_AGENT},
+        )
+        response.raise_for_status()
+        data = response.json()
+        self._token = data["access_token"]
+        self._token_expires_at = time.monotonic() + data.get("expires_in", 3600) - 60
+
+    def _auth_headers(self) -> dict[str, str]:
+        self._ensure_token()
+        return {"Authorization": f"bearer {self._token}", "User-Agent": _USER_AGENT}
 
     def search(self, query: str) -> list[RedditPost]:
         response = self._http.get(
             SEARCH_URL,
             params={"q": query, "sort": "hot", "t": "day", "limit": 25},
+            headers=self._auth_headers(),
         )
         response.raise_for_status()
         return _extract_posts(response.json())
@@ -145,6 +184,7 @@ class RedditWebGateway:
         response = self._http.get(
             SUBREDDIT_HOT_URL.format(sub=subreddit),
             params={"limit": 25},
+            headers=self._auth_headers(),
         )
         response.raise_for_status()
         return _extract_posts(response.json())
@@ -159,11 +199,15 @@ class RedditClient:
         gateway: RedditGateway | None = None,
     ) -> None:
         self.db_client = db_client or DatabaseClient()
-        self.gateway = gateway or RedditWebGateway()
+        self.gateway = gateway or RedditOAuthGateway()
 
     def harvest_and_store(
         self, request: TrendHarvestRequest
     ) -> tuple[list[TrendResult], list[str]]:
+        if isinstance(self.gateway, RedditOAuthGateway) and not self.gateway.configured:
+            logger.warning("REDDIT_CLIENT_ID/SECRET not set — skipping Reddit harvest")
+            return [], []
+
         all_results: list[TrendResult] = []
         failed: list[str] = []
 

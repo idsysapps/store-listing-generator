@@ -2,9 +2,12 @@
 
 from unittest.mock import MagicMock
 
+import httpx
+
 from store_listing.ingest.trends.reddit import (
     POD_SUBREDDITS,
     RedditClient,
+    RedditOAuthGateway,
     RedditPost,
 )
 from store_listing.ingest.trends.schemas import TrendHarvestRequest
@@ -151,3 +154,94 @@ def test_upsert_candidate_uses_correct_source() -> None:
 
     call_kwargs = db.upsert_seed_candidate.call_args
     assert call_kwargs.kwargs["source"] == "reddit"
+
+
+def _oauth_transport() -> tuple[httpx.MockTransport, list[httpx.Request]]:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if "access_token" in str(request.url):
+            return httpx.Response(
+                200,
+                json={"access_token": "test-token", "token_type": "bearer", "expires_in": 3600},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "children": [
+                        {
+                            "data": {
+                                "id": "abc",
+                                "title": "Cool post",
+                                "subreddit": "funny",
+                                "score": 500,
+                                "num_comments": 20,
+                                "upvote_ratio": 0.95,
+                            }
+                        }
+                    ]
+                }
+            },
+            request=request,
+        )
+
+    return httpx.MockTransport(handler), captured
+
+
+def test_oauth_gateway_authenticates_and_searches() -> None:
+    transport, captured = _oauth_transport()
+    client = httpx.Client(transport=transport)
+    gateway = RedditOAuthGateway(client_id="test-id", client_secret="test-secret", client=client)
+
+    posts = gateway.search("funny shirt")
+
+    assert len(posts) == 1
+    assert posts[0].title == "Cool post"
+    token_req = captured[0]
+    assert "access_token" in str(token_req.url)
+    assert token_req.headers.get("authorization") is not None
+    search_req = captured[1]
+    assert "oauth.reddit.com" in str(search_req.url)
+    assert search_req.headers["authorization"] == "bearer test-token"
+
+
+def test_oauth_gateway_reuses_token() -> None:
+    transport, captured = _oauth_transport()
+    client = httpx.Client(transport=transport)
+    gateway = RedditOAuthGateway(client_id="test-id", client_secret="test-secret", client=client)
+
+    gateway.search("first")
+    gateway.search("second")
+
+    token_requests = [r for r in captured if "access_token" in str(r.url)]
+    assert len(token_requests) == 1
+
+
+def test_oauth_gateway_raises_without_credentials() -> None:
+    transport, _ = _oauth_transport()
+    client = httpx.Client(transport=transport)
+    gateway = RedditOAuthGateway(client_id="", client_secret="", client=client)
+
+    try:
+        gateway.search("test")
+        assert False, "Should have raised RuntimeError"
+    except RuntimeError as e:
+        assert "REDDIT_CLIENT_ID" in str(e)
+
+
+def test_harvest_skips_when_credentials_missing() -> None:
+    transport, _ = _oauth_transport()
+    http_client = httpx.Client(transport=transport)
+    gateway = RedditOAuthGateway(client_id="", client_secret="", client=http_client)
+    db = MagicMock()
+    client = RedditClient(db_client=db, gateway=gateway)
+    request = TrendHarvestRequest(seed_keywords=["funny t-shirt"])
+
+    results, failed = client.harvest_and_store(request)
+
+    assert results == []
+    assert failed == []
+    assert not db.insert_trend_query.called

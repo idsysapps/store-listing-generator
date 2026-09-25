@@ -94,6 +94,36 @@ spec:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: YOUTUBE_API_KEY
+            - name: REDDIT_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: REDDIT_CLIENT_ID
+            - name: REDDIT_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: REDDIT_CLIENT_SECRET
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: LLM_API_KEY
+            - name: LLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_BASE_URL
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_MODEL
+            - name: LLM_SEED_CURATION_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_SEED_CURATION_ENABLED
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -173,5 +203,35 @@ spec:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: YOUTUBE_API_KEY
+            - name: REDDIT_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: REDDIT_CLIENT_ID
+            - name: REDDIT_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: REDDIT_CLIENT_SECRET
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: LLM_API_KEY
+            - name: LLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_BASE_URL
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_MODEL
+            - name: LLM_SEED_CURATION_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_SEED_CURATION_ENABLED
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
