@@ -49,7 +49,12 @@ def test_etsy_is_a_valid_source() -> None:
     assert "etsy" in Source.__args__  # type: ignore[attr-defined]
 
 
-def test_schemas_py_declares_all_five_sources() -> None:
+def test_x_is_a_valid_source() -> None:
+    """RED: Source literal must admit the X (Twitter) social source."""
+    assert "x" in Source.__args__  # type: ignore[attr-defined]
+
+
+def test_schemas_py_declares_all_sources() -> None:
     text = SCHEMAS_PY.read_text()
-    for source in ["google", "tiktok", "pinterest", "amazon", "etsy"]:
+    for source in ["google", "tiktok", "pinterest", "amazon", "etsy", "x"]:
         assert source in text

@@ -20,6 +20,12 @@ PROMOTION_THRESHOLDS: Final[dict[str, dict[str, int]]] = {
     },
     "amazon": {"min_cross_seeds": 2},
     "etsy": {"min_cross_seeds": 2},
+    "x": {
+        "hashtag_min_virality": 100_000,
+        "hashtag_min_tweets": 5,
+        "search_min_tweets": 5,
+        "min_cross_seeds": 2,
+    },
 }
 
 STARTER_SEEDS: Final[list[str]] = [
@@ -67,6 +73,7 @@ def compute_promotion_score(source: str, query_type: str, score: int, delta: int
     - tiktok hashtag/sound: cumulative play traction (score)
     - pinterest search/board: pin saves / repins (score)
     - amazon/etsy search: suggestion observation (score)
+    - x hashtag/keyword: cumulative post engagements (score)
     - amazon bsr_riser: still 0 until the #3 BSR ingester lands
     """
     if source == "google":
@@ -79,6 +86,8 @@ def compute_promotion_score(source: str, query_type: str, score: int, delta: int
     if source == "pinterest" and query_type in ("search", "board"):
         return max(score, 0)
     if source in ("amazon", "etsy") and query_type == "search":
+        return max(score, 0)
+    if source == "x" and query_type in ("hashtag", "search"):
         return max(score, 0)
     return 0
 
@@ -126,6 +135,16 @@ def _rule_met(candidate: SeedCandidate, cross_seed_count: int) -> bool:
         return False
     if candidate.source in ("amazon", "etsy") and candidate.query_type == "search":
         return cross_seed_count >= rules.get("min_cross_seeds", 0)
+    if candidate.source == "x":
+        if candidate.query_type == "hashtag":
+            virality_met = candidate.score >= rules.get(
+                "hashtag_min_virality", 0
+            ) and candidate.delta >= rules.get("hashtag_min_tweets", 0)
+        elif candidate.query_type == "search":
+            virality_met = candidate.delta >= rules.get("search_min_tweets", 0)
+        else:
+            return False
+        return virality_met or cross_seed_count >= rules.get("min_cross_seeds", 0)
     return False
 
 

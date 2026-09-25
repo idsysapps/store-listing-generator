@@ -3,6 +3,7 @@ from .google_trends import DatabaseClient, GoogleTrendsClient
 from .pinterest import PinterestClient
 from .schemas import TrendHarvestRequest, TrendQuery, TrendResult, TrendScore
 from .tiktok import TikTokClient
+from .x import XClient
 
 __all__ = [
     "AmazonSuggestionClient",
@@ -16,4 +17,5 @@ __all__ = [
     "TrendQuery",
     "TrendResult",
     "TrendScore",
+    "XClient",
 ]

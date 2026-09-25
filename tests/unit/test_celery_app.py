@@ -272,6 +272,45 @@ def test_fetch_marketplace_suggestions_runs_both_sources(redis_url: str) -> None
     assert result["status"] == "success"
 
 
+def test_fetch_x_trends_harvests_active_seeds(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="mom humor", promotion_score=0),
+        ActiveSeed(id=2, query="pickleball", promotion_score=0),
+    ]
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([object()], [])
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "XClient", return_value=client_mock),
+    ):
+        result = module.fetch_x_trends.run()
+
+    request = client_mock.harvest_and_store.call_args.args[0]
+    assert request.seed_keywords == ["mom humor", "pickleball"]
+    assert result["status"] == "success"
+
+
+def test_fetch_x_trends_partial_when_some_fail(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="mom humor", promotion_score=0)
+    ]
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([object()], ["mom humor"])
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "XClient", return_value=client_mock),
+    ):
+        result = module.fetch_x_trends.run()
+
+    assert result["status"] == "partial"
+
+
 def test_beat_schedule_registers_micro_trend_tasks(redis_url: str) -> None:
     module = _reload(redis_url)
     beat = module.celery_app.conf.beat_schedule
@@ -288,3 +327,4 @@ def test_beat_schedule_registers_micro_trend_tasks(redis_url: str) -> None:
         beat["marketplace-suggestions"]["task"]
         == "store_listing.orchestration.tasks.fetch_marketplace_suggestions"
     )
+    assert beat["x-micro-trends"]["task"] == "store_listing.orchestration.tasks.fetch_x_trends"
