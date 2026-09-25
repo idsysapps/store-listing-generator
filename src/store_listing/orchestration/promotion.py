@@ -26,6 +26,21 @@ PROMOTION_THRESHOLDS: Final[dict[str, dict[str, int]]] = {
         "search_min_tweets": 5,
         "min_cross_seeds": 2,
     },
+    "reddit": {
+        "search_min_upvotes": 500,
+        "subreddit_min_posts": 3,
+        "min_cross_seeds": 2,
+    },
+    "youtube": {
+        "video_min_views": 50_000,
+        "hashtag_min_videos": 5,
+        "min_cross_seeds": 2,
+    },
+    "instagram": {
+        "hashtag_min_virality": 100_000,
+        "hashtag_min_posts": 5,
+        "min_cross_seeds": 2,
+    },
 }
 
 STARTER_SEEDS: Final[list[str]] = [
@@ -89,6 +104,12 @@ def compute_promotion_score(source: str, query_type: str, score: int, delta: int
         return max(score, 0)
     if source == "x" and query_type in ("hashtag", "search"):
         return max(score, 0)
+    if source == "reddit" and query_type in ("search", "subreddit"):
+        return max(score, 0)
+    if source == "youtube" and query_type in ("video", "hashtag"):
+        return max(score, 0)
+    if source == "instagram" and query_type == "hashtag":
+        return max(score, 0)
     return 0
 
 
@@ -145,6 +166,31 @@ def _rule_met(candidate: SeedCandidate, cross_seed_count: int) -> bool:
         else:
             return False
         return virality_met or cross_seed_count >= rules.get("min_cross_seeds", 0)
+    if candidate.source == "reddit":
+        if candidate.query_type == "search":
+            return candidate.score >= rules.get(
+                "search_min_upvotes", 0
+            ) or cross_seed_count >= rules.get("min_cross_seeds", 0)
+        if candidate.query_type == "subreddit":
+            return candidate.delta >= rules.get("subreddit_min_posts", 0)
+        return False
+    if candidate.source == "youtube":
+        if candidate.query_type == "video":
+            return candidate.score >= rules.get(
+                "video_min_views", 0
+            ) or cross_seed_count >= rules.get("min_cross_seeds", 0)
+        if candidate.query_type == "hashtag":
+            return candidate.delta >= rules.get(
+                "hashtag_min_videos", 0
+            ) or cross_seed_count >= rules.get("min_cross_seeds", 0)
+        return False
+    if candidate.source == "instagram":
+        if candidate.query_type == "hashtag":
+            virality_met = candidate.score >= rules.get(
+                "hashtag_min_virality", 0
+            ) and candidate.delta >= rules.get("hashtag_min_posts", 0)
+            return virality_met or cross_seed_count >= rules.get("min_cross_seeds", 0)
+        return False
     return False
 
 

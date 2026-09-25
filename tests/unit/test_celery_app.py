@@ -319,6 +319,7 @@ def test_beat_schedule_registers_micro_trend_tasks_without_tiktok_by_default(
     beat = module.celery_app.conf.beat_schedule
 
     assert "tiktok-micro-trends" not in beat
+    assert "instagram-micro-trends" not in beat
     assert (
         beat["pinterest-micro-trends"]["task"]
         == "store_listing.orchestration.tasks.fetch_pinterest_trends"
@@ -328,6 +329,14 @@ def test_beat_schedule_registers_micro_trend_tasks_without_tiktok_by_default(
         == "store_listing.orchestration.tasks.fetch_marketplace_suggestions"
     )
     assert beat["x-micro-trends"]["task"] == "store_listing.orchestration.tasks.fetch_x_trends"
+    assert (
+        beat["reddit-micro-trends"]["task"]
+        == "store_listing.orchestration.tasks.fetch_reddit_trends"
+    )
+    assert (
+        beat["youtube-micro-trends"]["task"]
+        == "store_listing.orchestration.tasks.fetch_youtube_trends"
+    )
 
 
 def test_beat_schedule_tiktok_registered_when_enabled(redis_url: str) -> None:
@@ -354,6 +363,95 @@ def test_beat_schedule_tiktok_omitted_when_flag_false(redis_url: str) -> None:
         importlib.reload(module)
 
     assert "tiktok-micro-trends" not in module.celery_app.conf.beat_schedule
+
+
+def test_beat_schedule_pinterest_runs_twice_weekly(redis_url: str) -> None:
+    """Pinterest reduced to 2x/week (Mon+Thu) to cap Apify spend."""
+    module = _reload(redis_url)
+    schedule = module.celery_app.conf.beat_schedule["pinterest-micro-trends"]["schedule"]
+    assert schedule.day_of_week == {0, 3}
+
+
+def test_beat_schedule_x_runs_twice_weekly(redis_url: str) -> None:
+    """X reduced to 2x/week (Tue+Fri) to cap Apify spend."""
+    module = _reload(redis_url)
+    schedule = module.celery_app.conf.beat_schedule["x-micro-trends"]["schedule"]
+    assert schedule.day_of_week == {1, 4}
+
+
+def test_beat_schedule_reddit_runs_daily(redis_url: str) -> None:
+    module = _reload(redis_url)
+    schedule = module.celery_app.conf.beat_schedule["reddit-micro-trends"]["schedule"]
+    assert schedule.minute == {30}
+    assert schedule.hour == {6}
+
+
+def test_beat_schedule_youtube_runs_daily(redis_url: str) -> None:
+    module = _reload(redis_url)
+    schedule = module.celery_app.conf.beat_schedule["youtube-micro-trends"]["schedule"]
+    assert schedule.minute == {35}
+    assert schedule.hour == {6}
+
+
+def test_beat_schedule_instagram_registered_when_enabled(redis_url: str) -> None:
+    with patch.dict(os.environ, {"REDIS_URL": redis_url, "INSTAGRAM_ENABLED": "true"}):
+        module = importlib.import_module("store_listing.orchestration.tasks")
+        importlib.reload(module)
+
+    beat = module.celery_app.conf.beat_schedule
+    assert (
+        beat["instagram-micro-trends"]["task"]
+        == "store_listing.orchestration.tasks.fetch_instagram_trends"
+    )
+    assert beat["instagram-micro-trends"]["schedule"].day_of_week == {5}
+
+
+def test_beat_schedule_instagram_omitted_when_flag_false(redis_url: str) -> None:
+    with patch.dict(os.environ, {"REDIS_URL": redis_url, "INSTAGRAM_ENABLED": "false"}):
+        module = importlib.import_module("store_listing.orchestration.tasks")
+        importlib.reload(module)
+
+    assert "instagram-micro-trends" not in module.celery_app.conf.beat_schedule
+
+
+def test_fetch_reddit_trends_harvests_active_seeds(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="mom humor", promotion_score=0),
+    ]
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([object()], [])
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "RedditClient", return_value=client_mock),
+    ):
+        result = module.fetch_reddit_trends.run()
+
+    request = client_mock.harvest_and_store.call_args.args[0]
+    assert request.seed_keywords == ["mom humor"]
+    assert result["status"] == "success"
+
+
+def test_fetch_youtube_trends_harvests_active_seeds(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="gym fitness", promotion_score=0),
+    ]
+    client_mock = MagicMock()
+    client_mock.harvest_and_store.return_value = ([object()], [])
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "YouTubeClient", return_value=client_mock),
+    ):
+        result = module.fetch_youtube_trends.run()
+
+    request = client_mock.harvest_and_store.call_args.args[0]
+    assert request.seed_keywords == ["gym fitness"]
+    assert result["status"] == "success"
 
 
 class FakeHealthTracker:
