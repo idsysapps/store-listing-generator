@@ -9,7 +9,6 @@ from store_listing.ingest.trends.reddit import (
 )
 from store_listing.ingest.trends.schemas import TrendHarvestRequest
 
-
 POST_A = RedditPost(
     post_id="abc123",
     title="This oddly specific shirt is perfect",

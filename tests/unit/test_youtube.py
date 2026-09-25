@@ -8,7 +8,6 @@ from store_listing.ingest.trends.youtube import (
     YouTubeShort,
 )
 
-
 SHORT_A = YouTubeShort(
     video_id="abc123",
     title="Funniest gym fails compilation",
