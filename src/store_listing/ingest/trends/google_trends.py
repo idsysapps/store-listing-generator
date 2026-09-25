@@ -281,6 +281,42 @@ class DatabaseClient:
             )
             return cur.rowcount
 
+    def reject_candidate(self, candidate_id: int) -> int:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE seed_candidates
+                SET status = 'rejected', archived_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (candidate_id,),
+            )
+            return cur.rowcount
+
+    def insert_curation_log(
+        self,
+        candidate_id: int | None,
+        action: str,
+        reasoning: str | None,
+        event_context: str | None,
+        llm_model: str | None,
+    ) -> int:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO seed_curation_log
+                    (candidate_id, action, reasoning, event_context, llm_model)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (candidate_id, action, reasoning, event_context, llm_model),
+            )
+            result = cur.fetchone()
+            if result is None:
+                msg = "Failed to insert curation log"
+                raise RuntimeError(msg)
+            return result[0]
+
 
 class GoogleTrendsClient:
     DEFAULT_SEEDS: ClassVar[list[str]] = [

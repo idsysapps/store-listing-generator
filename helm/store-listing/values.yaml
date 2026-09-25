@@ -12,6 +12,9 @@ config:
   githubRepo: ""
   pinterestActorId: ""
   xActorId: ""
+  llmBaseUrl: "https://api.groq.com/openai/v1"
+  llmModel: "llama-3.3-70b-versatile"
+  llmSeedCurationEnabled: "false"
 
 secrets:
   databaseUser: store_listing
@@ -24,6 +27,7 @@ secrets:
   etsyApiKey: ""
   redditClientId: ""
   redditClientSecret: ""
+  llmApiKey: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest
