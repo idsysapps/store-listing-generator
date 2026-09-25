@@ -29,7 +29,9 @@ def _amazon_client(payload) -> tuple[AmazonSuggestionClient, list[httpx.Request]
 
 def _etsy_client(payload) -> tuple[EtsySuggestionClient, list[httpx.Request]]:
     transport, captured = _transport(payload)
-    return EtsySuggestionClient(client=httpx.Client(transport=transport)), captured
+    return EtsySuggestionClient(
+        client=httpx.Client(transport=transport), api_key="test-key"
+    ), captured
 
 
 def test_amazon_suggest_parses_suggestions() -> None:
@@ -54,19 +56,20 @@ def test_amazon_suggest_ignores_empty_values() -> None:
 def test_etsy_suggest_parses_values() -> None:
     client, captured = _etsy_client(
         {
+            "count": 2,
             "results": [
-                {"query": "pickleball mug", "search_types": []},
-                {"query": "pickleball mom shirt", "search_types": []},
-            ]
+                {"title": "Pickleball Mug", "listing_id": 1},
+                {"title": "Pickleball Mom Shirt", "listing_id": 2},
+            ],
         }
     )
 
     assert client.suggest("pickleball") == ["pickleball mug", "pickleball mom shirt"]
 
     request = captured[0]
-    assert "suggestions_ajax.php" in str(request.url)
-    assert request.url.params["search_query"] == "pickleball"
-    assert request.headers["x-requested-with"] == "XMLHttpRequest"
+    assert "openapi.etsy.com" in str(request.url)
+    assert request.url.params["keywords"] == "pickleball"
+    assert request.headers["x-api-key"] == "test-key"
 
 
 def test_harvester_writes_amazon_and_etsy_discoveries() -> None:
@@ -76,7 +79,7 @@ def test_harvester_writes_amazon_and_etsy_discoveries() -> None:
 
     class EtsyFake:
         def suggest(self, prefix: str) -> list[str]:
-            return ["pickleball mom shirt"]
+            return ["pickleball mom shirt"]  # Etsy API returns lowercased titles
 
     db = MagicMock()
     db.insert_trend_query.return_value = 1

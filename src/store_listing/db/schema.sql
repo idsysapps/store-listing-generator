@@ -22,8 +22,8 @@ CREATE TABLE trend_queries (
 CREATE TABLE trend_scores (
     id SERIAL PRIMARY KEY,
     query_id INTEGER NOT NULL REFERENCES trend_queries(id) ON DELETE CASCADE,
-    score INTEGER NOT NULL,
-    delta INTEGER DEFAULT 0,
+    score BIGINT NOT NULL,
+    delta BIGINT DEFAULT 0,
     region VARCHAR(255) DEFAULT 'US',
     query_type VARCHAR(10) DEFAULT 'interest',
     source VARCHAR(20) NOT NULL DEFAULT 'google',
@@ -45,9 +45,9 @@ CREATE TABLE seed_candidates (
     source_seed VARCHAR(255) NOT NULL,
     source VARCHAR(20) NOT NULL DEFAULT 'google',
     query_type VARCHAR(10),
-    score INTEGER,
-    delta INTEGER,
-    promotion_score INTEGER NOT NULL DEFAULT 0,
+    score BIGINT,
+    delta BIGINT,
+    promotion_score BIGINT NOT NULL DEFAULT 0,
     status VARCHAR(20) DEFAULT 'pending',
     discovered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     promoted_at TIMESTAMP WITH TIME ZONE,
@@ -63,7 +63,7 @@ CREATE INDEX idx_seed_candidates_promotion_score ON seed_candidates(promotion_sc
 CREATE TABLE active_seeds (
     id SERIAL PRIMARY KEY,
     query VARCHAR(500) NOT NULL UNIQUE,
-    promotion_score INTEGER NOT NULL DEFAULT 0,
+    promotion_score BIGINT NOT NULL DEFAULT 0,
     promoted_from_candidate_id INTEGER REFERENCES seed_candidates(id),
     added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     archived_at TIMESTAMP WITH TIME ZONE

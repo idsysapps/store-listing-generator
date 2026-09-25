@@ -29,9 +29,7 @@ DEFAULT_USER_AGENT: Final[str] = (
 
 AMAZON_SUGGEST_URL: Final[str] = "https://completion.amazon.com/api/2017/suggestions"
 
-DEFAULT_ETSY_SUGGEST_URL: Final[str] = "https://www.etsy.com/suggestions_ajax.php"
-
-ETSY_SUGGEST_URL: Final[str] = os.environ.get("ETSY_SUGGEST_URL") or DEFAULT_ETSY_SUGGEST_URL
+ETSY_API_URL: Final[str] = "https://openapi.etsy.com/v3/application/listings/active"
 
 
 class SuggestionSource(Protocol):
@@ -68,60 +66,47 @@ class AmazonSuggestionClient:
 
 
 class EtsySuggestionClient:
-    """Etsy site search-autocomplete endpoint (URL overridable via ETSY_SUGGEST_URL)."""
+    """Etsy Open API v3: searches active listings by keyword."""
 
     def __init__(
         self,
         client: httpx.Client | None = None,
-        endpoint: str | None = None,
+        api_key: str | None = None,
     ) -> None:
-        self._http = client or httpx.Client(headers={"User-Agent": DEFAULT_USER_AGENT}, timeout=10)
-        self._endpoint = endpoint or ETSY_SUGGEST_URL or DEFAULT_ETSY_SUGGEST_URL
+        self._api_key = api_key or os.environ.get("ETSY_API_KEY") or ""
+        self._http = client or httpx.Client(timeout=10)
 
     def suggest(self, prefix: str) -> list[str]:
+        if not self._api_key:
+            logger.warning("ETSY_API_KEY not set — skipping Etsy suggestions")
+            return []
         response = self._http.get(
-            self._endpoint,
-            params={"search_query": prefix, "search_type": "all"},
-            headers={
-                "X-Requested-With": "XMLHttpRequest",
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": f"https://www.etsy.com/search?q={prefix}",
-            },
+            ETSY_API_URL,
+            params={"keywords": prefix, "limit": 25, "sort_on": "score"},
+            headers={"x-api-key": self._api_key},
         )
         response.raise_for_status()
-        return _extract_etsy_suggestions(response.json())
+        return _extract_etsy_titles(response.json())
 
 
-def _extract_etsy_suggestions(payload: Any) -> list[str]:
-    """Defensive extraction across the Etsy autosuggest response shapes."""
-    if isinstance(payload, dict):
-        body = payload.get("result") or payload.get("results") or payload
-        entries = body if isinstance(body, list) else []
-    elif isinstance(payload, list):
-        entries = []
-        for entry in payload:
-            if isinstance(entry, list):
-                entries.extend(entry)
-            elif isinstance(entry, dict):
-                entries.append(entry)
-    else:
-        entries = []
-
-    suggestions: list[str] = []
-    for entry in entries:
+def _extract_etsy_titles(payload: Any) -> list[str]:
+    """Extract unique lowercased titles from the Etsy Open API v3 response."""
+    results = payload.get("results") if isinstance(payload, dict) else []
+    if not isinstance(results, list):
+        return []
+    seen: set[str] = set()
+    titles: list[str] = []
+    for entry in results:
         if not isinstance(entry, dict):
             continue
-        value = (
-            entry.get("query")
-            or entry.get("value")
-            or entry.get("display")
-            or entry.get("text")
-            or entry.get("name")
-        )
-        if value:
-            suggestions.append(str(value).strip())
-    return suggestions
+        title = entry.get("title")
+        if not title:
+            continue
+        normalized = str(title).strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            titles.append(normalized)
+    return titles
 
 
 class AutocompleteHarvester:

@@ -40,8 +40,8 @@ data:
     CREATE TABLE IF NOT EXISTS trend_scores (
         id SERIAL PRIMARY KEY,
         query_id INTEGER NOT NULL REFERENCES trend_queries(id) ON DELETE CASCADE,
-        score INTEGER NOT NULL,
-        delta INTEGER DEFAULT 0,
+        score BIGINT NOT NULL,
+        delta BIGINT DEFAULT 0,
         region VARCHAR(255) DEFAULT 'US',
         query_type VARCHAR(10) DEFAULT 'interest',
         source VARCHAR(20) NOT NULL DEFAULT 'google',
@@ -63,9 +63,9 @@ data:
         source_seed VARCHAR(255) NOT NULL,
         source VARCHAR(20) NOT NULL DEFAULT 'google',
         query_type VARCHAR(10),
-        score INTEGER,
-        delta INTEGER,
-        promotion_score INTEGER NOT NULL DEFAULT 0,
+        score BIGINT,
+        delta BIGINT,
+        promotion_score BIGINT NOT NULL DEFAULT 0,
         status VARCHAR(20) DEFAULT 'pending',
         discovered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         promoted_at TIMESTAMP WITH TIME ZONE,
@@ -81,7 +81,7 @@ data:
     CREATE TABLE IF NOT EXISTS active_seeds (
         id SERIAL PRIMARY KEY,
         query VARCHAR(500) NOT NULL UNIQUE,
-        promotion_score INTEGER NOT NULL DEFAULT 0,
+        promotion_score BIGINT NOT NULL DEFAULT 0,
         promoted_from_candidate_id INTEGER REFERENCES seed_candidates(id),
         added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         archived_at TIMESTAMP WITH TIME ZONE
@@ -148,9 +148,9 @@ data:
         source_seed VARCHAR(255) NOT NULL,
         source VARCHAR(20) NOT NULL DEFAULT 'google',
         query_type VARCHAR(10),
-        score INTEGER,
-        delta INTEGER,
-        promotion_score INTEGER NOT NULL DEFAULT 0,
+        score BIGINT,
+        delta BIGINT,
+        promotion_score BIGINT NOT NULL DEFAULT 0,
         status VARCHAR(20) DEFAULT 'pending',
         discovered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         promoted_at TIMESTAMP WITH TIME ZONE,
@@ -165,7 +165,7 @@ data:
     CREATE TABLE IF NOT EXISTS active_seeds (
         id SERIAL PRIMARY KEY,
         query VARCHAR(500) NOT NULL UNIQUE,
-        promotion_score INTEGER NOT NULL DEFAULT 0,
+        promotion_score BIGINT NOT NULL DEFAULT 0,
         promoted_from_candidate_id INTEGER REFERENCES seed_candidates(id),
         added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         archived_at TIMESTAMP WITH TIME ZONE
@@ -189,6 +189,14 @@ data:
         ('novelty socks', 0),
         ('personalized gifts', 0)
     ON CONFLICT (query) DO NOTHING;
+
+    -- Widen score/delta/promotion_score to BIGINT for YouTube view counts
+    ALTER TABLE trend_scores ALTER COLUMN score TYPE BIGINT;
+    ALTER TABLE trend_scores ALTER COLUMN delta TYPE BIGINT;
+    ALTER TABLE seed_candidates ALTER COLUMN score TYPE BIGINT;
+    ALTER TABLE seed_candidates ALTER COLUMN delta TYPE BIGINT;
+    ALTER TABLE seed_candidates ALTER COLUMN promotion_score TYPE BIGINT;
+    ALTER TABLE active_seeds ALTER COLUMN promotion_score TYPE BIGINT;
 
     -- Table: source_health (health tracker for auto-created GitHub issues)
     CREATE TABLE IF NOT EXISTS source_health (

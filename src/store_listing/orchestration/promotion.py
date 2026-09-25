@@ -82,34 +82,31 @@ class ActiveSeed:
 
 
 def compute_promotion_score(source: str, query_type: str, score: int, delta: int) -> int:
-    """Per-source promotion score at candidate creation.
+    """Normalize each source's native score range into 0–10000.
 
-    - google rising: delta; google top: score
-    - tiktok hashtag/sound: cumulative play traction (score)
-    - pinterest search/board: pin saves / repins (score)
-    - amazon/etsy search: suggestion observation (score)
-    - x hashtag/keyword: cumulative post engagements (score)
-    - amazon bsr_riser: still 0 until the #3 BSR ingester lands
+    Without normalization YouTube view counts (billions) dominate Google
+    interest (0–100) and Amazon presence (1). Each branch maps its range
+    so "very popular in source X" ≈ 10 000 regardless of source.
     """
     if source == "google":
         if query_type == "rising":
-            return max(delta, 0)
+            return min(max(delta, 0), 10000)
         if query_type == "top":
-            return max(score, 0)
+            return max(score, 0) * 100
     if source == "tiktok" and query_type in ("hashtag", "sound"):
-        return max(score, 0)
+        return min(max(score, 0) // 1000, 10000)
     if source == "pinterest" and query_type in ("search", "board"):
-        return max(score, 0)
+        return min(max(score, 0), 10000)
     if source in ("amazon", "etsy") and query_type == "search":
-        return max(score, 0)
+        return max(score, 0) * 500
     if source == "x" and query_type in ("hashtag", "search"):
-        return max(score, 0)
+        return min(max(score, 0) // 100, 10000)
     if source == "reddit" and query_type in ("search", "subreddit"):
-        return max(score, 0)
+        return min(max(score, 0), 10000)
     if source == "youtube" and query_type in ("video", "hashtag"):
-        return max(score, 0)
+        return min(max(score, 0) // 100_000, 10000)
     if source == "instagram" and query_type == "hashtag":
-        return max(score, 0)
+        return min(max(score, 0) // 1000, 10000)
     return 0
 
 
