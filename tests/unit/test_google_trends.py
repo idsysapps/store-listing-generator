@@ -6,7 +6,11 @@ import pytest
 import requests
 from pytrends.exceptions import ResponseError
 
-from store_listing.ingest.trends.google_trends import DatabaseClient, GoogleTrendsClient
+from store_listing.ingest.trends.google_trends import (
+    DatabaseClient,
+    GoogleTrendsClient,
+    is_valid_trends_query,
+)
 from store_listing.ingest.trends.schemas import TrendHarvestRequest, TrendResult
 
 
@@ -293,3 +297,110 @@ class TestPytrendsHardening:
         assert fake.build_payload_calls == 3
         assert fake.cookie_fetches == 2
         mock_warning.assert_called_once()
+
+
+class TestSeedQualityFilter:
+    def test_short_phrase_is_valid(self) -> None:
+        assert is_valid_trends_query("funny t-shirt") is True
+
+    def test_single_word_is_valid(self) -> None:
+        assert is_valid_trends_query("hoodie") is True
+
+    def test_youtube_title_too_long(self) -> None:
+        assert is_valid_trends_query("5 Amazon Products I Can't Believe are Real!") is False
+
+    def test_hashtag_rejected(self) -> None:
+        assert is_valid_trends_query("#shorts trending leggings") is False
+
+    def test_official_video_rejected(self) -> None:
+        assert is_valid_trends_query("Hoodie Allen - No Interruption (Official Video)") is False
+
+    def test_url_rejected(self) -> None:
+        assert is_valid_trends_query("check out https://example.com") is False
+
+    def test_too_many_words_rejected(self) -> None:
+        assert is_valid_trends_query("one two three four five six seven eight") is False
+
+    def test_seven_words_accepted(self) -> None:
+        assert is_valid_trends_query("one two three four five six seven") is True
+
+    def test_exactly_at_length_limit(self) -> None:
+        seed = "a" * 60
+        assert is_valid_trends_query(seed) is True
+
+    def test_over_length_limit(self) -> None:
+        seed = "a" * 61
+        assert is_valid_trends_query(seed) is False
+
+
+class TestCircuitBreaker:
+    @pytest.fixture
+    def mock_db_client(self) -> MagicMock:
+        return MagicMock(spec=DatabaseClient)
+
+    def _rate_limit_error(self) -> ResponseError:
+        class _Resp:
+            status_code = 429
+            text = "too many requests"
+
+        return ResponseError.from_response(_Resp())
+
+    def test_circuit_breaker_trips_after_consecutive_429s(self, mock_db_client: MagicMock) -> None:
+        errors = [self._rate_limit_error() for _ in range(4)]
+        fake = FakeTrendReq(errors=errors)
+        client = GoogleTrendsClient(
+            db_client=mock_db_client,
+            trend_req=fake,
+            consent_max_retries=0,
+            throttle_seconds=0,
+        )
+
+        results, failed = client.harvest_and_store(
+            TrendHarvestRequest(seed_keywords=["a", "b", "c", "d", "e"])
+        )
+
+        assert results == []
+        assert len(failed) == 5
+        assert fake.build_payload_calls == 3
+
+    def test_successful_seed_resets_circuit_breaker(self, mock_db_client: MagicMock) -> None:
+        errors = [self._rate_limit_error(), self._rate_limit_error()]
+        fake = FakeTrendReq(errors=errors)
+        client = GoogleTrendsClient(
+            db_client=mock_db_client,
+            trend_req=fake,
+            consent_max_retries=0,
+            throttle_seconds=0,
+        )
+        mock_db_client.insert_trend_query.return_value = 1
+
+        seeds = ["fail1", "fail2", "ok", "fail3", "fail4", "still-runs"]
+        results, failed = client.harvest_and_store(TrendHarvestRequest(seed_keywords=seeds))
+
+        assert "fail1" in failed
+        assert "fail2" in failed
+        assert fake.build_payload_calls == 6
+        assert "still-runs" not in failed
+
+    def test_noisy_seeds_filtered_before_harvest(self, mock_db_client: MagicMock) -> None:
+        fake = FakeTrendReq()
+        client = GoogleTrendsClient(
+            db_client=mock_db_client,
+            trend_req=fake,
+            consent_max_retries=0,
+            throttle_seconds=0,
+        )
+        mock_db_client.insert_trend_query.return_value = 1
+
+        results, failed = client.harvest_and_store(
+            TrendHarvestRequest(
+                seed_keywords=[
+                    "funny t-shirt",
+                    "5 Amazon Products I Can't Believe are Real!",
+                    "Hoodie Allen - No Interruption (Official Video)",
+                ]
+            )
+        )
+
+        assert fake.build_payload_calls == 1
+        assert len(results) > 0

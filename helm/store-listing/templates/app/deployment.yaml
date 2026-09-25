@@ -94,6 +94,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: YOUTUBE_API_KEY
+            - name: REDDIT_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: REDDIT_CLIENT_ID
+            - name: REDDIT_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: REDDIT_CLIENT_SECRET
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -173,5 +183,15 @@ spec:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: YOUTUBE_API_KEY
+            - name: REDDIT_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: REDDIT_CLIENT_ID
+            - name: REDDIT_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: REDDIT_CLIENT_SECRET
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}

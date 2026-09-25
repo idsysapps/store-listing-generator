@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Protocol, TypeVar, cast, runtime_checkable
@@ -18,6 +19,42 @@ from .schemas import QueryType, TrendHarvestRequest, TrendResult
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+MAX_SEED_LENGTH = 60
+CIRCUIT_BREAKER_THRESHOLD = 3
+THROTTLE_SECONDS = 2.0
+
+_NOISE_RE = re.compile(
+    r"[#@!]"
+    r"|https?://"
+    r"|\.com\b"
+    r"|\(official\s+(video|audio)\)"
+    r"|#shorts\b"
+    r"|\bfull\s+video\b",
+    re.IGNORECASE,
+)
+
+
+def is_valid_trends_query(seed: str) -> bool:
+    if len(seed) > MAX_SEED_LENGTH:
+        return False
+    if _NOISE_RE.search(seed):
+        return False
+    word_count = len(seed.split())
+    if word_count > 7:
+        return False
+    return True
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    if isinstance(exc, ResponseError):
+        status = getattr(exc.response, "status_code", None)
+        if status == 429:
+            return True
+        body = getattr(exc.response, "text", "") or ""
+        if "/sorry/" in body or "too many" in body.lower():
+            return True
+    return False
 
 
 @runtime_checkable
@@ -262,11 +299,13 @@ class GoogleTrendsClient:
         backoff_factor: float = 2.0,
         request_timeout: tuple[int, int] = (5, 30),
         consent_max_retries: int = 2,
+        throttle_seconds: float = THROTTLE_SECONDS,
     ) -> None:
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
         self.request_timeout = request_timeout
         self.consent_max_retries = consent_max_retries
+        self._throttle_seconds = throttle_seconds
         self.pytrends: TrendRequestGateway = trend_req or cast(
             TrendRequestGateway,
             TrendReq(
@@ -477,10 +516,34 @@ class GoogleTrendsClient:
         """Harvest requested seeds; return (stored results, failed seed keywords)."""
         all_results: list[TrendResult] = []
         failed_seeds: list[str] = []
+        consecutive_rate_limits = 0
 
-        for seed in request.seed_keywords:
+        seeds = [s for s in request.seed_keywords if is_valid_trends_query(s)]
+        skipped = set(request.seed_keywords) - set(seeds)
+        if skipped:
+            logger.info(
+                "Filtered %d noisy seeds from Google Trends batch: %s",
+                len(skipped),
+                list(skipped)[:5],
+            )
+
+        for i, seed in enumerate(seeds):
+            if consecutive_rate_limits >= CIRCUIT_BREAKER_THRESHOLD:
+                remaining = seeds[i:]
+                logger.warning(
+                    "Circuit breaker: %d consecutive 429s, skipping %d remaining seeds",
+                    consecutive_rate_limits,
+                    len(remaining),
+                )
+                failed_seeds.extend(remaining)
+                break
+
+            if i > 0:
+                time.sleep(self._throttle_seconds)
+
             try:
                 results = self._harvest_seed(seed, request.timeframe, request.region)
+                consecutive_rate_limits = 0
 
                 for result in results:
                     query_id = self.db_client.insert_trend_query(seed, result.query)
@@ -499,6 +562,10 @@ class GoogleTrendsClient:
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to fetch trends for seed %s: %s", seed, e)
                 failed_seeds.append(seed)
+                if _is_rate_limited(e):
+                    consecutive_rate_limits += 1
+                else:
+                    consecutive_rate_limits = 0
 
         return all_results, failed_seeds
 

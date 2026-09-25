@@ -22,6 +22,8 @@ secrets:
   githubToken: ""
   youtubeApiKey: ""
   etsyApiKey: ""
+  redditClientId: ""
+  redditClientSecret: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest
