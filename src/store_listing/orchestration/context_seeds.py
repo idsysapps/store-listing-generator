@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Final, Protocol
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,7 @@ def inject_seasonal_seeds(
     db_client: CurationDBClient,
     today: date | None = None,
 ) -> dict[str, Any]:
-    today = today or date.today()
+    today = today or datetime.now(tz=timezone.utc).date()
     pairs = get_seeds_to_inject(today)
     if not pairs:
         return {"status": "success", "injected": 0, "events": []}

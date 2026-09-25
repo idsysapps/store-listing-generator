@@ -375,7 +375,7 @@ class TestCircuitBreaker:
         mock_db_client.insert_trend_query.return_value = 1
 
         seeds = ["fail1", "fail2", "ok", "fail3", "fail4", "still-runs"]
-        results, failed = client.harvest_and_store(TrendHarvestRequest(seed_keywords=seeds))
+        _results, failed = client.harvest_and_store(TrendHarvestRequest(seed_keywords=seeds))
 
         assert "fail1" in failed
         assert "fail2" in failed
@@ -392,7 +392,7 @@ class TestCircuitBreaker:
         )
         mock_db_client.insert_trend_query.return_value = 1
 
-        results, failed = client.harvest_and_store(
+        results, _failed = client.harvest_and_store(
             TrendHarvestRequest(
                 seed_keywords=[
                     "funny t-shirt",

@@ -41,9 +41,7 @@ def is_valid_trends_query(seed: str) -> bool:
     if _NOISE_RE.search(seed):
         return False
     word_count = len(seed.split())
-    if word_count > 7:
-        return False
-    return True
+    return not word_count > 7
 
 
 def _is_rate_limited(exc: Exception) -> bool:
