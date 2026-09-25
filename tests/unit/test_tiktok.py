@@ -201,6 +201,8 @@ def test_apify_gateway_maps_actor_output() -> None:
     apify_client_cls.assert_called_once_with("tok123")
     call_kwargs = apify_client_cls.return_value.actor.return_value.call.call_args.kwargs
     assert call_kwargs["run_input"]["hashtags"] == ["pickleball"]
+    actor_id = apify_client_cls.return_value.actor.call_args.args[0]
+    assert actor_id == "clockworks~tiktok-hashtag-scraper"
 
 
 def test_web_gateway_parses_rehydrated_json() -> None:

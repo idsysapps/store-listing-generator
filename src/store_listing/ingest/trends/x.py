@@ -17,7 +17,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol, runtime_checkable
 
 import httpx
@@ -29,7 +29,7 @@ from .schemas import TrendHarvestRequest, TrendResult
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_X_ACTOR: Final[str] = "bernardo/x-scraper"
+DEFAULT_X_ACTOR: Final[str] = "xquik/x-tweet-scraper"
 
 _ENGAGEMENT_KEYS: Final[tuple[str, ...]] = (
     "likeCount",
@@ -163,7 +163,7 @@ def _to_int(value: Any) -> int:
 def _hashtags(item: dict[str, Any]) -> tuple[str, ...]:
     raw = item.get("hashtags") or []
     if not isinstance(raw, list):
-        return ()
+        raw = []
     names: list[str] = []
     for entry in raw:
         if isinstance(entry, dict):
@@ -174,7 +174,10 @@ def _hashtags(item: dict[str, Any]) -> tuple[str, ...]:
             name = None
         if name:
             names.append(str(name).lstrip("#").lower())
-    return tuple(dict.fromkeys(names))
+    if names:
+        return tuple(dict.fromkeys(names))
+    text = item.get("text") or item.get("fullText") or ""
+    return tuple(dict.fromkeys(re.findall(r"#([a-z0-9_]+)", str(text).lower())))
 
 
 def _x_tweet(item: dict[str, Any]) -> XTweet:
@@ -233,9 +236,24 @@ class ApifyXGateway:
 
         return ApifyClient
 
+    def _api_actor_ref(self) -> str:
+        return self.actor_id.replace("/", "~")
+
     def scrape_query(self, query: str) -> list[XTweet]:
-        run = self._apify().actor(self.actor_id).call(run_input={"query": query})
-        raw_items = self._apify().dataset(run["defaultDatasetId"]).list_items().items
+        run = (
+            self._apify()
+            .actor(self._api_actor_ref())
+            .call(
+                run_input={"searchTerms": [query], "maxItems": 30},
+                run_timeout=timedelta(minutes=4),
+            )
+        )
+        if run is None:
+            return []
+        dataset_id = (
+            run.get("defaultDatasetId") if isinstance(run, dict) else run.default_dataset_id
+        )
+        raw_items = self._apify().dataset(dataset_id).list_items().items
         return [_x_tweet(item) for item in raw_items]
 
 

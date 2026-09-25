@@ -16,7 +16,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol, runtime_checkable
 
 import httpx
@@ -89,15 +89,19 @@ def _tiktok_item(item: dict[str, Any]) -> TikTokItem:
         return str(entry)
 
     hashtags = list(dict.fromkeys(_name(h) for h in hashtags_raw if _name(h)))
+    play_count = item.get("playCount") or stats.get("playCount") or 0
+    digg_count = item.get("diggCount") or stats.get("diggCount") or 0
+    share_count = item.get("shareCount") or stats.get("shareCount") or 0
+    comment_count = item.get("commentCount") or stats.get("commentCount") or 0
     return TikTokItem(
         video_id=str(item.get("id") or ""),
         text=str(item.get("text") or item.get("desc") or ""),
         music=str(music.get("musicName") or ""),
         music_author=str(music.get("musicAuthor") or ""),
-        play_count=int(stats.get("playCount") or 0),
-        digg_count=int(stats.get("diggCount") or 0),
-        share_count=int(stats.get("shareCount") or 0),
-        comment_count=int(stats.get("commentCount") or 0),
+        play_count=int(play_count),
+        digg_count=int(digg_count),
+        share_count=int(share_count),
+        comment_count=int(comment_count),
         hashtags=tuple(hashtags),
     )
 
@@ -128,9 +132,24 @@ class ApifyTikTokGateway:
 
         return ApifyClient
 
+    def _api_actor_ref(self) -> str:
+        return self.actor_id.replace("/", "~")
+
     def scrape_hashtag(self, hashtag: str) -> list[TikTokItem]:
-        run = self._apify().actor(self.actor_id).call(run_input={"hashtags": [hashtag.lstrip("#")]})
-        raw_items = self._apify().dataset(run["defaultDatasetId"]).list_items().items
+        run = (
+            self._apify()
+            .actor(self._api_actor_ref())
+            .call(
+                run_input={"hashtags": [hashtag.lstrip("#")]},
+                run_timeout=timedelta(minutes=4),
+            )
+        )
+        if run is None:
+            return []
+        dataset_id = (
+            run.get("defaultDatasetId") if isinstance(run, dict) else run.default_dataset_id
+        )
+        raw_items = self._apify().dataset(dataset_id).list_items().items
         return [_tiktok_item(item) for item in raw_items]
 
 

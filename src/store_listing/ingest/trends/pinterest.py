@@ -15,7 +15,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol, runtime_checkable
 
 import httpx
@@ -27,7 +27,7 @@ from .schemas import TrendHarvestRequest, TrendResult
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PINTEREST_ACTOR: Final[str] = "epctex/pinterest-scraper"
+DEFAULT_PINTEREST_ACTOR: Final[str] = "automation-lab/pinterest-scraper"
 
 _SCRIPT_RE = re.compile(r'<script[^>]*id="__PWS_DATA__"[^>]*>(.*?)</script>', re.DOTALL)
 
@@ -70,13 +70,13 @@ def _pin(item: dict[str, Any]) -> Pin:
     if isinstance(board, dict):
         board_name = str(board.get("name") or "")
     else:
-        board_name = str(board or item.get("board_name") or "")
+        board_name = str(board or item.get("board_name") or item.get("boardName") or "")
     return Pin(
         id=str(item.get("id") or ""),
         title=str(item.get("title") or ""),
         description=str(item.get("description") or ""),
         board=board_name,
-        repins=int(item.get("repin_count") or item.get("repins_count") or 0),
+        repins=int(item.get("repin_count") or item.get("repins_count") or item.get("saves") or 0),
         favorites=int(item.get("favorite_count") or 0),
         comments=int(item.get("comment_count") or 0),
     )
@@ -108,9 +108,24 @@ class ApifyPinterestGateway:
 
         return ApifyClient
 
+    def _api_actor_ref(self) -> str:
+        return self.actor_id.replace("/", "~")
+
     def scrape_search(self, query: str) -> list[Pin]:
-        run = self._apify().actor(self.actor_id).call(run_input={"query": query})
-        raw_items = self._apify().dataset(run["defaultDatasetId"]).list_items().items
+        run = (
+            self._apify()
+            .actor(self._api_actor_ref())
+            .call(
+                run_input={"query": query, "maxPins": 25},
+                run_timeout=timedelta(minutes=4),
+            )
+        )
+        if run is None:
+            return []
+        dataset_id = (
+            run.get("defaultDatasetId") if isinstance(run, dict) else run.default_dataset_id
+        )
+        raw_items = self._apify().dataset(dataset_id).list_items().items
         return [_pin(item) for item in raw_items]
 
 

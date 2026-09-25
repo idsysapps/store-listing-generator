@@ -34,6 +34,23 @@ def test_x_item_mapping_reads_hashtags_and_engagements() -> None:
     assert tweet.handle == "pickleballmom"
 
 
+def test_hashtags_derived_from_text_when_field_missing() -> None:
+    from store_listing.ingest.trends.x import _x_tweet
+
+    raw = {
+        "text": "pickleball gifts today #PickleballGift #MomHumor!",
+        "likeCount": 5,
+        "retweetCount": 1,
+        "replyCount": 0,
+        "viewCount": 10,
+    }
+
+    tweet = _x_tweet(raw)
+    assert tweet.hashtags == ("pickleballgift", "momhumor")
+    assert tweet.like_count == 5
+    assert tweet.view_count == 10
+
+
 def test_apify_gateway_maps_actor_output() -> None:
     apify_client_cls = MagicMock()
     apify_client_cls.return_value.actor.return_value.call.return_value = {
@@ -58,7 +75,10 @@ def test_apify_gateway_maps_actor_output() -> None:
     assert tweets[0].like_count == 100000
     apify_client_cls.assert_called_once_with("tok123")
     call_kwargs = apify_client_cls.return_value.actor.return_value.call.call_args.kwargs
-    assert call_kwargs["run_input"]["query"] == "mom humor"
+    assert call_kwargs["run_input"]["searchTerms"] == ["mom humor"]
+    assert call_kwargs["run_input"]["maxItems"] == 30
+    actor_id = apify_client_cls.return_value.actor.call_args.args[0]
+    assert actor_id == "xquik~x-tweet-scraper"
 
 
 SAMPLE_HTML = """<!doctype html><html><head><script type="application/json">{
