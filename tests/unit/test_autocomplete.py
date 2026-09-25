@@ -43,6 +43,7 @@ def test_amazon_suggest_parses_suggestions() -> None:
     assert "completion.amazon.com" in str(request.url)
     assert request.url.params["prefix"] == "mom sho"
     assert request.url.params["alias"] == "aps"
+    assert request.url.params["mid"] == "ATVPDKIKX0DER"
 
 
 def test_amazon_suggest_ignores_empty_values() -> None:
@@ -52,14 +53,20 @@ def test_amazon_suggest_ignores_empty_values() -> None:
 
 def test_etsy_suggest_parses_values() -> None:
     client, captured = _etsy_client(
-        [{"value": "pickleball mug"}, {"value": "pickleball mom shirt"}]
+        {
+            "results": [
+                {"query": "pickleball mug", "search_types": []},
+                {"query": "pickleball mom shirt", "search_types": []},
+            ]
+        }
     )
 
     assert client.suggest("pickleball") == ["pickleball mug", "pickleball mom shirt"]
 
     request = captured[0]
-    assert "etsy.com" in str(request.url)
+    assert "suggestions_ajax.php" in str(request.url)
     assert request.url.params["search_query"] == "pickleball"
+    assert request.headers["x-requested-with"] == "XMLHttpRequest"
 
 
 def test_harvester_writes_amazon_and_etsy_discoveries() -> None:
