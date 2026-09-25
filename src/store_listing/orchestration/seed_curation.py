@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any, Protocol
 
 from store_listing.orchestration.context_seeds import get_upcoming_events
@@ -176,7 +176,7 @@ def curate_seeds(
     model: str,
     today: date | None = None,
 ) -> dict[str, Any]:
-    today = today or datetime.now(tz=timezone.utc).date()
+    today = today or datetime.now(tz=UTC).date()
 
     candidates = db_client.list_pending_candidates()
     if not candidates:
