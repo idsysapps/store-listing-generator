@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, Protocol
@@ -37,7 +38,7 @@ SYSTEM_PROMPT = (
     '"reasoning": {"candidate_id": "explanation"}}'
 )
 
-MAX_CANDIDATES = 50
+MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "10"))
 
 
 @dataclass(frozen=True)

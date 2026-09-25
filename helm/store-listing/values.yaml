@@ -15,6 +15,7 @@ config:
   llmBaseUrl: "https://api.groq.com/openai/v1"
   llmModel: "llama-3.3-70b-versatile"
   llmSeedCurationEnabled: "false"
+  llmMaxCandidates: "10"
 
 secrets:
   databaseUser: store_listing
