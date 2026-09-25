@@ -21,6 +21,7 @@ secrets:
   jwtIssuer: https://costbook.example.com
   apifyApiToken: ""
   githubToken: ""
+  youtubeApiKey: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest
