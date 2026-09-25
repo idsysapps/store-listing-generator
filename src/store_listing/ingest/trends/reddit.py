@@ -27,7 +27,7 @@ from .schemas import TrendHarvestRequest, TrendResult
 logger = logging.getLogger(__name__)
 
 _DEFAULT_HEADERS: Final[dict[str, str]] = {
-    "User-Agent": "store-listing-bot/1.0 (trend harvester; +nene-store-generation)"
+    "User-Agent": "script:store-listing-bot:v1.0 (by /u/nene-store-generation)"
 }
 
 SEARCH_URL: Final[str] = "https://www.reddit.com/search.json"

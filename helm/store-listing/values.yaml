@@ -11,7 +11,6 @@ config:
   healthEmptyThreshold: 3
   githubRepo: ""
   pinterestActorId: ""
-  etsySuggestUrl: ""
   xActorId: ""
 
 secrets:
@@ -22,6 +21,7 @@ secrets:
   apifyApiToken: ""
   githubToken: ""
   youtubeApiKey: ""
+  etsyApiKey: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest
@@ -55,10 +55,10 @@ app:
   resources:
     limits:
       cpu: 250m
-      memory: 1Gi
+      memory: 2Gi
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 512Mi
 
 trendService:
   image: quay.io/idsysapps/trend-service:latest

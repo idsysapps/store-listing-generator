@@ -45,8 +45,8 @@ def test_postgres_pvc_has_keep_resource_policy() -> None:
     )
 
 
-def test_app_memory_limit_is_one_gi() -> None:
-    """GREEN: the app container gets a 1Gi memory ceiling."""
+def test_app_memory_limit_is_two_gi() -> None:
+    """GREEN: the app container gets a 2Gi memory ceiling."""
     values = VALUES_YAML.read_text()
     app_block = _top_level_block(values, "app")
     limits_block = _top_level_block(app_block, "    limits")
@@ -55,6 +55,6 @@ def test_app_memory_limit_is_one_gi() -> None:
     limit = m.group("mem").strip()
     qty = re.fullmatch(r"(\d+)([MG])i", limit)
     assert qty, f"memory limit must be an Mi/Gi quantity, got: {limit!r}"
-    assert (qty.group(1), qty.group(2)) == ("1", "G"), (
-        f"app memory limit must be 1Gi, got: {limit!r}"
+    assert (qty.group(1), qty.group(2)) == ("2", "G"), (
+        f"app memory limit must be 2Gi, got: {limit!r}"
     )

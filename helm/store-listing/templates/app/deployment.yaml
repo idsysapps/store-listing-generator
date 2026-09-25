@@ -67,8 +67,11 @@ spec:
               value: {{ .Values.config.tiktokActorId | default "" | quote }}
             - name: APIFY_ACTOR_PINTEREST
               value: {{ .Values.config.pinterestActorId | default "" | quote }}
-            - name: ETSY_SUGGEST_URL
-              value: {{ .Values.config.etsySuggestUrl | default "" | quote }}
+            - name: ETSY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: ETSY_API_KEY
             - name: APIFY_ACTOR_X
               value: {{ .Values.config.xActorId | default "" | quote }}
             - name: TIKTOK_RESULTS_PER_PAGE
@@ -143,8 +146,11 @@ spec:
               value: {{ .Values.config.tiktokActorId | default "" | quote }}
             - name: APIFY_ACTOR_PINTEREST
               value: {{ .Values.config.pinterestActorId | default "" | quote }}
-            - name: ETSY_SUGGEST_URL
-              value: {{ .Values.config.etsySuggestUrl | default "" | quote }}
+            - name: ETSY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: ETSY_API_KEY
             - name: APIFY_ACTOR_X
               value: {{ .Values.config.xActorId | default "" | quote }}
             - name: TIKTOK_RESULTS_PER_PAGE
