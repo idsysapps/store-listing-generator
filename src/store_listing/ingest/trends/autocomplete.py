@@ -29,7 +29,7 @@ DEFAULT_USER_AGENT: Final[str] = (
 
 AMAZON_SUGGEST_URL: Final[str] = "https://completion.amazon.com/api/2017/suggestions"
 
-DEFAULT_ETSY_SUGGEST_URL: Final[str] = "https://www.etsy.com/autosuggest"
+DEFAULT_ETSY_SUGGEST_URL: Final[str] = "https://www.etsy.com/suggestions_ajax.php"
 
 ETSY_SUGGEST_URL: Final[str] = os.environ.get("ETSY_SUGGEST_URL") or DEFAULT_ETSY_SUGGEST_URL
 
@@ -48,6 +48,7 @@ class AmazonSuggestionClient:
         response = self._http.get(
             AMAZON_SUGGEST_URL,
             params={
+                "mid": "ATVPDKIKX0DER",
                 "limit": 11,
                 "prefix": prefix,
                 "suggestion-type": "WIDGET",
@@ -78,7 +79,16 @@ class EtsySuggestionClient:
         self._endpoint = endpoint or ETSY_SUGGEST_URL or DEFAULT_ETSY_SUGGEST_URL
 
     def suggest(self, prefix: str) -> list[str]:
-        response = self._http.get(self._endpoint, params={"search_query": prefix})
+        response = self._http.get(
+            self._endpoint,
+            params={"search_query": prefix, "search_type": "all"},
+            headers={
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": f"https://www.etsy.com/search?q={prefix}",
+            },
+        )
         response.raise_for_status()
         return _extract_etsy_suggestions(response.json())
 
@@ -102,7 +112,13 @@ def _extract_etsy_suggestions(payload: Any) -> list[str]:
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        value = entry.get("value") or entry.get("display") or entry.get("text") or entry.get("name")
+        value = (
+            entry.get("query")
+            or entry.get("value")
+            or entry.get("display")
+            or entry.get("text")
+            or entry.get("name")
+        )
         if value:
             suggestions.append(str(value).strip())
     return suggestions
