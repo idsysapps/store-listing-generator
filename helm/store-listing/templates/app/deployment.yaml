@@ -69,6 +69,8 @@ spec:
               value: {{ .Values.config.pinterestActorId | default "" | quote }}
             - name: ETSY_SUGGEST_URL
               value: {{ .Values.config.etsySuggestUrl | default "" | quote }}
+            - name: APIFY_ACTOR_X
+              value: {{ .Values.config.xActorId | default "" | quote }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -123,5 +125,7 @@ spec:
               value: {{ .Values.config.pinterestActorId | default "" | quote }}
             - name: ETSY_SUGGEST_URL
               value: {{ .Values.config.etsySuggestUrl | default "" | quote }}
+            - name: APIFY_ACTOR_X
+              value: {{ .Values.config.xActorId | default "" | quote }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}

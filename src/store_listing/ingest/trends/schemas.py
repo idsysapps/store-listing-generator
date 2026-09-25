@@ -14,7 +14,7 @@ QueryType = Literal[
     "bsr_riser",
 ]
 
-Source = Literal["google", "tiktok", "pinterest", "amazon", "etsy"]
+Source = Literal["google", "tiktok", "pinterest", "amazon", "etsy", "x"]
 
 
 class TrendQuery(BaseModel):

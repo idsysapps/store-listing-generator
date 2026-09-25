@@ -7,6 +7,7 @@ config:
   tiktokActorId: ""
   pinterestActorId: ""
   etsySuggestUrl: ""
+  xActorId: ""
 
 secrets:
   databaseUser: store_listing

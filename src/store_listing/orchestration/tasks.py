@@ -8,6 +8,7 @@ from store_listing.ingest.trends import (
     PinterestClient,
     TikTokClient,
     TrendHarvestRequest,
+    XClient,
 )
 from store_listing.orchestration import celery_redis_url
 from store_listing.orchestration.promotion import (
@@ -51,6 +52,10 @@ celery_app.conf.beat_schedule = {
     "marketplace-suggestions": {
         "task": "store_listing.orchestration.tasks.fetch_marketplace_suggestions",
         "schedule": crontab(hour=6, minute=20),
+    },
+    "x-micro-trends": {
+        "task": "store_listing.orchestration.tasks.fetch_x_trends",
+        "schedule": crontab(hour=6, minute=25),
     },
 }
 
@@ -133,6 +138,15 @@ def fetch_marketplace_suggestions() -> dict:
     request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
     results, failed_sources = AutocompleteHarvester(db_client=db_client).harvest_and_store(request)
     return _bulk_status(len(results), failed_sources, request.seed_keywords)
+
+
+@celery_app.task
+def fetch_x_trends() -> dict:
+    """Harvest X hashtag/keyword conversation trends from the active seed set."""
+    db_client = DatabaseClient()
+    request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
+    results, failed = XClient(db_client=db_client).harvest_and_store(request)
+    return _bulk_status(len(results), failed, request.seed_keywords)
 
 
 @celery_app.task

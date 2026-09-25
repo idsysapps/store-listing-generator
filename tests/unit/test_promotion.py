@@ -53,6 +53,12 @@ class TestComputePromotionScore:
         assert compute_promotion_score("amazon", "search", score=1, delta=0) == 1
         assert compute_promotion_score("etsy", "search", score=1, delta=0) == 1
 
+    def test_x_hashtag_uses_engagements(self) -> None:
+        assert compute_promotion_score("x", "hashtag", score=150000, delta=8) == 150000
+
+    def test_x_keyword_uses_engagements(self) -> None:
+        assert compute_promotion_score("x", "search", score=250000, delta=12) == 250000
+
     def test_amazon_bsr_riser_remains_zero_until_amazon_ingester(self) -> None:
         assert compute_promotion_score("amazon", "bsr_riser", score=80, delta=60) == 0
 
@@ -231,6 +237,54 @@ class TestCandidatesToPromote:
             )
             == []
         )
+
+    def test_x_hashtag_virality_promotes(self) -> None:
+        results = candidates_to_promote(
+            [
+                candidate(
+                    1,
+                    "#pickleballgift",
+                    source="x",
+                    query_type="hashtag",
+                    score=150000,
+                    delta=6,
+                )
+            ],
+            cross_seed_counts={"#pickleballgift": 1},
+        )
+        assert results == [1]
+
+    def test_x_hashtag_below_virality_stays_pending(self) -> None:
+        assert (
+            candidates_to_promote(
+                [candidate(1, "#corgi", source="x", query_type="hashtag", score=500, delta=100)],
+                cross_seed_counts={},
+            )
+            == []
+        )
+
+    def test_x_keyword_mentions_promotes(self) -> None:
+        results = candidates_to_promote(
+            [candidate(1, "pickleball", source="x", query_type="search", score=90000, delta=6)],
+            cross_seed_counts={},
+        )
+        assert results == [1]
+
+    def test_x_keyword_below_mentions_stays_pending(self) -> None:
+        assert (
+            candidates_to_promote(
+                [candidate(1, "resort", source="x", query_type="search", score=90000, delta=2)],
+                cross_seed_counts={},
+            )
+            == []
+        )
+
+    def test_x_cross_seed_promotes_regardless_of_virality(self) -> None:
+        results = candidates_to_promote(
+            [candidate(1, "#momsvg", source="x", query_type="hashtag", score=1000, delta=1)],
+            cross_seed_counts={"#momsvg": 2},
+        )
+        assert results == [1]
 
 
 class TestEnforceCap:
