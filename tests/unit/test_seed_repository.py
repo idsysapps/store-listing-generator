@@ -52,6 +52,28 @@ def connected_db(cursor: FakeCursor) -> Iterator[tuple[DatabaseClient, FakeMetaC
         yield db, conn
 
 
+def test_insert_trend_query_defaults_source_to_google() -> None:
+    cursor = FakeCursor()
+    cursor.fetchone_value = (1,)
+    with connected_db(cursor) as (db, _conn):
+        db.insert_trend_query("hoodie", "funny hoodie")
+
+    sql, params = cursor.executed_params[0]
+    assert "source" in sql
+    assert params == ("hoodie", "funny hoodie", "google")
+
+
+def test_insert_trend_query_accepts_explicit_source() -> None:
+    cursor = FakeCursor()
+    cursor.fetchone_value = (1,)
+    with connected_db(cursor) as (db, _conn):
+        db.insert_trend_query("#pickleball", "#pickleballgift", source="tiktok")
+
+    sql, params = cursor.executed_params[0]
+    assert "source" in sql
+    assert params == ("#pickleball", "#pickleballgift", "tiktok")
+
+
 def test_insert_trend_score_defaults_source_to_google() -> None:
     cursor = FakeCursor()
     cursor.fetchone_value = (1,)

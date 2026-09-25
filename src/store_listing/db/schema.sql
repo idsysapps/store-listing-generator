@@ -5,11 +5,13 @@ CREATE DATABASE store_listing;
 \c store_listing;
 
 -- Table: trend_queries
--- Stores the seed keywords and generated search queries
+-- Stores the seed keywords and generated search queries, tagged with the
+-- ingester `source` (google/tiktok/pinterest/amazon/etsy)
 CREATE TABLE trend_queries (
     id SERIAL PRIMARY KEY,
     seed_keyword VARCHAR(255) NOT NULL,
     query VARCHAR(500) NOT NULL,
+    source VARCHAR(20) NOT NULL DEFAULT 'google',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(seed_keyword, query)
 );

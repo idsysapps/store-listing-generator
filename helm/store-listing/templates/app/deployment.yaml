@@ -58,6 +58,17 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: REDIS_URL
+            - name: APIFY_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: APIFY_API_TOKEN
+            - name: APIFY_ACTOR_TIKTOK_HASHTAG
+              value: {{ .Values.config.tiktokActorId | default "" | quote }}
+            - name: APIFY_ACTOR_PINTEREST
+              value: {{ .Values.config.pinterestActorId | default "" | quote }}
+            - name: ETSY_SUGGEST_URL
+              value: {{ .Values.config.etsySuggestUrl | default "" | quote }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -101,5 +112,16 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: REDIS_URL
+            - name: APIFY_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: APIFY_API_TOKEN
+            - name: APIFY_ACTOR_TIKTOK_HASHTAG
+              value: {{ .Values.config.tiktokActorId | default "" | quote }}
+            - name: APIFY_ACTOR_PINTEREST
+              value: {{ .Values.config.pinterestActorId | default "" | quote }}
+            - name: ETSY_SUGGEST_URL
+              value: {{ .Values.config.etsySuggestUrl | default "" | quote }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}

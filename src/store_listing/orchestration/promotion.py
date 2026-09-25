@@ -7,9 +7,19 @@ MAX_ACTIVE_SEEDS: Final[int] = 50
 
 PROMOTION_THRESHOLDS: Final[dict[str, dict[str, int]]] = {
     "google": {"rising_min_delta": 5000, "top_min_cross_seeds": 2},
-    "tiktok": {},
-    "pinterest": {},
-    "amazon": {},
+    "tiktok": {
+        "hashtag_min_virality": 100_000,
+        "hashtag_min_videos": 5,
+        "sound_min_usage": 10,
+        "min_cross_seeds": 2,
+    },
+    "pinterest": {
+        "search_min_repins": 500,
+        "search_min_pins": 3,
+        "board_min_repins": 1_000,
+    },
+    "amazon": {"min_cross_seeds": 2},
+    "etsy": {"min_cross_seeds": 2},
 }
 
 STARTER_SEEDS: Final[list[str]] = [
@@ -53,14 +63,23 @@ class ActiveSeed:
 def compute_promotion_score(source: str, query_type: str, score: int, delta: int) -> int:
     """Per-source promotion score at candidate creation.
 
-    Only google rules are live today; tiktok/pinterest/amazon score 0 until their
-    ingesters (#2/#3) define thresholds.
+    - google rising: delta; google top: score
+    - tiktok hashtag/sound: cumulative play traction (score)
+    - pinterest search/board: pin saves / repins (score)
+    - amazon/etsy search: suggestion observation (score)
+    - amazon bsr_riser: still 0 until the #3 BSR ingester lands
     """
     if source == "google":
         if query_type == "rising":
             return max(delta, 0)
         if query_type == "top":
             return max(score, 0)
+    if source == "tiktok" and query_type in ("hashtag", "sound"):
+        return max(score, 0)
+    if source == "pinterest" and query_type in ("search", "board"):
+        return max(score, 0)
+    if source in ("amazon", "etsy") and query_type == "search":
+        return max(score, 0)
     return 0
 
 
@@ -80,10 +99,33 @@ def candidates_to_promote(
 
 def _rule_met(candidate: SeedCandidate, cross_seed_count: int) -> bool:
     rules = PROMOTION_THRESHOLDS.get(candidate.source, {})
-    if candidate.source == "google" and candidate.query_type == "rising":
-        return candidate.delta >= rules.get("rising_min_delta", 0)
-    if candidate.source == "google" and candidate.query_type == "top":
-        return cross_seed_count >= rules.get("top_min_cross_seeds", 0)
+    if candidate.source == "google":
+        if candidate.query_type == "rising":
+            return candidate.delta >= rules.get("rising_min_delta", 0)
+        if candidate.query_type == "top":
+            return cross_seed_count >= rules.get("top_min_cross_seeds", 0)
+    if candidate.source == "tiktok":
+        if candidate.query_type == "hashtag":
+            virality_met = candidate.score >= rules.get(
+                "hashtag_min_virality", 0
+            ) and candidate.delta >= rules.get("hashtag_min_videos", 0)
+        elif candidate.query_type == "sound":
+            virality_met = candidate.score >= rules.get(
+                "hashtag_min_virality", 0
+            ) and candidate.delta >= rules.get("sound_min_usage", 0)
+        else:
+            return False
+        return virality_met or cross_seed_count >= rules.get("min_cross_seeds", 0)
+    if candidate.source == "pinterest":
+        if candidate.query_type == "search":
+            return candidate.score >= rules.get(
+                "search_min_repins", 0
+            ) and candidate.delta >= rules.get("search_min_pins", 0)
+        if candidate.query_type == "board":
+            return candidate.score >= rules.get("board_min_repins", 0)
+        return False
+    if candidate.source in ("amazon", "etsy") and candidate.query_type == "search":
+        return cross_seed_count >= rules.get("min_cross_seeds", 0)
     return False
 
 

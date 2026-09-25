@@ -55,16 +55,16 @@ class DatabaseClient:
     def connect(self) -> psycopg2.extensions.connection:
         return psycopg2.connect(**self.connection_params)
 
-    def insert_trend_query(self, seed_keyword: str, query: str) -> int:
+    def insert_trend_query(self, seed_keyword: str, query: str, source: str = "google") -> int:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO trend_queries (seed_keyword, query)
-                VALUES (%s, %s)
+                INSERT INTO trend_queries (seed_keyword, query, source)
+                VALUES (%s, %s, %s)
                 ON CONFLICT (seed_keyword, query) DO UPDATE SET created_at = CURRENT_TIMESTAMP
                 RETURNING id
                 """,
-                (seed_keyword, query),
+                (seed_keyword, query, source),
             )
             result = cur.fetchone()
             if result is None:

@@ -244,6 +244,10 @@ store-listing-generator/
 | `DATABASE_USER` | postgres | Database user |
 | `DATABASE_PASSWORD` | (empty) | Database password |
 | `REDIS_URL` | redis://localhost:6379/0 | Redis connection URL |
+| `APIFY_API_TOKEN` | (empty) | Apify API token; enables the Apify TikTok/Pinterest actors when set (falls back to free scraping when empty) |
+| `APIFY_ACTOR_TIKTOK_HASHTAG` | `clockworks/tiktok-hashtag-scraper` | Apify actor ID for TikTok hashtag scraping |
+| `APIFY_ACTOR_PINTEREST` | `epctex/pinterest-scraper` | Apify actor ID for Pinterest search scraping |
+| `ETSY_SUGGEST_URL` | `https://www.etsy.com/autosuggest` | Etsy search autocomplete endpoint |
 
 ## Contributing
 

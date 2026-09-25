@@ -37,8 +37,23 @@ class TestComputePromotionScore:
     def test_google_top_uses_score(self) -> None:
         assert compute_promotion_score("google", "top", score=90, delta=0) == 90
 
-    def test_non_google_sources_are_zero_for_now(self) -> None:
-        assert compute_promotion_score("tiktok", "hashtag", score=500, delta=99) == 0
+    def test_tiktok_hashtag_uses_virality_plays(self) -> None:
+        assert compute_promotion_score("tiktok", "hashtag", score=150000, delta=12) == 150000
+
+    def test_tiktok_sound_uses_play_traction(self) -> None:
+        assert compute_promotion_score("tiktok", "sound", score=120000, delta=15) == 120000
+
+    def test_pinterest_search_uses_repins(self) -> None:
+        assert compute_promotion_score("pinterest", "search", score=600, delta=4) == 600
+
+    def test_pinterest_board_uses_repins(self) -> None:
+        assert compute_promotion_score("pinterest", "board", score=1200, delta=9) == 1200
+
+    def test_marketplace_search_uses_score(self) -> None:
+        assert compute_promotion_score("amazon", "search", score=1, delta=0) == 1
+        assert compute_promotion_score("etsy", "search", score=1, delta=0) == 1
+
+    def test_amazon_bsr_riser_remains_zero_until_amazon_ingester(self) -> None:
         assert compute_promotion_score("amazon", "bsr_riser", score=80, delta=60) == 0
 
 
@@ -92,6 +107,127 @@ class TestCandidatesToPromote:
                     candidate(2, "bsr", source="amazon", query_type="bsr_riser", score=1000),
                 ],
                 cross_seed_counts={},
+            )
+            == []
+        )
+
+    def test_tiktok_hashtag_virality_promotes(self) -> None:
+        results = candidates_to_promote(
+            [
+                candidate(
+                    1,
+                    "#pickleballgift",
+                    source="tiktok",
+                    query_type="hashtag",
+                    score=150000,
+                    delta=6,
+                )
+            ],
+            cross_seed_counts={"#pickleballgift": 1},
+        )
+        assert results == [1]
+
+    def test_tiktok_hashtag_below_virality_stays_pending(self) -> None:
+        assert (
+            candidates_to_promote(
+                [
+                    candidate(
+                        1, "#corgi", source="tiktok", query_type="hashtag", score=500, delta=100
+                    )
+                ],
+                cross_seed_counts={},
+            )
+            == []
+        )
+
+    def test_tiktok_cross_seed_promotes_regardless_of_virality(self) -> None:
+        results = candidates_to_promote(
+            [candidate(1, "#momsvg", source="tiktok", query_type="hashtag", score=1000, delta=1)],
+            cross_seed_counts={"#momsvg": 2},
+        )
+        assert results == [1]
+
+    def test_tiktok_sound_usage_promotes(self) -> None:
+        results = candidates_to_promote(
+            [
+                candidate(
+                    1, "sunset tones", source="tiktok", query_type="sound", score=120000, delta=12
+                )
+            ],
+            cross_seed_counts={},
+        )
+        assert results == [1]
+
+    def test_tiktok_sound_below_usage_stays_pending(self) -> None:
+        assert (
+            candidates_to_promote(
+                [candidate(1, "lo fi", source="tiktok", query_type="sound", score=120000, delta=4)],
+                cross_seed_counts={},
+            )
+            == []
+        )
+
+    def test_pinterest_search_traction_promotes(self) -> None:
+        results = candidates_to_promote(
+            [
+                candidate(
+                    1,
+                    "pickleball mom shirt",
+                    source="pinterest",
+                    query_type="search",
+                    score=600,
+                    delta=4,
+                )
+            ],
+            cross_seed_counts={},
+        )
+        assert results == [1]
+
+    def test_pinterest_search_below_repins_stays_pending(self) -> None:
+        assert (
+            candidates_to_promote(
+                [
+                    candidate(
+                        1, "corgi svg", source="pinterest", query_type="search", score=400, delta=10
+                    )
+                ],
+                cross_seed_counts={},
+            )
+            == []
+        )
+
+    def test_pinterest_board_traction_promotes(self) -> None:
+        results = candidates_to_promote(
+            [
+                candidate(
+                    1,
+                    "pickleball gifts",
+                    source="pinterest",
+                    query_type="board",
+                    score=1200,
+                    delta=7,
+                )
+            ],
+            cross_seed_counts={},
+        )
+        assert results == [1]
+
+    def test_amazon_cross_seed_suggestion_promotes(self) -> None:
+        results = candidates_to_promote(
+            [candidate(1, "mom shirt svg", source="amazon", query_type="search", score=1, delta=0)],
+            cross_seed_counts={"mom shirt svg": 2},
+        )
+        assert results == [1]
+
+    def test_etsy_single_seed_suggestion_stays_pending(self) -> None:
+        assert (
+            candidates_to_promote(
+                [
+                    candidate(
+                        1, "pickleball mug", source="etsy", query_type="search", score=1, delta=0
+                    )
+                ],
+                cross_seed_counts={"pickleball mug": 1},
             )
             == []
         )
