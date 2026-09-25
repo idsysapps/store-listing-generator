@@ -11,5 +11,8 @@ trend-service/target/
 # Stray empty file at repo root
 Novelty
 
+# Helm local overrides (secrets)
+helm/values-local.yaml
+
 # OS
 .DS_Store

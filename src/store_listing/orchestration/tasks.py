@@ -1,3 +1,5 @@
+import os
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -5,10 +7,13 @@ from store_listing.ingest.trends import (
     AutocompleteHarvester,
     DatabaseClient,
     GoogleTrendsClient,
+    InstagramClient,
     PinterestClient,
+    RedditClient,
     TikTokClient,
     TrendHarvestRequest,
     XClient,
+    YouTubeClient,
 )
 from store_listing.orchestration import celery_redis_url
 from store_listing.orchestration.promotion import (
@@ -17,6 +22,7 @@ from store_listing.orchestration.promotion import (
     compute_promotion_score,
     enforce_cap,
 )
+from store_listing.orchestration.source_health import with_source_health
 
 celery_app = Celery(
     "store_listing",
@@ -32,6 +38,15 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
+
+def _tiktok_enabled() -> bool:
+    return os.environ.get("TIKTOK_ENABLED", "false").lower() in ("1", "true", "yes")
+
+
+def _instagram_enabled() -> bool:
+    return os.environ.get("INSTAGRAM_ENABLED", "false").lower() in ("1", "true", "yes")
+
+
 celery_app.conf.beat_schedule = {
     "daily-trend-harvest": {
         "task": "store_listing.orchestration.tasks.fetch_daily_trends",
@@ -41,13 +56,9 @@ celery_app.conf.beat_schedule = {
         "task": "store_listing.orchestration.tasks.promote_seeds",
         "schedule": crontab(hour=6, minute=5),
     },
-    "tiktok-micro-trends": {
-        "task": "store_listing.orchestration.tasks.fetch_tiktok_trends",
-        "schedule": crontab(hour=6, minute=10),
-    },
     "pinterest-micro-trends": {
         "task": "store_listing.orchestration.tasks.fetch_pinterest_trends",
-        "schedule": crontab(hour=6, minute=15),
+        "schedule": crontab(hour=6, minute=15, day_of_week="0,3"),
     },
     "marketplace-suggestions": {
         "task": "store_listing.orchestration.tasks.fetch_marketplace_suggestions",
@@ -55,9 +66,36 @@ celery_app.conf.beat_schedule = {
     },
     "x-micro-trends": {
         "task": "store_listing.orchestration.tasks.fetch_x_trends",
-        "schedule": crontab(hour=6, minute=25),
+        "schedule": crontab(hour=6, minute=25, day_of_week="1,4"),
+    },
+    "reddit-micro-trends": {
+        "task": "store_listing.orchestration.tasks.fetch_reddit_trends",
+        "schedule": crontab(hour=6, minute=30),
+    },
+    "youtube-micro-trends": {
+        "task": "store_listing.orchestration.tasks.fetch_youtube_trends",
+        "schedule": crontab(hour=6, minute=35),
     },
 }
+
+if _tiktok_enabled():
+    # TikTok is disabled by default: the Apify actor bills per returned video and
+    # the free tag-page path is TLS-blocked from our egress. Re-enable by setting
+    # TIKTOK_ENABLED=true with cost caps (see #86); the harvest runs weekly
+    # (Sunday) so spend stays under Apify's $5/month free tier.
+    celery_app.conf.beat_schedule["tiktok-micro-trends"] = {
+        "task": "store_listing.orchestration.tasks.fetch_tiktok_trends",
+        "schedule": crontab(hour=6, minute=10, day_of_week=0),
+    }
+
+if _instagram_enabled():
+    # Instagram is disabled by default: fully login-walled, Apify required
+    # (~$0.40-2.50/1K posts). Re-enable by setting INSTAGRAM_ENABLED=true;
+    # the harvest runs weekly (Saturday) to cap Apify spend.
+    celery_app.conf.beat_schedule["instagram-micro-trends"] = {
+        "task": "store_listing.orchestration.tasks.fetch_instagram_trends",
+        "schedule": crontab(hour=6, minute=40, day_of_week=5),
+    }
 
 
 def _active_seed_keywords(db_client: DatabaseClient) -> list[str]:
@@ -92,6 +130,7 @@ def _bulk_status(results_count: int, failed_targets: list[str], seeds: list[str]
 
 
 @celery_app.task
+@with_source_health("google")
 def fetch_daily_trends() -> dict:
     db_client = DatabaseClient()
     trends_client = GoogleTrendsClient(db_client=db_client)
@@ -103,6 +142,7 @@ def fetch_daily_trends() -> dict:
 
 
 @celery_app.task
+@with_source_health("google")
 def fetch_trends_manual(seeds: list[str] | None = None) -> dict:
     db_client = DatabaseClient()
     trends_client = GoogleTrendsClient(db_client=db_client)
@@ -114,6 +154,7 @@ def fetch_trends_manual(seeds: list[str] | None = None) -> dict:
 
 
 @celery_app.task
+@with_source_health("tiktok")
 def fetch_tiktok_trends() -> dict:
     """Harvest TikTok hashtag/sound micro-trends from the active seed set."""
     db_client = DatabaseClient()
@@ -123,6 +164,7 @@ def fetch_tiktok_trends() -> dict:
 
 
 @celery_app.task
+@with_source_health("pinterest")
 def fetch_pinterest_trends() -> dict:
     """Harvest Pinterest search/board traction from the active seed set."""
     db_client = DatabaseClient()
@@ -132,6 +174,7 @@ def fetch_pinterest_trends() -> dict:
 
 
 @celery_app.task
+@with_source_health("marketplace")
 def fetch_marketplace_suggestions() -> dict:
     """Collect Amazon + Etsy search autocomplete queries for the active seed set."""
     db_client = DatabaseClient()
@@ -141,11 +184,42 @@ def fetch_marketplace_suggestions() -> dict:
 
 
 @celery_app.task
+@with_source_health("x")
 def fetch_x_trends() -> dict:
     """Harvest X hashtag/keyword conversation trends from the active seed set."""
     db_client = DatabaseClient()
     request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
     results, failed = XClient(db_client=db_client).harvest_and_store(request)
+    return _bulk_status(len(results), failed, request.seed_keywords)
+
+
+@celery_app.task
+@with_source_health("reddit")
+def fetch_reddit_trends() -> dict:
+    """Harvest Reddit post titles and subreddit traction from seeds + POD subs."""
+    db_client = DatabaseClient()
+    request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
+    results, failed = RedditClient(db_client=db_client).harvest_and_store(request)
+    return _bulk_status(len(results), failed, request.seed_keywords)
+
+
+@celery_app.task
+@with_source_health("youtube")
+def fetch_youtube_trends() -> dict:
+    """Harvest YouTube Shorts titles and tags from the active seed set."""
+    db_client = DatabaseClient()
+    request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
+    results, failed = YouTubeClient(db_client=db_client).harvest_and_store(request)
+    return _bulk_status(len(results), failed, request.seed_keywords)
+
+
+@celery_app.task
+@with_source_health("instagram")
+def fetch_instagram_trends() -> dict:
+    """Harvest Instagram hashtag engagement from the active seed set."""
+    db_client = DatabaseClient()
+    request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
+    results, failed = InstagramClient(db_client=db_client).harvest_and_store(request)
     return _bulk_status(len(results), failed, request.seed_keywords)
 
 

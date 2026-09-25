@@ -249,6 +249,31 @@ store-listing-generator/
 | `APIFY_ACTOR_PINTEREST` | `automation-lab/pinterest-scraper` | Apify actor ID for Pinterest search scraping |
 | `ETSY_SUGGEST_URL` | `https://www.etsy.com/autosuggest` | Etsy search autocomplete endpoint |
 | `APIFY_ACTOR_X` | `xquik/x-tweet-scraper` | Apify actor ID for X (Twitter) search scraping |
+| `TIKTOK_RESULTS_PER_PAGE` | `20` | Caps videos returned per TikTok hashtag (Apify bills per video; keeps spend low) |
+| `TIKTOK_EXTRA_HASHTAGS` | (empty) | Comma-separated curated hashtags to add to the active seed set |
+| `SOURCE_HEALTH_ENABLED` | `true` | Track per-source harvest health and auto-file GitHub issues on repeated failures |
+| `HEALTH_FAILURE_THRESHOLD` | `2` | Consecutive failures before an `[auto-health]` issue is opened |
+| `HEALTH_EMPTY_THRESHOLD` | `3` | Consecutive empty harvests before an `[auto-health]` issue is opened |
+| `GITHUB_TOKEN` | (empty) | Token used to open auto-health issues (requires `GITHUB_REPO` too) |
+| `GITHUB_REPO` | (empty) | `owner/repo` to file auto-health issues against |
+
+## Source Health & Free-Path-First Harvesting
+
+Each scheduled harvest task records an outcome (`success` / `failure` / `empty`)
+for its source (google, tiktok, pinterest, marketplace, x) into the
+`source_health` table. After `HEALTH_FAILURE_THRESHOLD` consecutive failures (or
+`HEALTH_EMPTY_THRESHOLD` consecutive empty runs) the tracker opens a labeled
+`[auto-health] <source> harvester is failing consistently` GitHub issue with a
+runbook, de-duplicating while the issue is open. Closing the issue resets the
+tracker so a later regression re-opens it after the next `HEALTH_FAILURE_THRESHOLD`
+failures.
+
+Sources prefer the free web-gateway path first; the paid Apify actors are only
+used when `APIFY_API_TOKEN` is set. If a source is blocked (for example the
+free TikTok tag pages), its issue becomes the work item for the fix loop.
+Harvest health is tracked even without `GITHUB_TOKEN`; issue creation is how
+the `[auto-health]` tickets reach GitHub. See
+`src/store_listing/orchestration/source_health.py`.
 
 ## Contributing
 

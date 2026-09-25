@@ -5,6 +5,11 @@ config:
   redisUrl: redis://store-listing-store-listing-redis:6379/0
   quarkusProfile: prod
   tiktokActorId: ""
+  tiktokResultsPerPage: 20
+  sourceHealthEnabled: true
+  healthFailureThreshold: 2
+  healthEmptyThreshold: 3
+  githubRepo: ""
   pinterestActorId: ""
   etsySuggestUrl: ""
   xActorId: ""
@@ -15,6 +20,8 @@ secrets:
   jwtSecretName: ""
   jwtIssuer: https://costbook.example.com
   apifyApiToken: ""
+  githubToken: ""
+  youtubeApiKey: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest

@@ -12,9 +12,13 @@ QueryType = Literal[
     "search",
     "board",
     "bsr_riser",
+    "subreddit",
+    "video",
 ]
 
-Source = Literal["google", "tiktok", "pinterest", "amazon", "etsy", "x"]
+Source = Literal[
+    "google", "tiktok", "pinterest", "amazon", "etsy", "x", "reddit", "youtube", "instagram"
+]
 
 
 class TrendQuery(BaseModel):
