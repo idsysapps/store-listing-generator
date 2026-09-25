@@ -15,6 +15,7 @@ data:
   LLM_BASE_URL: {{ .Values.config.llmBaseUrl | default "https://api.groq.com/openai/v1" | quote }}
   LLM_MODEL: {{ .Values.config.llmModel | default "llama-3.3-70b-versatile" | quote }}
   LLM_SEED_CURATION_ENABLED: {{ .Values.config.llmSeedCurationEnabled | default "false" | quote }}
+  LLM_MAX_CANDIDATES: {{ .Values.config.llmMaxCandidates | default "10" | quote }}
 ---
 kind: ConfigMap
 apiVersion: v1

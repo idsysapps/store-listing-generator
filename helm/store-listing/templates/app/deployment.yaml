@@ -124,6 +124,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_SEED_CURATION_ENABLED
+            - name: LLM_MAX_CANDIDATES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_MAX_CANDIDATES
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -233,5 +238,10 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_SEED_CURATION_ENABLED
+            - name: LLM_MAX_CANDIDATES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_MAX_CANDIDATES
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
