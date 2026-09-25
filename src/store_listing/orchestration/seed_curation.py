@@ -38,7 +38,7 @@ SYSTEM_PROMPT = (
     '"reasoning": {"candidate_id": "explanation"}}'
 )
 
-MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "10"))
+MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "50"))
 
 
 @dataclass(frozen=True)
