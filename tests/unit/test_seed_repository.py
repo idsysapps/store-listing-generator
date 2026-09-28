@@ -229,3 +229,45 @@ def test_archive_active_seed_marks_archived() -> None:
     sql, params = cursor.executed_params[0]
     assert "archived_at" in sql
     assert params == ("hoodie",)
+
+
+def test_insert_product_tags_inserts_rows() -> None:
+    cursor = FakeCursor()
+    with connected_db(cursor) as (db, _conn):
+        db.insert_product_tags(active_seed_id=7, tags=["dtf_apparel", "sublimation"])
+
+    assert len(cursor.executed_params) == 2
+    sql_1, params_1 = cursor.executed_params[0]
+    _sql_2, params_2 = cursor.executed_params[1]
+    assert "seed_product_tags" in sql_1
+    assert params_1 == (7, "dtf_apparel")
+    assert params_2 == (7, "sublimation")
+
+
+def test_insert_product_tags_returns_count() -> None:
+    cursor = FakeCursor()
+    with connected_db(cursor) as (db, _conn):
+        result = db.insert_product_tags(active_seed_id=7, tags=["dtf_apparel"])
+
+    assert result == 1
+
+
+def test_insert_product_tags_empty_list_returns_zero() -> None:
+    cursor = FakeCursor()
+    with connected_db(cursor) as (db, _conn):
+        result = db.insert_product_tags(active_seed_id=7, tags=[])
+
+    assert result == 0
+    assert len(cursor.executed_params) == 0
+
+
+def test_list_active_seeds_by_tag_filters() -> None:
+    cursor = FakeCursor()
+    cursor.fetchall_value = [(1, "dad jokes shirt", 5000)]
+    with connected_db(cursor) as (db, _conn):
+        result = db.list_active_seeds_by_tag("dtf_apparel")
+
+    assert result == [ActiveSeed(id=1, query="dad jokes shirt", promotion_score=5000)]
+    sql, params = cursor.executed_params[0]
+    assert "seed_product_tags" in sql
+    assert params == ("dtf_apparel",)

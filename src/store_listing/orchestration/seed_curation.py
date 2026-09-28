@@ -11,12 +11,14 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from store_listing.orchestration.context_seeds import get_upcoming_events
 from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate, enforce_cap
 
 logger = logging.getLogger(__name__)
+
+PRODUCT_TAGS: Final[set[str]] = {"dtf_apparel", "sublimation", "sticker_vinyl"}
 
 SYSTEM_PROMPT = (
     "You are a print-on-demand product strategist. Your job is to curate seed "
@@ -42,10 +44,21 @@ SYSTEM_PROMPT = (
     "IMPORTANT: Do not suggest seeds that would require licensed IP (movie characters, "
     "team logos, brand names). Suggest concepts inspired by the cultural moment, "
     "not the IP itself.\n\n"
+    "For every promoted candidate, pivot, and event_seed, also specify which "
+    "production methods the design fits. Valid product_tags:\n"
+    '- "dtf_apparel": t-shirts, hoodies, sweatshirts, tank tops, hats/caps, '
+    "tote bags, baby onesies\n"
+    '- "sublimation": mugs, tumblers, phone cases, mouse pads, coasters, '
+    "jigsaw puzzles, ornaments, wall art, pillows, blankets, socks\n"
+    '- "sticker_vinyl": stickers and vinyl decals\n\n'
+    "A seed can have multiple tags if the design works across methods.\n\n"
     "Return ONLY valid JSON with this exact structure:\n"
     '{"promote": [candidate_ids], "reject": [candidate_ids], '
-    '"pivot": [{"from": "broad seed", "to": "specific seed", "reason": "why"}], '
-    '"event_seeds": [{"seed": "keyword", "reason": "why", "event": "event_name"}], '
+    '"product_tags": {"candidate_id": ["dtf_apparel", ...]}, '
+    '"pivot": [{"from": "broad seed", "to": "specific seed", "reason": "why", '
+    '"product_tags": ["dtf_apparel", ...]}], '
+    '"event_seeds": [{"seed": "keyword", "reason": "why", "event": "event_name", '
+    '"product_tags": ["dtf_apparel", ...]}], '
     '"reasoning": {"candidate_id": "explanation"}}'
 )
 
@@ -57,6 +70,7 @@ class PivotSuggestion:
     from_seed: str
     to_seed: str
     reason: str
+    product_tags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -64,6 +78,7 @@ class EventSeed:
     seed: str
     reason: str
     event: str
+    product_tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -73,6 +88,7 @@ class CurationResult:
     pivot: list[PivotSuggestion] = field(default_factory=list)
     event_seeds: list[EventSeed] = field(default_factory=list)
     reasoning: dict[str, str] = field(default_factory=dict)
+    product_tags: dict[str, list[str]] = field(default_factory=dict)
 
 
 class CurationDBClient(Protocol):
@@ -100,6 +116,8 @@ class CurationDBClient(Protocol):
         event_context: str | None,
         llm_model: str | None,
     ) -> int: ...
+
+    def insert_product_tags(self, active_seed_id: int, tags: list[str]) -> int: ...
 
 
 def build_curation_prompt(
@@ -139,6 +157,12 @@ def build_curation_prompt(
     ]
 
 
+def _filter_tags(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [t for t in raw if isinstance(t, str) and t in PRODUCT_TAGS]
+
+
 def parse_curation_response(text: str) -> CurationResult:
     try:
         start = text.find("{")
@@ -156,6 +180,7 @@ def parse_curation_response(text: str) -> CurationResult:
             from_seed=p.get("from", ""),
             to_seed=p.get("to", ""),
             reason=p.get("reason", ""),
+            product_tags=_filter_tags(p.get("product_tags", [])),
         )
         for p in data.get("pivot", [])
         if isinstance(p, dict) and p.get("to")
@@ -165,6 +190,7 @@ def parse_curation_response(text: str) -> CurationResult:
             seed=e.get("seed", ""),
             reason=e.get("reason", ""),
             event=e.get("event", ""),
+            product_tags=_filter_tags(e.get("product_tags", [])),
         )
         for e in data.get("event_seeds", [])
         if isinstance(e, dict) and e.get("seed")
@@ -173,12 +199,18 @@ def parse_curation_response(text: str) -> CurationResult:
     if not isinstance(reasoning, dict):
         reasoning = {}
 
+    raw_tags = data.get("product_tags", {})
+    if not isinstance(raw_tags, dict):
+        raw_tags = {}
+    product_tags = {str(k): _filter_tags(v) for k, v in raw_tags.items() if isinstance(v, list)}
+
     return CurationResult(
         promote=[i for i in data.get("promote", []) if isinstance(i, int)],
         reject=[i for i in data.get("reject", []) if isinstance(i, int)],
         pivot=pivots,
         event_seeds=event_seeds,
         reasoning={str(k): str(v) for k, v in reasoning.items()},
+        product_tags=product_tags,
     )
 
 
@@ -215,7 +247,7 @@ def curate_seeds(
         if cid not in by_id:
             continue
         candidate = by_id[cid]
-        db_client.insert_active_seed(
+        seed_id = db_client.insert_active_seed(
             query=candidate.query,
             promotion_score=candidate.promotion_score,
             candidate_id=cid,
@@ -228,6 +260,9 @@ def curate_seeds(
             event_context=None,
             llm_model=model,
         )
+        tags = result.product_tags.get(str(cid), [])
+        if seed_id is not None and tags:
+            db_client.insert_product_tags(active_seed_id=seed_id, tags=tags)
         promoted += 1
 
     rejected = 0
@@ -257,6 +292,8 @@ def curate_seeds(
                 event_context=None,
                 llm_model=model,
             )
+            if pivot.product_tags:
+                db_client.insert_product_tags(active_seed_id=inserted, tags=pivot.product_tags)
             pivot_count += 1
 
     event_count = 0
@@ -270,6 +307,8 @@ def curate_seeds(
                 event_context=es.event,
                 llm_model=model,
             )
+            if es.product_tags:
+                db_client.insert_product_tags(active_seed_id=inserted, tags=es.product_tags)
             event_count += 1
 
     incoming = promoted + pivot_count + event_count
