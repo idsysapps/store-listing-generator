@@ -18,9 +18,7 @@ from store_listing.ingest.trends import (
 from store_listing.orchestration import celery_redis_url
 from store_listing.orchestration.promotion import (
     STARTER_SEEDS,
-    candidates_to_promote,
     compute_promotion_score,
-    enforce_cap,
 )
 from store_listing.orchestration.source_health import with_source_health
 
@@ -59,10 +57,6 @@ celery_app.conf.beat_schedule = {
     "daily-trend-harvest": {
         "task": "store_listing.orchestration.tasks.fetch_daily_trends",
         "schedule": crontab(hour=6, minute=0),
-    },
-    "seed-promotion": {
-        "task": "store_listing.orchestration.tasks.promote_seeds",
-        "schedule": crontab(hour=6, minute=5),
     },
     "pinterest-micro-trends": {
         "task": "store_listing.orchestration.tasks.fetch_pinterest_trends",
@@ -235,40 +229,6 @@ def fetch_instagram_trends() -> dict:
     request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
     results, failed = InstagramClient(db_client=db_client).harvest_and_store(request)
     return _bulk_status(len(results), failed, request.seed_keywords)
-
-
-@celery_app.task
-def promote_seeds() -> dict:
-    """Auto-promote pending seed candidates that meet their source's rules."""
-    db_client = DatabaseClient()
-
-    pending = db_client.list_pending_candidates()
-    cross_seed_counts = db_client.cross_seed_counts()
-    to_promote = candidates_to_promote(pending, cross_seed_counts)
-    if not to_promote:
-        return {"status": "success", "promoted": 0, "archived": 0}
-
-    active = db_client.list_active_seeds()
-    archives = enforce_cap(active, len(to_promote))
-
-    for query in archives:
-        db_client.archive_active_seed(query)
-
-    by_id = {candidate.id: candidate for candidate in pending}
-    for candidate_id in to_promote:
-        candidate = by_id[candidate_id]
-        db_client.insert_active_seed(
-            query=candidate.query,
-            promotion_score=candidate.promotion_score,
-            candidate_id=candidate.id,
-        )
-        db_client.promote_candidate(candidate.id)
-
-    return {
-        "status": "success",
-        "promoted": len(to_promote),
-        "archived": len(archives),
-    }
 
 
 @celery_app.task

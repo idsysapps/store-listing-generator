@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate
+from store_listing.orchestration.promotion import ActiveSeed
 
 
 @pytest.fixture
@@ -106,75 +106,7 @@ def test_fetch_daily_trends_falls_back_to_starter_seeds(redis_url: str) -> None:
     assert len(request.seed_keywords) > 0
 
 
-def test_promote_seeds_promotes_only_qualifying_candidates(redis_url: str) -> None:
-    """Black-box: only google candidates meeting rules are promoted; others untouched."""
-    with patch.dict(os.environ, {"REDIS_URL": redis_url}):
-        module = importlib.import_module("store_listing.orchestration.tasks")
-        importlib.reload(module)
-
-    pending = [
-        SeedCandidate(
-            id=11,
-            query="mom shirt",
-            source="google",
-            query_type="rising",
-            score=0,
-            delta=12000,
-            promotion_score=12000,
-            status="pending",
-        ),
-        SeedCandidate(
-            id=12,
-            query="pickleball",
-            source="google",
-            query_type="top",
-            score=80,
-            delta=0,
-            promotion_score=80,
-            status="pending",
-        ),
-        SeedCandidate(
-            id=13,
-            query="tiktok boom",
-            source="tiktok",
-            query_type="hashtag",
-            score=90,
-            delta=0,
-            promotion_score=0,
-            status="pending",
-        ),
-    ]
-    db_mock = MagicMock()
-    db_mock.list_pending_candidates.return_value = pending
-    db_mock.cross_seed_counts.return_value = {"pickleball": 2}
-    db_mock.list_active_seeds.return_value = []
-
-    with patch.object(module, "DatabaseClient", return_value=db_mock):
-        result = module.promote_seeds.run()
-
-    assert result["promoted"] == 2
-    assert result["archived"] == 0
-    promoted_ids = {call.args[0] for call in db_mock.promote_candidate.call_args_list}
-    assert promoted_ids == {11, 12}
-    assert db_mock.insert_active_seed.call_count == 2
-
-
-def test_promote_seeds_returns_zero_when_nothing_qualifies(redis_url: str) -> None:
-    with patch.dict(os.environ, {"REDIS_URL": redis_url}):
-        module = importlib.import_module("store_listing.orchestration.tasks")
-        importlib.reload(module)
-
-    db_mock = MagicMock()
-    db_mock.list_pending_candidates.return_value = []
-    db_mock.cross_seed_counts.return_value = {}
-
-    with patch.object(module, "DatabaseClient", return_value=db_mock):
-        result = module.promote_seeds.run()
-
-    assert result == {"status": "success", "promoted": 0, "archived": 0}
-
-
-def test_beat_schedule_registers_harvest_and_promotion(redis_url: str) -> None:
+def test_beat_schedule_registers_harvest_tasks(redis_url: str) -> None:
     with patch.dict(os.environ, {"REDIS_URL": redis_url}):
         module = importlib.import_module("store_listing.orchestration.tasks")
         importlib.reload(module)
@@ -184,7 +116,7 @@ def test_beat_schedule_registers_harvest_and_promotion(redis_url: str) -> None:
         beat["daily-trend-harvest"]["task"]
         == "store_listing.orchestration.tasks.fetch_daily_trends"
     )
-    assert beat["seed-promotion"]["task"] == "store_listing.orchestration.tasks.promote_seeds"
+    assert "seed-promotion" not in beat
     assert (
         beat["seasonal-seed-injection"]["task"]
         == "store_listing.orchestration.tasks.inject_seasonal_seeds_task"
