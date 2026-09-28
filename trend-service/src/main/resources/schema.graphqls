@@ -51,11 +51,20 @@ type PageInfo {
   totalCount: Int!
 }
 
+type ActiveSeedSummary {
+  id: ID!
+  query: String!
+  promotionScore: Int!
+  productTags: [String!]!
+}
+
 type Query {
   trendQueries(limit: Int = 100, offset: Int = 0): TrendQueryConnection!
   trendSummary(query: String!): TrendSummary
   topTrends(limit: Int = 10): [TrendSummary!]!
   trendHistory(query: String!, days: Int = 30): [TrendScore!]!
+  activeSeeds(tag: String, limit: Int = 50): [ActiveSeedSummary!]!
+  productTags: [String!]!
 }
 
 type Subscription {
