@@ -16,6 +16,9 @@ config:
   llmModel: "llama-3.3-70b-versatile"
   llmSeedCurationEnabled: "false"
   llmMaxCandidates: "10"
+  llmDesignBriefsEnabled: "false"
+  llmMaxBriefs: "8"
+  llmMaxBriefSeeds: "20"
 
 secrets:
   databaseUser: store_listing

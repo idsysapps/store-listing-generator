@@ -133,3 +133,36 @@ CREATE TABLE seed_product_tags (
 
 CREATE INDEX idx_seed_product_tags_tag ON seed_product_tags(tag);
 CREATE INDEX idx_seed_product_tags_seed ON seed_product_tags(active_seed_id);
+
+-- Table: design_briefs
+-- Stores LLM-generated design concepts synthesized from trend signals.
+CREATE TABLE design_briefs (
+    id SERIAL PRIMARY KEY,
+    concept TEXT NOT NULL,
+    product_type VARCHAR(50) NOT NULL,
+    specific_products TEXT[],
+    audience TEXT,
+    visual_style TEXT,
+    confidence INTEGER NOT NULL DEFAULT 0,
+    reasoning TEXT,
+    llm_model VARCHAR(100),
+    batch_id VARCHAR(50),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);
+CREATE INDEX idx_design_briefs_created_at ON design_briefs(created_at);
+CREATE INDEX idx_design_briefs_batch_id ON design_briefs(batch_id);
+
+-- Table: design_brief_sources
+-- Links design briefs to the active seeds that inspired them.
+CREATE TABLE design_brief_sources (
+    id SERIAL PRIMARY KEY,
+    brief_id INTEGER NOT NULL REFERENCES design_briefs(id) ON DELETE CASCADE,
+    active_seed_id INTEGER NOT NULL REFERENCES active_seeds(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(brief_id, active_seed_id)
+);
+
+CREATE INDEX idx_design_brief_sources_brief ON design_brief_sources(brief_id);
+CREATE INDEX idx_design_brief_sources_seed ON design_brief_sources(active_seed_id);

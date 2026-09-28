@@ -58,6 +58,21 @@ type ActiveSeedSummary {
   productTags: [String!]!
 }
 
+type DesignBriefSummary {
+  id: ID!
+  concept: String!
+  productType: String!
+  specificProducts: [String!]!
+  audience: String
+  visualStyle: String
+  confidence: Int!
+  reasoning: String
+  llmModel: String
+  batchId: String
+  createdAt: DateTime
+  sourceSeeds: [String!]!
+}
+
 type Query {
   trendQueries(limit: Int = 100, offset: Int = 0): TrendQueryConnection!
   trendSummary(query: String!): TrendSummary
@@ -65,6 +80,7 @@ type Query {
   trendHistory(query: String!, days: Int = 30): [TrendScore!]!
   activeSeeds(tag: String, limit: Int = 50): [ActiveSeedSummary!]!
   productTags: [String!]!
+  designBriefs(productType: String, batchId: String, limit: Int = 20): [DesignBriefSummary!]!
 }
 
 type Subscription {
