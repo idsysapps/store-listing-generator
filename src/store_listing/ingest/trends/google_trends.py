@@ -12,6 +12,7 @@ import requests
 from pytrends.exceptions import ResponseError
 from pytrends.request import TrendReq
 
+from store_listing.orchestration.design_briefs import BriefableCandidate
 from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate, compute_promotion_score
 
 from .schemas import QueryType, TrendHarvestRequest, TrendResult
@@ -346,6 +347,103 @@ class DatabaseClient:
                 ActiveSeed(id=row[0], query=row[1], promotion_score=row[2])
                 for row in cur.fetchall()
             ]
+
+    def list_briefable_seeds(self) -> list[BriefableCandidate]:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    a.id AS active_seed_id,
+                    a.query,
+                    COALESCE(sc.source, 'calendar') AS source,
+                    COALESCE(sc.query_type, 'inject') AS query_type,
+                    COALESCE(sc.score, 0) AS score,
+                    COALESCE(sc.delta, 0) AS delta,
+                    a.promotion_score,
+                    COALESCE(
+                        ARRAY_AGG(spt.tag) FILTER (WHERE spt.tag IS NOT NULL),
+                        '{}'
+                    ) AS product_tags
+                FROM active_seeds a
+                LEFT JOIN seed_candidates sc
+                    ON sc.id = a.promoted_from_candidate_id
+                LEFT JOIN design_brief_sources dbs
+                    ON dbs.active_seed_id = a.id
+                LEFT JOIN seed_product_tags spt
+                    ON spt.active_seed_id = a.id
+                WHERE a.archived_at IS NULL
+                  AND dbs.id IS NULL
+                GROUP BY a.id, a.query, a.promotion_score,
+                         sc.source, sc.query_type, sc.score, sc.delta
+                ORDER BY a.promotion_score DESC
+                """
+            )
+            return [
+                BriefableCandidate(
+                    active_seed_id=row[0],
+                    query=row[1],
+                    source=row[2],
+                    query_type=row[3],
+                    score=row[4],
+                    delta=row[5],
+                    promotion_score=row[6],
+                    product_tags=list(row[7]) if row[7] else [],
+                )
+                for row in cur.fetchall()
+            ]
+
+    def insert_design_brief(
+        self,
+        concept: str,
+        product_type: str,
+        specific_products: list[str],
+        audience: str,
+        visual_style: str,
+        confidence: int,
+        reasoning: str,
+        llm_model: str,
+        batch_id: str,
+    ) -> int:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO design_briefs
+                    (concept, product_type, specific_products, audience,
+                     visual_style, confidence, reasoning, llm_model, batch_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    concept,
+                    product_type,
+                    specific_products,
+                    audience,
+                    visual_style,
+                    confidence,
+                    reasoning,
+                    llm_model,
+                    batch_id,
+                ),
+            )
+            result = cur.fetchone()
+            if result is None:
+                msg = "Failed to insert design brief"
+                raise RuntimeError(msg)
+            return result[0]
+
+    def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO design_brief_sources (brief_id, active_seed_id)
+                VALUES (%s, %s)
+                ON CONFLICT (brief_id, active_seed_id) DO NOTHING
+                RETURNING id
+                """,
+                (brief_id, active_seed_id),
+            )
+            row = cur.fetchone()
+            return None if row is None else row[0]
 
 
 class GoogleTrendsClient:

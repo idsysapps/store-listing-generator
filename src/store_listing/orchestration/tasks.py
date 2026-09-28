@@ -49,6 +49,10 @@ def _llm_curation_enabled() -> bool:
     return os.environ.get("LLM_SEED_CURATION_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
+def _llm_design_briefs_enabled() -> bool:
+    return os.environ.get("LLM_DESIGN_BRIEFS_ENABLED", "false").lower() in ("1", "true", "yes")
+
+
 celery_app.conf.beat_schedule = {
     "seasonal-seed-injection": {
         "task": "store_listing.orchestration.tasks.inject_seasonal_seeds_task",
@@ -103,6 +107,12 @@ if _llm_curation_enabled():
     celery_app.conf.beat_schedule["llm-seed-curation"] = {
         "task": "store_listing.orchestration.tasks.curate_seeds_task",
         "schedule": crontab(hour=6, minute=50),
+    }
+
+if _llm_design_briefs_enabled():
+    celery_app.conf.beat_schedule["llm-design-briefs"] = {
+        "task": "store_listing.orchestration.tasks.generate_design_briefs_task",
+        "schedule": crontab(hour=7, minute=0),
     }
 
 
@@ -277,3 +287,16 @@ def curate_seeds_task() -> dict:
 
     client = get_llm_client()
     return curate_seeds(DatabaseClient(), client.chat.completions, get_llm_model())
+
+
+@celery_app.task
+def generate_design_briefs_task() -> dict:
+    """LLM-driven design brief generation from curated trend signals."""
+    from store_listing.orchestration.design_briefs import generate_design_briefs
+    from store_listing.orchestration.llm_client import configured, get_llm_client, get_llm_model
+
+    if not configured():
+        return {"status": "skipped", "reason": "LLM_API_KEY not set"}
+
+    client = get_llm_client()
+    return generate_design_briefs(DatabaseClient(), client.chat.completions, get_llm_model())
