@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate
 from store_listing.orchestration.seed_curation import (
+    PRODUCT_TAGS,
     CurationResult,
     build_curation_prompt,
     curate_seeds,
@@ -315,3 +316,210 @@ class TestCurateSeeds:
         result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
 
         assert result["pivots"] == 0
+
+
+class TestProductTags:
+    def test_product_tags_contains_three_categories(self) -> None:
+        assert "dtf_apparel" in PRODUCT_TAGS
+        assert "sublimation" in PRODUCT_TAGS
+        assert "sticker_vinyl" in PRODUCT_TAGS
+        assert len(PRODUCT_TAGS) == 3
+
+
+class TestParseProductTags:
+    def test_parses_product_tags_on_promoted(self) -> None:
+        response = json.dumps(
+            {
+                "promote": [42],
+                "reject": [],
+                "product_tags": {"42": ["dtf_apparel"]},
+            }
+        )
+        result = parse_curation_response(response)
+        assert result.product_tags == {"42": ["dtf_apparel"]}
+
+    def test_filters_invalid_tags(self) -> None:
+        response = json.dumps(
+            {
+                "promote": [42],
+                "reject": [],
+                "product_tags": {"42": ["dtf_apparel", "furniture", "sublimation"]},
+            }
+        )
+        result = parse_curation_response(response)
+        assert result.product_tags == {"42": ["dtf_apparel", "sublimation"]}
+
+    def test_missing_product_tags_defaults_empty(self) -> None:
+        response = json.dumps({"promote": [42], "reject": []})
+        result = parse_curation_response(response)
+        assert result.product_tags == {}
+
+    def test_non_dict_product_tags_ignored(self) -> None:
+        response = json.dumps({"promote": [], "reject": [], "product_tags": "not a dict"})
+        result = parse_curation_response(response)
+        assert result.product_tags == {}
+
+    def test_pivot_product_tags_parsed(self) -> None:
+        response = json.dumps(
+            {
+                "promote": [],
+                "reject": [],
+                "pivot": [
+                    {
+                        "from": "hoodie",
+                        "to": "vintage band hoodie",
+                        "reason": "niche",
+                        "product_tags": ["dtf_apparel"],
+                    }
+                ],
+            }
+        )
+        result = parse_curation_response(response)
+        assert result.pivot[0].product_tags == ["dtf_apparel"]
+
+    def test_event_seed_product_tags_parsed(self) -> None:
+        response = json.dumps(
+            {
+                "promote": [],
+                "reject": [],
+                "event_seeds": [
+                    {
+                        "seed": "halloween mug",
+                        "reason": "seasonal",
+                        "event": "halloween",
+                        "product_tags": ["sublimation"],
+                    }
+                ],
+            }
+        )
+        result = parse_curation_response(response)
+        assert result.event_seeds[0].product_tags == ["sublimation"]
+
+    def test_pivot_without_product_tags_defaults_empty(self) -> None:
+        response = json.dumps(
+            {
+                "promote": [],
+                "reject": [],
+                "pivot": [{"from": "a", "to": "b", "reason": "r"}],
+            }
+        )
+        result = parse_curation_response(response)
+        assert result.pivot[0].product_tags == []
+
+    def test_event_seed_without_product_tags_defaults_empty(self) -> None:
+        response = json.dumps(
+            {
+                "promote": [],
+                "reject": [],
+                "event_seeds": [{"seed": "x", "reason": "r", "event": "e"}],
+            }
+        )
+        result = parse_curation_response(response)
+        assert result.event_seeds[0].product_tags == []
+
+
+class TestCurateSeedsProductTags:
+    def _mock_db(self, candidates=None, active_seeds=None) -> MagicMock:
+        db = MagicMock()
+        db.list_pending_candidates.return_value = candidates or []
+        db.list_active_seeds.return_value = active_seeds or []
+        db.cross_seed_counts.return_value = {}
+        db.insert_active_seed.return_value = 1
+        db.insert_curation_log.return_value = 1
+        return db
+
+    def _mock_llm(self, response_json: dict) -> MagicMock:
+        llm = MagicMock()
+        choice = MagicMock()
+        choice.message.content = json.dumps(response_json)
+        llm.create.return_value = MagicMock(choices=[choice])
+        return llm
+
+    def test_promoted_seed_gets_product_tags(self) -> None:
+        candidates = [_candidate(42, "dad jokes shirt")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            {
+                "promote": [42],
+                "reject": [],
+                "product_tags": {"42": ["dtf_apparel"]},
+            }
+        )
+
+        curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        db.insert_product_tags.assert_called_once()
+        call_args = db.insert_product_tags.call_args
+        assert call_args.kwargs["active_seed_id"] == 1
+        assert call_args.kwargs["tags"] == ["dtf_apparel"]
+
+    def test_pivot_seed_gets_product_tags(self) -> None:
+        candidates = [_candidate(1, "hoodie")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            {
+                "promote": [],
+                "reject": [],
+                "pivot": [
+                    {
+                        "from": "hoodie",
+                        "to": "vintage hoodie",
+                        "reason": "niche",
+                        "product_tags": ["dtf_apparel"],
+                    }
+                ],
+            }
+        )
+
+        curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        db.insert_product_tags.assert_called_once()
+        call_args = db.insert_product_tags.call_args
+        assert call_args.kwargs["active_seed_id"] == 1
+        assert call_args.kwargs["tags"] == ["dtf_apparel"]
+
+    def test_event_seed_gets_product_tags(self) -> None:
+        candidates = [_candidate(1, "hoodie")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            {
+                "promote": [],
+                "reject": [],
+                "event_seeds": [
+                    {
+                        "seed": "halloween mug",
+                        "reason": "holiday",
+                        "event": "halloween",
+                        "product_tags": ["sublimation"],
+                    }
+                ],
+            }
+        )
+
+        curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        db.insert_product_tags.assert_called_once()
+        call_args = db.insert_product_tags.call_args
+        assert call_args.kwargs["active_seed_id"] == 1
+        assert call_args.kwargs["tags"] == ["sublimation"]
+
+    def test_no_tags_means_no_insert(self) -> None:
+        candidates = [_candidate(42, "dad jokes shirt")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm({"promote": [42], "reject": []})
+
+        curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        db.insert_product_tags.assert_not_called()
+
+    def test_prompt_includes_product_tags_instruction(self) -> None:
+        messages = build_curation_prompt(
+            candidates=[_candidate(1, "dad jokes shirt")],
+            active_seeds=[],
+            cross_seed_counts={},
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        assert "product_tags" in messages[0]["content"]
+        assert "dtf_apparel" in messages[0]["content"]

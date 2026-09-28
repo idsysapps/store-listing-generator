@@ -140,6 +140,19 @@ data:
 
     CREATE INDEX IF NOT EXISTS idx_curation_log_action ON seed_curation_log(action);
     CREATE INDEX IF NOT EXISTS idx_curation_log_event ON seed_curation_log(event_context);
+
+    -- Table: seed_product_tags
+    -- Tags active seeds with which production methods the design fits.
+    CREATE TABLE IF NOT EXISTS seed_product_tags (
+        id SERIAL PRIMARY KEY,
+        active_seed_id INTEGER NOT NULL REFERENCES active_seeds(id) ON DELETE CASCADE,
+        tag VARCHAR(30) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(active_seed_id, tag)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_seed_product_tags_tag ON seed_product_tags(tag);
+    CREATE INDEX IF NOT EXISTS idx_seed_product_tags_seed ON seed_product_tags(active_seed_id);
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -244,3 +257,15 @@ data:
 
     CREATE INDEX IF NOT EXISTS idx_curation_log_action ON seed_curation_log(action);
     CREATE INDEX IF NOT EXISTS idx_curation_log_event ON seed_curation_log(event_context);
+
+    -- Table: seed_product_tags (production method tagging for phased rollout)
+    CREATE TABLE IF NOT EXISTS seed_product_tags (
+        id SERIAL PRIMARY KEY,
+        active_seed_id INTEGER NOT NULL REFERENCES active_seeds(id) ON DELETE CASCADE,
+        tag VARCHAR(30) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(active_seed_id, tag)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_seed_product_tags_tag ON seed_product_tags(tag);
+    CREATE INDEX IF NOT EXISTS idx_seed_product_tags_seed ON seed_product_tags(active_seed_id);
