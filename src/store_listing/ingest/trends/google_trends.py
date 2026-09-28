@@ -315,6 +315,38 @@ class DatabaseClient:
                 raise RuntimeError(msg)
             return result[0]
 
+    def insert_product_tags(self, active_seed_id: int, tags: list[str]) -> int:
+        if not tags:
+            return 0
+        with self.connect() as conn, conn.cursor() as cur:
+            for tag in tags:
+                cur.execute(
+                    """
+                    INSERT INTO seed_product_tags (active_seed_id, tag)
+                    VALUES (%s, %s)
+                    ON CONFLICT (active_seed_id, tag) DO NOTHING
+                    """,
+                    (active_seed_id, tag),
+                )
+            return len(tags)
+
+    def list_active_seeds_by_tag(self, tag: str) -> list[ActiveSeed]:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT a.id, a.query, a.promotion_score
+                FROM active_seeds a
+                JOIN seed_product_tags t ON t.active_seed_id = a.id
+                WHERE a.archived_at IS NULL AND t.tag = %s
+                ORDER BY a.promotion_score DESC
+                """,
+                (tag,),
+            )
+            return [
+                ActiveSeed(id=row[0], query=row[1], promotion_score=row[2])
+                for row in cur.fetchall()
+            ]
+
 
 class GoogleTrendsClient:
     DEFAULT_SEEDS: ClassVar[list[str]] = [

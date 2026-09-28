@@ -118,3 +118,18 @@ CREATE TABLE seed_curation_log (
 
 CREATE INDEX idx_curation_log_action ON seed_curation_log(action);
 CREATE INDEX idx_curation_log_event ON seed_curation_log(event_context);
+
+-- Table: seed_product_tags
+-- Tags active seeds with which production methods the design fits.
+-- Allows filtering seeds by what we can produce now (e.g. dtf_apparel)
+-- without discarding data for future production methods.
+CREATE TABLE seed_product_tags (
+    id SERIAL PRIMARY KEY,
+    active_seed_id INTEGER NOT NULL REFERENCES active_seeds(id) ON DELETE CASCADE,
+    tag VARCHAR(30) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(active_seed_id, tag)
+);
+
+CREATE INDEX idx_seed_product_tags_tag ON seed_product_tags(tag);
+CREATE INDEX idx_seed_product_tags_seed ON seed_product_tags(active_seed_id);
