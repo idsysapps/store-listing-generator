@@ -74,12 +74,16 @@ type DesignBriefSummary {
   batchId: String
   createdAt: DateTime
   sourceSeeds: [String!]!
+  imageKeyRaw: String
+  imageKeyTransparent: String
+  imageUrl: String
+  imageTransparentUrl: String
 }
 
 type Query {
   trendQueries(limit: Int = 100, offset: Int = 0): TrendQueryConnection!
   trendSummary(query: String!): TrendSummary
-  topTrends(limit: Int = 10): [TrendSummary!]!
+  topTrends(limit: Int = 10, hasDesignBriefs: Boolean = false): [TrendSummary!]!
   trendHistory(query: String!, days: Int = 30): [TrendScore!]!
   activeSeeds(tag: String, limit: Int = 50): [ActiveSeedSummary!]!
   productTags: [String!]!

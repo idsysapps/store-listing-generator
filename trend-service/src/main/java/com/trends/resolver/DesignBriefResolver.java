@@ -1,5 +1,6 @@
 package com.trends.resolver;
 
+import com.trends.config.ImageStorageConfig;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefSummary;
@@ -23,6 +24,9 @@ public class DesignBriefResolver {
 
     @Inject
     DesignBriefRepository designBriefRepository;
+
+    @Inject
+    ImageStorageConfig imageStorageConfig;
 
     @Authenticated
     @Query("designBriefs")
@@ -55,10 +59,14 @@ public class DesignBriefResolver {
                         .collect(Collectors.toList())
                 : List.of();
 
-        return new DesignBriefSummary(
+        DesignBriefSummary summary = new DesignBriefSummary(
                 brief.id, brief.concept, brief.productType,
                 products, brief.audience, brief.visualStyle,
                 brief.confidence, brief.reasoning, brief.llmModel,
-                brief.batchId, brief.createdAt, sourceSeeds);
+                brief.batchId, brief.createdAt, sourceSeeds,
+                brief.imageKeyRaw, brief.imageKeyTransparent);
+        summary.setImageUrl(imageStorageConfig.buildUrl(brief.imageKeyRaw));
+        summary.setImageTransparentUrl(imageStorageConfig.buildUrl(brief.imageKeyTransparent));
+        return summary;
     }
 }

@@ -16,13 +16,18 @@ public class DesignBriefSummary {
     private String batchId;
     private OffsetDateTime createdAt;
     private List<String> sourceSeeds;
+    private String imageKeyRaw;
+    private String imageKeyTransparent;
+    private String imageUrl;
+    private String imageTransparentUrl;
 
     public DesignBriefSummary() {}
 
     public DesignBriefSummary(Integer id, String concept, String productType,
             List<String> specificProducts, String audience, String visualStyle,
             Integer confidence, String reasoning, String llmModel, String batchId,
-            OffsetDateTime createdAt, List<String> sourceSeeds) {
+            OffsetDateTime createdAt, List<String> sourceSeeds,
+            String imageKeyRaw, String imageKeyTransparent) {
         this.id = id;
         this.concept = concept;
         this.productType = productType;
@@ -35,6 +40,8 @@ public class DesignBriefSummary {
         this.batchId = batchId;
         this.createdAt = createdAt;
         this.sourceSeeds = sourceSeeds;
+        this.imageKeyRaw = imageKeyRaw;
+        this.imageKeyTransparent = imageKeyTransparent;
     }
 
     public Integer getId() { return id; }
@@ -72,4 +79,16 @@ public class DesignBriefSummary {
 
     public List<String> getSourceSeeds() { return sourceSeeds; }
     public void setSourceSeeds(List<String> sourceSeeds) { this.sourceSeeds = sourceSeeds; }
+
+    public String getImageKeyRaw() { return imageKeyRaw; }
+    public void setImageKeyRaw(String imageKeyRaw) { this.imageKeyRaw = imageKeyRaw; }
+
+    public String getImageKeyTransparent() { return imageKeyTransparent; }
+    public void setImageKeyTransparent(String imageKeyTransparent) { this.imageKeyTransparent = imageKeyTransparent; }
+
+    public String getImageUrl() { return imageUrl; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+
+    public String getImageTransparentUrl() { return imageTransparentUrl; }
+    public void setImageTransparentUrl(String imageTransparentUrl) { this.imageTransparentUrl = imageTransparentUrl; }
 }

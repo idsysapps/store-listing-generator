@@ -19,6 +19,9 @@ config:
   llmDesignBriefsEnabled: "false"
   llmMaxBriefs: "8"
   llmMaxBriefSeeds: "20"
+  awsDefaultRegion: "us-west-2"
+  s3EndpointUrl: ""
+  designS3Bucket: "store-listing-designs"
 
 secrets:
   databaseUser: store_listing
@@ -32,6 +35,8 @@ secrets:
   redditClientId: ""
   redditClientSecret: ""
   llmApiKey: ""
+  awsAccessKeyId: ""
+  awsSecretAccessKey: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest

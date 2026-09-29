@@ -147,7 +147,9 @@ CREATE TABLE design_briefs (
     reasoning TEXT,
     llm_model VARCHAR(100),
     batch_id VARCHAR(50),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    image_key_raw TEXT,
+    image_key_transparent TEXT
 );
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);
