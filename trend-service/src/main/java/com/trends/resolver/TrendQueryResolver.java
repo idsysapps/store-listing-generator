@@ -60,24 +60,24 @@ public class TrendQueryResolver {
         List<TrendScore> latestScores = trendQueryRepository.findLatestScoresByQueryId(trendQuery.id, 10);
 
         if (latestScores.isEmpty()) {
-            return new TrendSummary(query, 0, 0, List.of(), null);
+            return new TrendSummary(query, 0L, 0L, List.of(), null);
         }
 
         TrendScore latest = latestScores.get(0);
-        Integer velocity = latest.delta != null ? latest.delta : 0;
+        Long velocity = latest.delta != null ? latest.delta : 0L;
         String source = latest.source != null ? latest.source : "google";
 
-        Map<String, Integer> regionScores = latestScores.stream()
+        Map<String, Long> regionScores = latestScores.stream()
                 .collect(Collectors.groupingBy(
                         ts -> ts.region != null ? ts.region : "Unknown",
                         Collectors.collectingAndThen(
-                                Collectors.maxBy(Comparator.comparingInt(ts -> ts.score != null ? ts.score : 0)),
-                                opt -> opt.map(ts -> ts.score).orElse(0)
+                                Collectors.maxBy(Comparator.comparingLong(ts -> ts.score != null ? ts.score : 0L)),
+                                opt -> opt.map(ts -> ts.score).orElse(0L)
                         )
                 ));
 
         List<RegionScore> topRegions = regionScores.entrySet().stream()
-                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(5)
                 .map(e -> new RegionScore(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());

@@ -5,13 +5,13 @@ import java.util.List;
 
 public class TrendUpdate {
     private String query;
-    private Integer delta;
-    private Integer score;
+    private Long delta;
+    private Long score;
     private OffsetDateTime timestamp;
 
     public TrendUpdate() {}
 
-    public TrendUpdate(String query, Integer delta, Integer score, OffsetDateTime timestamp) {
+    public TrendUpdate(String query, Long delta, Long score, OffsetDateTime timestamp) {
         this.query = query;
         this.delta = delta;
         this.score = score;
@@ -26,19 +26,19 @@ public class TrendUpdate {
         this.query = query;
     }
 
-    public Integer getDelta() {
+    public Long getDelta() {
         return delta;
     }
 
-    public void setDelta(Integer delta) {
+    public void setDelta(Long delta) {
         this.delta = delta;
     }
 
-    public Integer getScore() {
+    public Long getScore() {
         return score;
     }
 
-    public void setScore(Integer score) {
+    public void setScore(Long score) {
         this.score = score;
     }
 
