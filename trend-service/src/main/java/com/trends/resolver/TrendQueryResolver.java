@@ -105,7 +105,7 @@ public class TrendQueryResolver {
     @Authenticated
     @Query("topTrends")
     public List<TrendSummary> getTopTrends(int limit, boolean hasDesignBriefs) {
-        LOG.debugf("Fetching top trends: limit=%d, hasDesignBriefs=%s", limit, hasDesignBriefs);
+        LOG.debugf("Fetching top trends: limit=%d, hasDesignBriefs=%s", (Object) limit, hasDesignBriefs);
 
         Map<String, Long> maxScoresBySource = trendQueryRepository.findMaxScoreBySource();
 
