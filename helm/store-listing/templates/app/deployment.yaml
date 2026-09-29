@@ -140,7 +140,7 @@ spec:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: AWS_SECRET_ACCESS_KEY
             - name: AWS_DEFAULT_REGION
-              value: {{ .Values.config.awsDefaultRegion | default "us-east-1" | quote }}
+              value: {{ .Values.config.awsDefaultRegion | default "us-west-2" | quote }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -266,6 +266,6 @@ spec:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: AWS_SECRET_ACCESS_KEY
             - name: AWS_DEFAULT_REGION
-              value: {{ .Values.config.awsDefaultRegion | default "us-east-1" | quote }}
+              value: {{ .Values.config.awsDefaultRegion | default "us-west-2" | quote }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}

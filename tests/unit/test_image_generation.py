@@ -112,7 +112,7 @@ class TestGenerateImage:
         assert result.image_bytes is None
         assert "Bedrock timeout" in (result.error or "")
 
-    def test_uses_1024x1024_dimensions(self) -> None:
+    def test_uses_square_aspect_ratio(self) -> None:
         mock_client = MagicMock()
         fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
         mock_client.invoke_model.return_value = {
@@ -127,5 +127,6 @@ class TestGenerateImage:
         call_kwargs = mock_client.invoke_model.call_args
         body_str = call_kwargs.kwargs.get("body", call_kwargs[1].get("body", ""))
         body = json.loads(body_str)
-        assert body.get("width") == 1024
-        assert body.get("height") == 1024
+        assert body.get("aspect_ratio") == "1:1"
+        assert body.get("mode") == "text-to-image"
+        assert body.get("output_format") == "png"

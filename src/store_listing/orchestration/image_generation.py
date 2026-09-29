@@ -1,6 +1,6 @@
 """Bedrock-based image generation from design briefs.
 
-Temporary solution using AWS Bedrock Stability SD 3.5 until DGX hardware
+Temporary solution using AWS Bedrock Stable Image Core until DGX hardware
 is available for self-hosted ComfyUI + Flux Schnell. See issue #111.
 """
 
@@ -17,7 +17,8 @@ from store_listing.orchestration.design_briefs import DesignBrief
 
 logger = logging.getLogger(__name__)
 
-BEDROCK_MODEL_ID: str = os.environ.get("BEDROCK_IMAGE_MODEL_ID", "stability.sd3-large-v1:0")
+BEDROCK_MODEL_ID: str = os.environ.get("BEDROCK_IMAGE_MODEL_ID", "stability.stable-image-core-v1:1")
+BEDROCK_REGION: str = os.environ.get("AWS_BEDROCK_REGION", "us-west-2")
 
 PRODUCT_TYPE_CONTEXT: dict[str, str] = {
     "dtf_apparel": "design for DTF print on apparel, t-shirt graphic, clean edges, print-ready",
@@ -56,8 +57,9 @@ def generate_image(
             body=json.dumps(
                 {
                     "prompt": prompt,
-                    "width": 1024,
-                    "height": 1024,
+                    "mode": "text-to-image",
+                    "aspect_ratio": "1:1",
+                    "output_format": "png",
                 }
             ),
         )

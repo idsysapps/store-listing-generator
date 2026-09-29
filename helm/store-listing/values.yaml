@@ -19,7 +19,7 @@ config:
   llmDesignBriefsEnabled: "false"
   llmMaxBriefs: "8"
   llmMaxBriefSeeds: "20"
-  awsDefaultRegion: "us-east-1"
+  awsDefaultRegion: "us-west-2"
 
 secrets:
   databaseUser: store_listing
