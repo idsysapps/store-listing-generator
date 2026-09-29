@@ -24,4 +24,18 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
                 .page(0, limit)
                 .list();
     }
+
+    public List<DesignBrief> findBySeedKeyword(String seedKeyword) {
+        return getEntityManager()
+                .createQuery(
+                        "SELECT DISTINCT db FROM DesignBrief db "
+                                + "JOIN db.sources dbs "
+                                + "JOIN dbs.activeSeed a "
+                                + "WHERE a.query = :seedKeyword "
+                                + "ORDER BY db.createdAt DESC",
+                        DesignBrief.class)
+                .setParameter("seedKeyword", seedKeyword)
+                .setMaxResults(5)
+                .getResultList();
+    }
 }

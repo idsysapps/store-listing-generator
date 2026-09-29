@@ -17,10 +17,12 @@ type TrendScore {
 
 type TrendSummary {
   query: String!
+  seedKeyword: String
   latestScore: Int!
   velocity: Int!
   source: String
   topRegions(limit: Int = 5): [RegionScore!]!
+  designBriefs: [DesignBriefSummary!]!
 }
 
 type RegionScore {

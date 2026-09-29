@@ -3,6 +3,7 @@ package com.trends.resolver;
 import com.trends.domain.TrendQuery;
 import com.trends.domain.TrendScore;
 import com.trends.dto.TrendSummary;
+import com.trends.repository.DesignBriefRepository;
 import com.trends.repository.TrendQueryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 class TrendQueryResolverTest {
@@ -21,12 +23,16 @@ class TrendQueryResolverTest {
     @Mock
     TrendQueryRepository trendQueryRepository;
 
+    @Mock
+    DesignBriefRepository designBriefRepository;
+
     @InjectMocks
     TrendQueryResolver trendQueryResolver;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        when(designBriefRepository.findBySeedKeyword(anyString())).thenReturn(List.of());
     }
 
     @Test
@@ -98,6 +104,22 @@ class TrendQueryResolverTest {
         TrendSummary result = trendQueryResolver.getTrendSummary("funny hoodie");
 
         assertEquals("google", result.getSource());
+    }
+
+    @Test
+    void testGetTrendSummary_IncludesSeedKeyword() {
+        TrendQuery trendQuery = new TrendQuery("hoodie", "funny hoodie");
+        trendQuery.id = 1;
+
+        TrendScore score = new TrendScore(trendQuery, 75L, 10L, "US", "youtube");
+
+        when(trendQueryRepository.findByQuery("funny hoodie")).thenReturn(trendQuery);
+        when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(score));
+
+        TrendSummary result = trendQueryResolver.getTrendSummary("funny hoodie");
+
+        assertEquals("hoodie", result.getSeedKeyword());
+        assertNotNull(result.getDesignBriefs());
     }
 
     @Test
