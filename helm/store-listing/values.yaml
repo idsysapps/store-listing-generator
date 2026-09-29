@@ -24,7 +24,7 @@ secrets:
   databaseUser: store_listing
   databasePassword: store_listing
   jwtSecretName: ""
-  jwtIssuer: https://costbook.example.com
+  jwtIssuer: https://costbook.com
   apifyApiToken: ""
   githubToken: ""
   youtubeApiKey: ""
