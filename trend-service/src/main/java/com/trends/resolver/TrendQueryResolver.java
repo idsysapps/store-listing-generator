@@ -1,8 +1,10 @@
 package com.trends.resolver;
 
+import com.trends.domain.DesignBrief;
 import com.trends.domain.TrendQuery;
 import com.trends.domain.TrendScore;
 import com.trends.dto.*;
+import com.trends.repository.DesignBriefRepository;
 import com.trends.repository.TrendQueryRepository;
 import io.quarkus.security.Authenticated;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -12,6 +14,7 @@ import org.eclipse.microprofile.graphql.Query;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +28,9 @@ public class TrendQueryResolver {
 
     @Inject
     TrendQueryRepository trendQueryRepository;
+
+    @Inject
+    DesignBriefRepository designBriefRepository;
 
     @Authenticated
     @Query("trendQueries")
@@ -82,7 +88,14 @@ public class TrendQueryResolver {
                 .map(e -> new RegionScore(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());
 
-        return new TrendSummary(query, latest.score, velocity, topRegions, source);
+        String seedKeyword = trendQuery.seedKeyword;
+
+        List<DesignBriefSummary> briefs = designBriefRepository.findBySeedKeyword(seedKeyword)
+                .stream()
+                .map(this::toDesignBriefSummary)
+                .collect(Collectors.toList());
+
+        return new TrendSummary(query, seedKeyword, latest.score, velocity, topRegions, source, null, briefs);
     }
 
     @Authenticated
@@ -90,12 +103,20 @@ public class TrendQueryResolver {
     public List<TrendSummary> getTopTrends(int limit) {
         LOG.debugf("Fetching top trends: limit=%d", limit);
 
+        Map<String, Long> maxScoresBySource = trendQueryRepository.findMaxScoreBySource();
+
         List<TrendQuery> topQueries = trendQueryRepository.findTopByLatestScore(limit);
         List<TrendSummary> summaries = new ArrayList<>();
 
         for (TrendQuery tq : topQueries) {
             TrendSummary summary = getTrendSummary(tq.query);
             if (summary != null) {
+                Long maxForSource = maxScoresBySource.getOrDefault(
+                        summary.getSource(), summary.getLatestScore());
+                if (maxForSource > 0 && summary.getLatestScore() != null) {
+                    summary.setNormalizedScore(
+                            (int) (summary.getLatestScore() * 100 / maxForSource));
+                }
                 summaries.add(summary);
             }
         }
@@ -115,5 +136,23 @@ public class TrendQueryResolver {
             return List.of();
         }
         return trendQueryRepository.findScoresByQueryId(trendQuery.id, limit, offset);
+    }
+
+    private DesignBriefSummary toDesignBriefSummary(DesignBrief brief) {
+        List<String> products = brief.specificProducts != null
+                ? Arrays.asList(brief.specificProducts)
+                : List.of();
+
+        List<String> sourceSeeds = brief.sources != null
+                ? brief.sources.stream()
+                        .map(s -> s.activeSeed.query)
+                        .collect(Collectors.toList())
+                : List.of();
+
+        return new DesignBriefSummary(
+                brief.id, brief.concept, brief.productType,
+                products, brief.audience, brief.visualStyle,
+                brief.confidence, brief.reasoning, brief.llmModel,
+                brief.batchId, brief.createdAt, sourceSeeds);
     }
 }
