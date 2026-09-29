@@ -20,6 +20,8 @@ config:
   llmMaxBriefs: "8"
   llmMaxBriefSeeds: "20"
   awsDefaultRegion: "us-west-2"
+  s3EndpointUrl: ""
+  designS3Bucket: "store-listing-designs"
 
 secrets:
   databaseUser: store_listing

@@ -141,6 +141,12 @@ spec:
                   key: AWS_SECRET_ACCESS_KEY
             - name: AWS_DEFAULT_REGION
               value: {{ .Values.config.awsDefaultRegion | default "us-west-2" | quote }}
+            - name: DESIGN_S3_BUCKET
+              value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
+            {{- if .Values.config.s3EndpointUrl }}
+            - name: S3_ENDPOINT_URL
+              value: {{ .Values.config.s3EndpointUrl | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -267,5 +273,11 @@ spec:
                   key: AWS_SECRET_ACCESS_KEY
             - name: AWS_DEFAULT_REGION
               value: {{ .Values.config.awsDefaultRegion | default "us-west-2" | quote }}
+            - name: DESIGN_S3_BUCKET
+              value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
+            {{- if .Values.config.s3EndpointUrl }}
+            - name: S3_ENDPOINT_URL
+              value: {{ .Values.config.s3EndpointUrl | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
