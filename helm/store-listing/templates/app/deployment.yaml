@@ -129,6 +129,18 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_CANDIDATES
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.config.awsDefaultRegion | default "us-east-1" | quote }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -243,5 +255,17 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_CANDIDATES
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.config.awsDefaultRegion | default "us-east-1" | quote }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}

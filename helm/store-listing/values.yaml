@@ -19,6 +19,7 @@ config:
   llmDesignBriefsEnabled: "false"
   llmMaxBriefs: "8"
   llmMaxBriefSeeds: "20"
+  awsDefaultRegion: "us-east-1"
 
 secrets:
   databaseUser: store_listing
@@ -32,6 +33,8 @@ secrets:
   redditClientId: ""
   redditClientSecret: ""
   llmApiKey: ""
+  awsAccessKeyId: ""
+  awsSecretAccessKey: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest
