@@ -138,4 +138,34 @@ class DesignBriefResolverTest {
         assertEquals(1, result.size());
         assertTrue(result.get(0).getSpecificProducts().isEmpty());
     }
+
+    @Test
+    void testGetDesignBriefs_IncludesImageKeys() {
+        DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
+        brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
+        brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
+
+        when(designBriefRepository.findRecent(10)).thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, null, 10);
+
+        assertEquals(1, result.size());
+        assertEquals("designs/2026/09/dtf_apparel/1_raw.png", result.get(0).getImageKeyRaw());
+        assertEquals("designs/2026/09/dtf_apparel/1_transparent.png", result.get(0).getImageKeyTransparent());
+    }
+
+    @Test
+    void testGetDesignBriefs_NullImageKeysWhenNotGenerated() {
+        DesignBrief brief = makeBrief(1, "No Image Brief", "sublimation");
+        brief.imageKeyRaw = null;
+        brief.imageKeyTransparent = null;
+
+        when(designBriefRepository.findRecent(10)).thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, null, 10);
+
+        assertEquals(1, result.size());
+        assertNull(result.get(0).getImageKeyRaw());
+        assertNull(result.get(0).getImageKeyTransparent());
+    }
 }

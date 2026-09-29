@@ -43,6 +43,12 @@ public class DesignBrief extends PanacheEntityBase {
     @Column(name = "created_at")
     public OffsetDateTime createdAt;
 
+    @Column(name = "image_key_raw")
+    public String imageKeyRaw;
+
+    @Column(name = "image_key_transparent")
+    public String imageKeyTransparent;
+
     @OneToMany(mappedBy = "designBrief", fetch = FetchType.LAZY)
     public List<DesignBriefSource> sources;
 

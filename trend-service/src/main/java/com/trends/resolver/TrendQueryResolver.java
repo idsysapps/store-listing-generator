@@ -100,17 +100,24 @@ public class TrendQueryResolver {
 
     @Authenticated
     @Query("topTrends")
-    public List<TrendSummary> getTopTrends(int limit) {
-        LOG.debugf("Fetching top trends: limit=%d", limit);
+    public List<TrendSummary> getTopTrends(int limit, boolean hasDesignBriefs) {
+        LOG.debugf("Fetching top trends: limit=%d, hasDesignBriefs=%s", limit, hasDesignBriefs);
 
         Map<String, Long> maxScoresBySource = trendQueryRepository.findMaxScoreBySource();
 
-        List<TrendQuery> topQueries = trendQueryRepository.findTopByLatestScore(limit);
+        int fetchLimit = hasDesignBriefs ? limit * 5 : limit;
+        List<TrendQuery> topQueries = trendQueryRepository.findTopByLatestScore(fetchLimit);
         List<TrendSummary> summaries = new ArrayList<>();
 
         for (TrendQuery tq : topQueries) {
+            if (summaries.size() >= limit) {
+                break;
+            }
             TrendSummary summary = getTrendSummary(tq.query);
             if (summary != null) {
+                if (hasDesignBriefs && summary.getDesignBriefs().isEmpty()) {
+                    continue;
+                }
                 Long maxForSource = maxScoresBySource.getOrDefault(
                         summary.getSource(), summary.getLatestScore());
                 if (maxForSource > 0 && summary.getLatestScore() != null) {
@@ -153,6 +160,7 @@ public class TrendQueryResolver {
                 brief.id, brief.concept, brief.productType,
                 products, brief.audience, brief.visualStyle,
                 brief.confidence, brief.reasoning, brief.llmModel,
-                brief.batchId, brief.createdAt, sourceSeeds);
+                brief.batchId, brief.createdAt, sourceSeeds,
+                brief.imageKeyRaw, brief.imageKeyTransparent);
     }
 }

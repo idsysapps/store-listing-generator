@@ -13,7 +13,6 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-
 from store_listing.orchestration.design_briefs import DesignBrief
 
 logger = logging.getLogger(__name__)
@@ -36,6 +35,7 @@ class ImageResult:
     image_bytes: bytes | None
     prompt: str
     error: str | None = None
+    raw_bytes: bytes | None = None
 
 
 def build_prompt_from_brief(brief: DesignBrief) -> str:
@@ -82,13 +82,14 @@ def generate_image(
         logger.warning("Bedrock image generation failed: %s", e)
         return ImageResult(image_bytes=None, prompt=prompt, error=str(e))
 
+    raw_bytes = image_bytes
     if brief.product_type == "dtf_apparel":
         try:
             image_bytes = remove_background(image_bytes, bedrock_client=bedrock_client)
         except Exception as e:  # noqa: BLE001
             logger.warning("Background removal failed, returning raw image: %s", e)
 
-    return ImageResult(image_bytes=image_bytes, prompt=prompt)
+    return ImageResult(image_bytes=image_bytes, prompt=prompt, raw_bytes=raw_bytes)
 
 
 REMOVE_BG_MODEL_ID: str = "us.stability.stable-image-remove-background-v1:0"

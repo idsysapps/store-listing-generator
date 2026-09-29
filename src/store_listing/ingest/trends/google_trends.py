@@ -445,6 +445,45 @@ class DatabaseClient:
             row = cur.fetchone()
             return None if row is None else row[0]
 
+    def list_briefs_without_images(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, concept, product_type, audience, visual_style
+                FROM design_briefs
+                WHERE image_key_raw IS NULL
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return [
+                {
+                    "id": row[0],
+                    "concept": row[1],
+                    "product_type": row[2],
+                    "audience": row[3],
+                    "visual_style": row[4],
+                }
+                for row in cur.fetchall()
+            ]
+
+    def update_brief_image_keys(
+        self,
+        brief_id: int,
+        image_key_raw: str,
+        image_key_transparent: str | None,
+    ) -> None:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE design_briefs
+                SET image_key_raw = %s, image_key_transparent = %s
+                WHERE id = %s
+                """,
+                (image_key_raw, image_key_transparent, brief_id),
+            )
+
 
 class GoogleTrendsClient:
     DEFAULT_SEEDS: ClassVar[list[str]] = [

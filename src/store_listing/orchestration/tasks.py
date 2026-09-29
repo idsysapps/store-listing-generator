@@ -114,6 +114,10 @@ if _llm_design_briefs_enabled():
         "task": "store_listing.orchestration.tasks.generate_design_briefs_task",
         "schedule": crontab(hour=7, minute=0),
     }
+    celery_app.conf.beat_schedule["design-image-generation"] = {
+        "task": "store_listing.orchestration.tasks.generate_design_images_task",
+        "schedule": crontab(hour=7, minute=30),
+    }
 
 
 def _active_seed_keywords(db_client: DatabaseClient) -> list[str]:
@@ -300,3 +304,28 @@ def generate_design_briefs_task() -> dict:
 
     client = get_llm_client()
     return generate_design_briefs(DatabaseClient(), client.chat.completions, get_llm_model())
+
+
+@celery_app.task
+def generate_design_images_task() -> dict:
+    """Generate images for design briefs via Bedrock, store in S3, update DB."""
+    import boto3
+
+    from store_listing.orchestration.image_generation import BEDROCK_REGION
+    from store_listing.orchestration.image_pipeline import generate_images_for_briefs
+    from store_listing.orchestration.image_storage import S3_BUCKET, S3_ENDPOINT_URL
+
+    bedrock_client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
+
+    s3_kwargs: dict[str, str] = {}
+    if S3_ENDPOINT_URL:
+        s3_kwargs["endpoint_url"] = S3_ENDPOINT_URL
+    s3_client = boto3.client("s3", **s3_kwargs)
+
+    return generate_images_for_briefs(
+        db_client=DatabaseClient(),
+        bedrock_client=bedrock_client,
+        s3_client=s3_client,
+        bucket=S3_BUCKET,
+        endpoint_url=S3_ENDPOINT_URL,
+    )

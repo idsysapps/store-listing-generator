@@ -59,6 +59,7 @@ public class DesignBriefResolver {
                 brief.id, brief.concept, brief.productType,
                 products, brief.audience, brief.visualStyle,
                 brief.confidence, brief.reasoning, brief.llmModel,
-                brief.batchId, brief.createdAt, sourceSeeds);
+                brief.batchId, brief.createdAt, sourceSeeds,
+                brief.imageKeyRaw, brief.imageKeyTransparent);
     }
 }

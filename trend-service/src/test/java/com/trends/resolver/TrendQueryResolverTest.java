@@ -1,5 +1,6 @@
 package com.trends.resolver;
 
+import com.trends.domain.DesignBrief;
 import com.trends.domain.TrendQuery;
 import com.trends.domain.TrendScore;
 import com.trends.dto.TrendSummary;
@@ -85,7 +86,7 @@ class TrendQueryResolverTest {
         when(trendQueryRepository.findByQuery("funny tshirt")).thenReturn(tq2);
         when(trendQueryRepository.findLatestScoresByQueryId(2, 10)).thenReturn(List.of(tshirtScore));
 
-        List<TrendSummary> result = trendQueryResolver.getTopTrends(10);
+        List<TrendSummary> result = trendQueryResolver.getTopTrends(10, false);
 
         assertEquals(2, result.size());
         assertEquals("funny tshirt", result.get(0).getQuery());
@@ -105,7 +106,7 @@ class TrendQueryResolverTest {
         when(trendQueryRepository.findByQuery("cool hoodie")).thenReturn(tq1);
         when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(youtubeScore));
 
-        List<TrendSummary> result = trendQueryResolver.getTopTrends(10);
+        List<TrendSummary> result = trendQueryResolver.getTopTrends(10, false);
 
         assertEquals(1, result.size());
         assertEquals(50, result.get(0).getNormalizedScore());
@@ -141,6 +142,58 @@ class TrendQueryResolverTest {
 
         assertEquals("hoodie", result.getSeedKeyword());
         assertNotNull(result.getDesignBriefs());
+    }
+
+    @Test
+    void testGetTopTrends_HasDesignBriefsTrue_FiltersOnlyWithBriefs() {
+        TrendQuery tq1 = new TrendQuery("hoodie", "cool hoodie");
+        tq1.id = 1;
+
+        TrendQuery tq2 = new TrendQuery("tshirt", "funny tshirt");
+        tq2.id = 2;
+
+        when(trendQueryRepository.findTopByLatestScore(50)).thenReturn(List.of(tq1, tq2));
+        when(trendQueryRepository.findMaxScoreBySource()).thenReturn(Map.of("google", 100L));
+
+        TrendScore hoodieScore = new TrendScore(tq1, 50L, 5L, "US");
+        when(trendQueryRepository.findByQuery("cool hoodie")).thenReturn(tq1);
+        when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(hoodieScore));
+
+        TrendScore tshirtScore = new TrendScore(tq2, 100L, 20L, "US");
+        when(trendQueryRepository.findByQuery("funny tshirt")).thenReturn(tq2);
+        when(trendQueryRepository.findLatestScoresByQueryId(2, 10)).thenReturn(List.of(tshirtScore));
+
+        // Only tq1 has design briefs
+        DesignBrief brief = new DesignBrief();
+        brief.id = 1;
+        brief.concept = "Cool Hoodie Design";
+        brief.productType = "dtf_apparel";
+        brief.confidence = 80;
+        brief.sources = List.of();
+        when(designBriefRepository.findBySeedKeyword("hoodie")).thenReturn(List.of(brief));
+        when(designBriefRepository.findBySeedKeyword("tshirt")).thenReturn(List.of());
+
+        List<TrendSummary> result = trendQueryResolver.getTopTrends(10, true);
+
+        assertEquals(1, result.size());
+        assertEquals("cool hoodie", result.get(0).getQuery());
+    }
+
+    @Test
+    void testGetTopTrends_HasDesignBriefsFalse_ReturnsAll() {
+        TrendQuery tq1 = new TrendQuery("hoodie", "cool hoodie");
+        tq1.id = 1;
+
+        when(trendQueryRepository.findTopByLatestScore(10)).thenReturn(List.of(tq1));
+        when(trendQueryRepository.findMaxScoreBySource()).thenReturn(Map.of("google", 100L));
+
+        TrendScore hoodieScore = new TrendScore(tq1, 50L, 5L, "US");
+        when(trendQueryRepository.findByQuery("cool hoodie")).thenReturn(tq1);
+        when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(hoodieScore));
+
+        List<TrendSummary> result = trendQueryResolver.getTopTrends(10, false);
+
+        assertEquals(1, result.size());
     }
 
     @Test
