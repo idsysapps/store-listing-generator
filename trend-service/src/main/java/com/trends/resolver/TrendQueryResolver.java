@@ -90,24 +90,17 @@ public class TrendQueryResolver {
     public List<TrendSummary> getTopTrends(int limit) {
         LOG.debugf("Fetching top trends: limit=%d", limit);
 
-        List<TrendQuery> allQueries = trendQueryRepository.listAll();
+        List<TrendQuery> topQueries = trendQueryRepository.findTopByLatestScore(limit);
         List<TrendSummary> summaries = new ArrayList<>();
 
-        for (TrendQuery tq : allQueries) {
+        for (TrendQuery tq : topQueries) {
             TrendSummary summary = getTrendSummary(tq.query);
-            if (summary != null && summary.getLatestScore() != null && summary.getLatestScore() > 0) {
+            if (summary != null) {
                 summaries.add(summary);
             }
         }
 
-        return summaries.stream()
-                .sorted((a, b) -> {
-                    int scoreCompare = b.getLatestScore().compareTo(a.getLatestScore());
-                    if (scoreCompare != 0) return scoreCompare;
-                    return b.getVelocity().compareTo(a.getVelocity());
-                })
-                .limit(limit)
-                .collect(Collectors.toList());
+        return summaries;
     }
 
     @Authenticated

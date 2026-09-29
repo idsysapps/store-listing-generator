@@ -67,7 +67,7 @@ class TrendQueryResolverTest {
         TrendQuery tq2 = new TrendQuery("tshirt", "funny tshirt");
         tq2.id = 2;
 
-        when(trendQueryRepository.listAll()).thenReturn(List.of(tq1, tq2));
+        when(trendQueryRepository.findTopByLatestScore(10)).thenReturn(List.of(tq2, tq1));
 
         TrendScore hoodieScore = new TrendScore(tq1, 50L, 5L, "US");
         when(trendQueryRepository.findByQuery("cool hoodie")).thenReturn(tq1);

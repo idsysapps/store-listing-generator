@@ -58,6 +58,25 @@ public class TrendQueryRepository implements PanacheRepository<TrendQuery> {
                 .getResultList();
     }
 
+    @SuppressWarnings("unchecked")
+    public List<TrendQuery> findTopByLatestScore(int limit) {
+        return getEntityManager()
+                .createNativeQuery("""
+                    SELECT tq.*
+                    FROM trend_queries tq
+                    JOIN (
+                        SELECT ts.query_id, ts.score, ts.delta,
+                               ROW_NUMBER() OVER (PARTITION BY ts.query_id ORDER BY ts.fetched_at DESC) as rn
+                        FROM trend_scores ts
+                    ) latest ON latest.query_id = tq.id
+                    WHERE latest.rn = 1 AND latest.score > 0
+                    ORDER BY latest.score DESC, COALESCE(latest.delta, 0) DESC
+                    LIMIT :limit
+                    """, TrendQuery.class)
+                .setParameter("limit", limit)
+                .getResultList();
+    }
+
     public String encodeCursor(Integer id) {
         return Base64.getEncoder().encodeToString(("cursor:" + id).getBytes());
     }
