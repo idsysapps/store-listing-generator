@@ -26,8 +26,9 @@ spec:
           command: ["/bin/bash", "-c"]
           args:
             - |-
-              psql -v ON_ERROR_STOP=1 -h {{ include "store-listing.postgres.fullname" . }} \
-                -U "$PGUSER" -d "$PGDATABASE" -f /migrate/migrations.sql
+              psql -v ON_ERROR_STOP=1 \
+                "postgresql://$PGUSER:$PGPASSWORD@{{ include "store-listing.postgres.fullname" . }}:5432/$PGDATABASE" \
+                -f /migrate/migrations.sql
           env:
             - name: PGPASSWORD
               valueFrom:
