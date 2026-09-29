@@ -21,6 +21,7 @@ type TrendSummary {
   latestScore: Int!
   velocity: Int!
   source: String
+  normalizedScore: Int
   topRegions(limit: Int = 5): [RegionScore!]!
   designBriefs: [DesignBriefSummary!]!
 }

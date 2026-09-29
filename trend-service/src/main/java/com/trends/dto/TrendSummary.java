@@ -9,26 +9,29 @@ public class TrendSummary {
     private Long velocity;
     private List<RegionScore> topRegions;
     private String source;
+    private Integer normalizedScore;
     private List<DesignBriefSummary> designBriefs;
 
     public TrendSummary() {}
 
     public TrendSummary(String query, Long latestScore, Long velocity, List<RegionScore> topRegions) {
-        this(query, null, latestScore, velocity, topRegions, null, List.of());
+        this(query, null, latestScore, velocity, topRegions, null, null, List.of());
     }
 
     public TrendSummary(String query, Long latestScore, Long velocity, List<RegionScore> topRegions, String source) {
-        this(query, null, latestScore, velocity, topRegions, source, List.of());
+        this(query, null, latestScore, velocity, topRegions, source, null, List.of());
     }
 
     public TrendSummary(String query, String seedKeyword, Long latestScore, Long velocity,
-            List<RegionScore> topRegions, String source, List<DesignBriefSummary> designBriefs) {
+            List<RegionScore> topRegions, String source, Integer normalizedScore,
+            List<DesignBriefSummary> designBriefs) {
         this.query = query;
         this.seedKeyword = seedKeyword;
         this.latestScore = latestScore;
         this.velocity = velocity;
         this.topRegions = topRegions;
         this.source = source;
+        this.normalizedScore = normalizedScore;
         this.designBriefs = designBriefs;
     }
 
@@ -78,6 +81,14 @@ public class TrendSummary {
 
     public void setSource(String source) {
         this.source = source;
+    }
+
+    public Integer getNormalizedScore() {
+        return normalizedScore;
+    }
+
+    public void setNormalizedScore(Integer normalizedScore) {
+        this.normalizedScore = normalizedScore;
     }
 
     public List<DesignBriefSummary> getDesignBriefs() {

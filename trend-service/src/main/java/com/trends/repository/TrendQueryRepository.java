@@ -7,7 +7,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @ApplicationScoped
 public class TrendQueryRepository implements PanacheRepository<TrendQuery> {
@@ -75,6 +77,28 @@ public class TrendQueryRepository implements PanacheRepository<TrendQuery> {
                     """, TrendQuery.class)
                 .setParameter("limit", limit)
                 .getResultList();
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Long> findMaxScoreBySource() {
+        List<Object[]> rows = getEntityManager()
+                .createNativeQuery("""
+                    SELECT ts.source, MAX(ts.score) as max_score
+                    FROM trend_scores ts
+                    WHERE ts.source IS NOT NULL
+                    GROUP BY ts.source
+                    """)
+                .getResultList();
+
+        Map<String, Long> result = new HashMap<>();
+        for (Object[] row : rows) {
+            String source = (String) row[0];
+            Long maxScore = ((Number) row[1]).longValue();
+            if (maxScore > 0) {
+                result.put(source, maxScore);
+            }
+        }
+        return result;
     }
 
     public String encodeCursor(Integer id) {

@@ -13,6 +13,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -74,6 +75,7 @@ class TrendQueryResolverTest {
         tq2.id = 2;
 
         when(trendQueryRepository.findTopByLatestScore(10)).thenReturn(List.of(tq2, tq1));
+        when(trendQueryRepository.findMaxScoreBySource()).thenReturn(Map.of("google", 100L));
 
         TrendScore hoodieScore = new TrendScore(tq1, 50L, 5L, "US");
         when(trendQueryRepository.findByQuery("cool hoodie")).thenReturn(tq1);
@@ -88,6 +90,25 @@ class TrendQueryResolverTest {
         assertEquals(2, result.size());
         assertEquals("funny tshirt", result.get(0).getQuery());
         assertEquals("cool hoodie", result.get(1).getQuery());
+    }
+
+    @Test
+    void testGetTopTrends_NormalizesScoresWithinSource() {
+        TrendQuery tq1 = new TrendQuery("hoodie", "cool hoodie");
+        tq1.id = 1;
+
+        when(trendQueryRepository.findTopByLatestScore(10)).thenReturn(List.of(tq1));
+        when(trendQueryRepository.findMaxScoreBySource()).thenReturn(
+                Map.of("youtube", 1000000L, "google", 100L));
+
+        TrendScore youtubeScore = new TrendScore(tq1, 500000L, 5L, "US", "youtube");
+        when(trendQueryRepository.findByQuery("cool hoodie")).thenReturn(tq1);
+        when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(youtubeScore));
+
+        List<TrendSummary> result = trendQueryResolver.getTopTrends(10);
+
+        assertEquals(1, result.size());
+        assertEquals(50, result.get(0).getNormalizedScore());
     }
 
     @Test

@@ -95,7 +95,7 @@ public class TrendQueryResolver {
                 .map(this::toDesignBriefSummary)
                 .collect(Collectors.toList());
 
-        return new TrendSummary(query, seedKeyword, latest.score, velocity, topRegions, source, briefs);
+        return new TrendSummary(query, seedKeyword, latest.score, velocity, topRegions, source, null, briefs);
     }
 
     @Authenticated
@@ -103,12 +103,20 @@ public class TrendQueryResolver {
     public List<TrendSummary> getTopTrends(int limit) {
         LOG.debugf("Fetching top trends: limit=%d", limit);
 
+        Map<String, Long> maxScoresBySource = trendQueryRepository.findMaxScoreBySource();
+
         List<TrendQuery> topQueries = trendQueryRepository.findTopByLatestScore(limit);
         List<TrendSummary> summaries = new ArrayList<>();
 
         for (TrendQuery tq : topQueries) {
             TrendSummary summary = getTrendSummary(tq.query);
             if (summary != null) {
+                Long maxForSource = maxScoresBySource.getOrDefault(
+                        summary.getSource(), summary.getLatestScore());
+                if (maxForSource > 0 && summary.getLatestScore() != null) {
+                    summary.setNormalizedScore(
+                            (int) (summary.getLatestScore() * 100 / maxForSource));
+                }
                 summaries.add(summary);
             }
         }
