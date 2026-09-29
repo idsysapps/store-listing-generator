@@ -13,6 +13,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+
 from store_listing.orchestration.design_briefs import DesignBrief
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,10 @@ BEDROCK_MODEL_ID: str = os.environ.get("BEDROCK_IMAGE_MODEL_ID", "stability.stab
 BEDROCK_REGION: str = os.environ.get("AWS_BEDROCK_REGION", "us-west-2")
 
 PRODUCT_TYPE_CONTEXT: dict[str, str] = {
-    "dtf_apparel": "design for DTF print on apparel, t-shirt graphic, clean edges, print-ready",
+    "dtf_apparel": (
+        "isolated design on a plain background, subject only with space around it, "
+        "DTF transfer print for apparel, clean edges"
+    ),
     "sublimation": "full-color sublimation print design, seamless edges, vibrant colors, print-ready",
     "sticker_vinyl": "sticker or vinyl decal design, clean cut lines, bold outlines, print-ready",
 }
@@ -36,6 +40,14 @@ class ImageResult:
 
 def build_prompt_from_brief(brief: DesignBrief) -> str:
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
+    if brief.product_type == "dtf_apparel":
+        return (
+            f"A single isolated object on a pure white background. "
+            f"{brief.concept}. Style: {brief.visual_style}. "
+            f"No background pattern, no background texture, no border. "
+            f"White negative space surrounding the subject. "
+            f"{product_context}, high quality, professional illustration"
+        )
     return (
         f"{brief.concept}, {brief.visual_style}, "
         f"{product_context}, high quality, professional illustration"
@@ -70,4 +82,23 @@ def generate_image(
         logger.warning("Bedrock image generation failed: %s", e)
         return ImageResult(image_bytes=None, prompt=prompt, error=str(e))
 
+    if brief.product_type == "dtf_apparel":
+        try:
+            image_bytes = remove_background(image_bytes, bedrock_client=bedrock_client)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Background removal failed, returning raw image: %s", e)
+
     return ImageResult(image_bytes=image_bytes, prompt=prompt)
+
+
+REMOVE_BG_MODEL_ID: str = "us.stability.stable-image-remove-background-v1:0"
+
+
+def remove_background(image_bytes: bytes, *, bedrock_client: Any) -> bytes:
+    image_b64 = base64.b64encode(image_bytes).decode()
+    response = bedrock_client.invoke_model(
+        modelId=REMOVE_BG_MODEL_ID,
+        body=json.dumps({"image": image_b64}),
+    )
+    result = json.loads(response["body"].read())
+    return base64.b64decode(result["images"][0])
