@@ -2,11 +2,11 @@ package com.trends.dto;
 
 public class RegionScore {
     private String region;
-    private Integer score;
+    private Long score;
 
     public RegionScore() {}
 
-    public RegionScore(String region, Integer score) {
+    public RegionScore(String region, Long score) {
         this.region = region;
         this.score = score;
     }
@@ -19,11 +19,11 @@ public class RegionScore {
         this.region = region;
     }
 
-    public Integer getScore() {
+    public Long getScore() {
         return score;
     }
 
-    public void setScore(Integer score) {
+    public void setScore(Long score) {
         this.score = score;
     }
 }

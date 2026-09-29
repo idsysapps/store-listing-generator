@@ -17,10 +17,10 @@ public class TrendScore extends PanacheEntityBase {
     public TrendQuery trendQuery;
 
     @Column(name = "score", nullable = false)
-    public Integer score;
+    public Long score;
 
     @Column(name = "delta")
-    public Integer delta;
+    public Long delta;
 
     @Column(name = "region", length = 10)
     public String region;
@@ -33,11 +33,11 @@ public class TrendScore extends PanacheEntityBase {
 
     public TrendScore() {}
 
-    public TrendScore(TrendQuery trendQuery, Integer score, Integer delta, String region) {
+    public TrendScore(TrendQuery trendQuery, Long score, Long delta, String region) {
         this(trendQuery, score, delta, region, "google");
     }
 
-    public TrendScore(TrendQuery trendQuery, Integer score, Integer delta, String region, String source) {
+    public TrendScore(TrendQuery trendQuery, Long score, Long delta, String region, String source) {
         this.trendQuery = trendQuery;
         this.score = score;
         this.delta = delta;

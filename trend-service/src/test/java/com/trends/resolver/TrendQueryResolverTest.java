@@ -44,8 +44,8 @@ class TrendQueryResolverTest {
         TrendQuery trendQuery = new TrendQuery("hoodie", "funny hoodie");
         trendQuery.id = 1;
 
-        TrendScore score1 = new TrendScore(trendQuery, 75, 10, "US");
-        TrendScore score2 = new TrendScore(trendQuery, 60, 5, "CA");
+        TrendScore score1 = new TrendScore(trendQuery, 75L, 10L, "US");
+        TrendScore score2 = new TrendScore(trendQuery, 60L, 5L, "CA");
 
         when(trendQueryRepository.findByQuery("funny hoodie")).thenReturn(trendQuery);
         when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(score1, score2));
@@ -54,8 +54,8 @@ class TrendQueryResolverTest {
 
         assertNotNull(result);
         assertEquals("funny hoodie", result.getQuery());
-        assertEquals(75, result.getLatestScore());
-        assertEquals(10, result.getVelocity());
+        assertEquals(75L, result.getLatestScore());
+        assertEquals(10L, result.getVelocity());
         assertFalse(result.getTopRegions().isEmpty());
     }
 
@@ -69,11 +69,11 @@ class TrendQueryResolverTest {
 
         when(trendQueryRepository.listAll()).thenReturn(List.of(tq1, tq2));
 
-        TrendScore hoodieScore = new TrendScore(tq1, 50, 5, "US");
+        TrendScore hoodieScore = new TrendScore(tq1, 50L, 5L, "US");
         when(trendQueryRepository.findByQuery("cool hoodie")).thenReturn(tq1);
         when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(hoodieScore));
 
-        TrendScore tshirtScore = new TrendScore(tq2, 100, 20, "US");
+        TrendScore tshirtScore = new TrendScore(tq2, 100L, 20L, "US");
         when(trendQueryRepository.findByQuery("funny tshirt")).thenReturn(tq2);
         when(trendQueryRepository.findLatestScoresByQueryId(2, 10)).thenReturn(List.of(tshirtScore));
 
@@ -89,8 +89,8 @@ class TrendQueryResolverTest {
         TrendQuery trendQuery = new TrendQuery("hoodie", "funny hoodie");
         trendQuery.id = 1;
 
-        TrendScore score1 = new TrendScore(trendQuery, 75, 10, "US", "google");
-        TrendScore score2 = new TrendScore(trendQuery, 60, 5, "CA");
+        TrendScore score1 = new TrendScore(trendQuery, 75L, 10L, "US", "google");
+        TrendScore score2 = new TrendScore(trendQuery, 60L, 5L, "CA");
 
         when(trendQueryRepository.findByQuery("funny hoodie")).thenReturn(trendQuery);
         when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(score1, score2));
