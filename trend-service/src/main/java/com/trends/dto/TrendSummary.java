@@ -4,18 +4,18 @@ import java.util.List;
 
 public class TrendSummary {
     private String query;
-    private Integer latestScore;
-    private Integer velocity;
+    private Long latestScore;
+    private Long velocity;
     private List<RegionScore> topRegions;
     private String source;
 
     public TrendSummary() {}
 
-    public TrendSummary(String query, Integer latestScore, Integer velocity, List<RegionScore> topRegions) {
+    public TrendSummary(String query, Long latestScore, Long velocity, List<RegionScore> topRegions) {
         this(query, latestScore, velocity, topRegions, null);
     }
 
-    public TrendSummary(String query, Integer latestScore, Integer velocity, List<RegionScore> topRegions, String source) {
+    public TrendSummary(String query, Long latestScore, Long velocity, List<RegionScore> topRegions, String source) {
         this.query = query;
         this.latestScore = latestScore;
         this.velocity = velocity;
@@ -31,19 +31,19 @@ public class TrendSummary {
         this.query = query;
     }
 
-    public Integer getLatestScore() {
+    public Long getLatestScore() {
         return latestScore;
     }
 
-    public void setLatestScore(Integer latestScore) {
+    public void setLatestScore(Long latestScore) {
         this.latestScore = latestScore;
     }
 
-    public Integer getVelocity() {
+    public Long getVelocity() {
         return velocity;
     }
 
-    public void setVelocity(Integer velocity) {
+    public void setVelocity(Long velocity) {
         this.velocity = velocity;
     }
 

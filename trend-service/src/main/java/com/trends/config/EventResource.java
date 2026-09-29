@@ -39,8 +39,8 @@ public class EventResource {
                     .build();
         }
 
-        int score = request.score() != null ? request.score() : 0;
-        int delta = request.delta() != null ? request.delta() : 0;
+        long score = request.score() != null ? request.score() : 0L;
+        long delta = request.delta() != null ? request.delta() : 0L;
 
         TrendUpdate update = new TrendUpdate(
                 request.query(),
@@ -56,5 +56,5 @@ public class EventResource {
                 .build();
     }
 
-    public record TrendUpdateRequest(String query, Integer score, Integer delta) {}
+    public record TrendUpdateRequest(String query, Long score, Long delta) {}
 }
