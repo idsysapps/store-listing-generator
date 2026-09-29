@@ -14,6 +14,7 @@ from pytrends.request import TrendReq
 
 from store_listing.orchestration.design_briefs import BriefableCandidate
 from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate, compute_promotion_score
+from store_listing.rendering.svg_design import DesignBriefInput
 
 from .schemas import QueryType, TrendHarvestRequest, TrendResult
 
@@ -444,6 +445,55 @@ class DatabaseClient:
             )
             row = cur.fetchone()
             return None if row is None else row[0]
+
+    def list_renderable_briefs(self) -> list[DesignBriefInput]:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    db.id AS brief_id,
+                    db.concept,
+                    db.product_type,
+                    COALESCE(db.specific_products, '{}') AS specific_products,
+                    COALESCE(db.visual_style, '') AS visual_style
+                FROM design_briefs db
+                LEFT JOIN design_renders dr
+                    ON dr.brief_id = db.id
+                WHERE dr.id IS NULL
+                ORDER BY db.confidence DESC
+                """
+            )
+            return [
+                DesignBriefInput(
+                    brief_id=row[0],
+                    concept=row[1],
+                    product_type=row[2],
+                    specific_products=list(row[3]) if row[3] else [],
+                    visual_style=row[4],
+                )
+                for row in cur.fetchall()
+            ]
+
+    def insert_design_render(
+        self,
+        brief_id: int,
+        svg_content: str,
+        llm_model: str,
+    ) -> int:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO design_renders (brief_id, svg_content, llm_model)
+                VALUES (%s, %s, %s)
+                RETURNING id
+                """,
+                (brief_id, svg_content, llm_model),
+            )
+            result = cur.fetchone()
+            if result is None:
+                msg = "Failed to insert design render"
+                raise RuntimeError(msg)
+            return result[0]
 
 
 class GoogleTrendsClient:

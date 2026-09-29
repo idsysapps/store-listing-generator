@@ -166,3 +166,18 @@ CREATE TABLE design_brief_sources (
 
 CREATE INDEX idx_design_brief_sources_brief ON design_brief_sources(brief_id);
 CREATE INDEX idx_design_brief_sources_seed ON design_brief_sources(active_seed_id);
+
+-- Table: design_renders
+-- Stores LLM-generated SVG artwork rendered from design briefs.
+CREATE TABLE design_renders (
+    id SERIAL PRIMARY KEY,
+    brief_id INTEGER NOT NULL REFERENCES design_briefs(id) ON DELETE CASCADE,
+    svg_content TEXT NOT NULL,
+    llm_model VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_design_renders_brief ON design_renders(brief_id);
+CREATE INDEX idx_design_renders_status ON design_renders(status);
+CREATE INDEX idx_design_renders_created_at ON design_renders(created_at);

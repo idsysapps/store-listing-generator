@@ -129,6 +129,26 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_CANDIDATES
+            - name: SVG_RENDERING_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: SVG_RENDERING_ENABLED
+            - name: SVG_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: SVG_LLM_API_KEY
+            - name: SVG_LLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: SVG_LLM_BASE_URL
+            - name: SVG_LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: SVG_LLM_MODEL
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
         - name: celery-beat
@@ -243,5 +263,25 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_CANDIDATES
+            - name: SVG_RENDERING_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: SVG_RENDERING_ENABLED
+            - name: SVG_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: SVG_LLM_API_KEY
+            - name: SVG_LLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: SVG_LLM_BASE_URL
+            - name: SVG_LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: SVG_LLM_MODEL
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}

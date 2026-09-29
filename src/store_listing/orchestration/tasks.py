@@ -53,6 +53,10 @@ def _llm_design_briefs_enabled() -> bool:
     return os.environ.get("LLM_DESIGN_BRIEFS_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
+def _svg_rendering_enabled() -> bool:
+    return os.environ.get("SVG_RENDERING_ENABLED", "false").lower() in ("1", "true", "yes")
+
+
 celery_app.conf.beat_schedule = {
     "seasonal-seed-injection": {
         "task": "store_listing.orchestration.tasks.inject_seasonal_seeds_task",
@@ -113,6 +117,12 @@ if _llm_design_briefs_enabled():
     celery_app.conf.beat_schedule["llm-design-briefs"] = {
         "task": "store_listing.orchestration.tasks.generate_design_briefs_task",
         "schedule": crontab(hour=7, minute=0),
+    }
+
+if _svg_rendering_enabled():
+    celery_app.conf.beat_schedule["svg-design-rendering"] = {
+        "task": "store_listing.orchestration.tasks.render_design_svgs_task",
+        "schedule": crontab(hour=7, minute=15),
     }
 
 
@@ -300,3 +310,20 @@ def generate_design_briefs_task() -> dict:
 
     client = get_llm_client()
     return generate_design_briefs(DatabaseClient(), client.chat.completions, get_llm_model())
+
+
+@celery_app.task
+def render_design_svgs_task() -> dict:
+    """LLM-driven SVG design generation from design briefs."""
+    from store_listing.orchestration.llm_client import (
+        get_svg_llm_client,
+        get_svg_llm_model,
+        svg_configured,
+    )
+    from store_listing.rendering.svg_design import generate_design_svgs
+
+    if not svg_configured():
+        return {"status": "skipped", "reason": "SVG_LLM_API_KEY / LLM_API_KEY not set"}
+
+    client = get_svg_llm_client()
+    return generate_design_svgs(DatabaseClient(), client.chat.completions, get_svg_llm_model())

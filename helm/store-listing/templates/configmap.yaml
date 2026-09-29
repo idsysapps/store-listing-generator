@@ -19,6 +19,9 @@ data:
   LLM_DESIGN_BRIEFS_ENABLED: {{ .Values.config.llmDesignBriefsEnabled | default "false" | quote }}
   LLM_MAX_BRIEFS: {{ .Values.config.llmMaxBriefs | default "8" | quote }}
   LLM_MAX_BRIEF_SEEDS: {{ .Values.config.llmMaxBriefSeeds | default "20" | quote }}
+  SVG_RENDERING_ENABLED: {{ .Values.config.svgRenderingEnabled | default "false" | quote }}
+  SVG_LLM_BASE_URL: {{ .Values.config.svgLlmBaseUrl | default "https://openrouter.ai/api/v1" | quote }}
+  SVG_LLM_MODEL: {{ .Values.config.svgLlmModel | default "google/gemini-2.5-flash-preview:free" | quote }}
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -189,6 +192,21 @@ data:
 
     CREATE INDEX IF NOT EXISTS idx_design_brief_sources_brief ON design_brief_sources(brief_id);
     CREATE INDEX IF NOT EXISTS idx_design_brief_sources_seed ON design_brief_sources(active_seed_id);
+
+    -- Table: design_renders
+    -- Stores LLM-generated SVG artwork rendered from design briefs.
+    CREATE TABLE IF NOT EXISTS design_renders (
+        id SERIAL PRIMARY KEY,
+        brief_id INTEGER NOT NULL REFERENCES design_briefs(id) ON DELETE CASCADE,
+        svg_content TEXT NOT NULL,
+        llm_model VARCHAR(100),
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_design_renders_brief ON design_renders(brief_id);
+    CREATE INDEX IF NOT EXISTS idx_design_renders_status ON design_renders(status);
+    CREATE INDEX IF NOT EXISTS idx_design_renders_created_at ON design_renders(created_at);
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -336,3 +354,17 @@ data:
 
     CREATE INDEX IF NOT EXISTS idx_design_brief_sources_brief ON design_brief_sources(brief_id);
     CREATE INDEX IF NOT EXISTS idx_design_brief_sources_seed ON design_brief_sources(active_seed_id);
+
+    -- Table: design_renders (LLM-generated SVG artwork)
+    CREATE TABLE IF NOT EXISTS design_renders (
+        id SERIAL PRIMARY KEY,
+        brief_id INTEGER NOT NULL REFERENCES design_briefs(id) ON DELETE CASCADE,
+        svg_content TEXT NOT NULL,
+        llm_model VARCHAR(100),
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_design_renders_brief ON design_renders(brief_id);
+    CREATE INDEX IF NOT EXISTS idx_design_renders_status ON design_renders(status);
+    CREATE INDEX IF NOT EXISTS idx_design_renders_created_at ON design_renders(created_at);
