@@ -71,6 +71,12 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: QUARKUS_PROFILE
+            - name: DESIGN_S3_BUCKET
+              value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
+            {{- if .Values.config.s3EndpointUrl }}
+            - name: S3_ENDPOINT_URL
+              value: {{ .Values.config.s3EndpointUrl | quote }}
+            {{- end }}
             - name: JAVA_TOOL_OPTIONS
               value: "-Xms256m -Xmx512m"
             - name: QUARKUS_HTTP_PORT

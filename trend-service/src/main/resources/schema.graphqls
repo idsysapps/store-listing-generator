@@ -76,6 +76,8 @@ type DesignBriefSummary {
   sourceSeeds: [String!]!
   imageKeyRaw: String
   imageKeyTransparent: String
+  imageUrl: String
+  imageTransparentUrl: String
 }
 
 type Query {

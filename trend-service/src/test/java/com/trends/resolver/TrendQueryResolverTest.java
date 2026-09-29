@@ -1,5 +1,6 @@
 package com.trends.resolver;
 
+import com.trends.config.ImageStorageConfig;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.TrendQuery;
 import com.trends.domain.TrendScore;
@@ -27,6 +28,9 @@ class TrendQueryResolverTest {
 
     @Mock
     DesignBriefRepository designBriefRepository;
+
+    @Mock
+    ImageStorageConfig imageStorageConfig;
 
     @InjectMocks
     TrendQueryResolver trendQueryResolver;

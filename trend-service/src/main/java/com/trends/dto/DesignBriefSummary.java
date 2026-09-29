@@ -18,6 +18,8 @@ public class DesignBriefSummary {
     private List<String> sourceSeeds;
     private String imageKeyRaw;
     private String imageKeyTransparent;
+    private String imageUrl;
+    private String imageTransparentUrl;
 
     public DesignBriefSummary() {}
 
@@ -83,4 +85,10 @@ public class DesignBriefSummary {
 
     public String getImageKeyTransparent() { return imageKeyTransparent; }
     public void setImageKeyTransparent(String imageKeyTransparent) { this.imageKeyTransparent = imageKeyTransparent; }
+
+    public String getImageUrl() { return imageUrl; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+
+    public String getImageTransparentUrl() { return imageTransparentUrl; }
+    public void setImageTransparentUrl(String imageTransparentUrl) { this.imageTransparentUrl = imageTransparentUrl; }
 }

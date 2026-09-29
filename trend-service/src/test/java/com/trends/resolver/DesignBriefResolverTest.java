@@ -1,5 +1,6 @@
 package com.trends.resolver;
 
+import com.trends.config.ImageStorageConfig;
 import com.trends.domain.ActiveSeed;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
@@ -21,6 +22,9 @@ class DesignBriefResolverTest {
 
     @Mock
     DesignBriefRepository designBriefRepository;
+
+    @Mock
+    ImageStorageConfig imageStorageConfig;
 
     @InjectMocks
     DesignBriefResolver designBriefResolver;
@@ -140,18 +144,24 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_IncludesImageKeys() {
+    void testGetDesignBriefs_IncludesImageKeysAndUrls() {
         DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
         brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
         brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
 
         when(designBriefRepository.findRecent(10)).thenReturn(List.of(brief));
+        when(imageStorageConfig.buildUrl("designs/2026/09/dtf_apparel/1_raw.png"))
+                .thenReturn("https://minio.local:9000/designs/designs/2026/09/dtf_apparel/1_raw.png");
+        when(imageStorageConfig.buildUrl("designs/2026/09/dtf_apparel/1_transparent.png"))
+                .thenReturn("https://minio.local:9000/designs/designs/2026/09/dtf_apparel/1_transparent.png");
 
         List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, null, 10);
 
         assertEquals(1, result.size());
         assertEquals("designs/2026/09/dtf_apparel/1_raw.png", result.get(0).getImageKeyRaw());
         assertEquals("designs/2026/09/dtf_apparel/1_transparent.png", result.get(0).getImageKeyTransparent());
+        assertNotNull(result.get(0).getImageUrl());
+        assertNotNull(result.get(0).getImageTransparentUrl());
     }
 
     @Test
