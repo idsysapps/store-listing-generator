@@ -54,6 +54,11 @@ SYSTEM_PROMPT: Final[str] = (
     "- tagline_text: (optional, only for 'text_top_bottom') secondary text line\n"
     "- font_color: hex color for text (e.g. '#FFFFFF' for white, '#000000' for black), "
     "choose to contrast with the design background\n\n"
+    "SCENE DESCRIPTION — for image generation:\n"
+    "- scene_description: A concise visual description of ONLY the illustration to draw "
+    "(no text, no slogans, no words — just the visual scene). Under 20 words. "
+    "Example: 'a skeleton sitting at an office desk holding a coffee mug, looking exasperated'. "
+    "This is what the image generator sees, so describe the artwork, not the product concept.\n\n"
     "IMPORTANT: Do not suggest designs requiring licensed IP (movie characters, "
     "team logos, brand names). Create original concepts inspired by cultural moments.\n\n"
     "Return ONLY valid JSON with this exact structure:\n"
@@ -61,7 +66,8 @@ SYSTEM_PROMPT: Final[str] = (
     '"audience": "...", "visual_style": "...", "confidence": 0-100, '
     '"reasoning": "...", "source_seed_ids": [id1, id2], '
     '"layout_type": "text_top", "headline_text": "...", '
-    '"tagline_text": "...", "font_color": "#000000"}]}'
+    '"tagline_text": "...", "font_color": "#000000", '
+    '"scene_description": "..."}]}'
 )
 
 
@@ -95,6 +101,7 @@ class DesignBrief:
     tagline_text: str | None = None
     font_color: str | None = None
     regeneration_feedback: str | None = None
+    scene_description: str | None = None
 
 
 class DesignBriefDBClient(Protocol):
@@ -115,6 +122,7 @@ class DesignBriefDBClient(Protocol):
         headline_text: str | None = None,
         tagline_text: str | None = None,
         font_color: str | None = None,
+        scene_description: str | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -216,6 +224,10 @@ def parse_brief_response(text: str) -> list[DesignBrief]:
         if font_color is not None and not isinstance(font_color, str):
             font_color = None
 
+        scene_description = b.get("scene_description")
+        if scene_description is not None and not isinstance(scene_description, str):
+            scene_description = None
+
         result.append(
             DesignBrief(
                 concept=concept,
@@ -230,6 +242,7 @@ def parse_brief_response(text: str) -> list[DesignBrief]:
                 headline_text=headline_text,
                 tagline_text=tagline_text,
                 font_color=font_color,
+                scene_description=scene_description,
             )
         )
 
@@ -278,6 +291,7 @@ def generate_design_briefs(
             headline_text=brief.headline_text,
             tagline_text=brief.tagline_text,
             font_color=brief.font_color,
+            scene_description=brief.scene_description,
         )
         for seed_id in brief.source_seed_ids:
             if seed_id in valid_ids:

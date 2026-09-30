@@ -26,14 +26,11 @@ BEDROCK_REGION: str = os.environ.get("AWS_BEDROCK_REGION", "us-west-2")
 
 PRODUCT_TYPE_CONTEXT: dict[str, str] = {
     "dtf_apparel": (
-        "single isolated subject on a plain white background with no scene or environment, "
-        "the artwork should be a self-contained graphic like a sticker sheet or iron-on transfer, "
-        "compact composition centered in frame with generous negative space on all sides, "
-        "bold outlines, flat color fills, high contrast, no gradients fading into background, "
-        "suitable for DTF heat-transfer print on a t-shirt"
+        "sticker illustration on plain white background, bold outlines, "
+        "flat colors, compact centered composition, DTF transfer print"
     ),
-    "sublimation": "full-color sublimation print design, seamless edges, vibrant colors, print-ready",
-    "sticker_vinyl": "sticker or vinyl decal design, clean cut lines, bold outlines, print-ready",
+    "sublimation": "full-color sublimation print, seamless edges, vibrant colors",
+    "sticker_vinyl": "sticker decal, clean cut lines, bold outlines",
 }
 
 
@@ -79,50 +76,52 @@ def _split_concept(concept: str) -> tuple[str, str | None]:
     return concept, None
 
 
-def _text_prompt_section(brief: DesignBrief) -> tuple[str, str]:
-    """Return (scene_description, text_instruction) for the prompt."""
+def _scene_for_prompt(brief: DesignBrief) -> str:
+    """Return the visual scene description, preferring the dedicated field."""
+    if brief.scene_description:
+        return brief.scene_description
+    if brief.headline_text:
+        return brief.concept
+    scene, _ = _split_concept(brief.concept)
+    return scene
+
+
+def _text_prompt_section(brief: DesignBrief) -> str:
+    """Return text instruction to LEAD the prompt (Flux best practice)."""
     typography = _typography_hint(brief.visual_style)
 
     if brief.headline_text:
-        parts = [f'that says "{brief.headline_text}"']
+        parts = [f'Large text reading "{brief.headline_text}"']
         if brief.tagline_text:
-            parts.append(f'with the subtitle "{brief.tagline_text}"')
-        text_inst = (
-            f"{', '.join(parts)} in {typography}, "
-            f"do not include any other text or words beyond the quoted text above, "
-            f"no speech bubbles, no captions, no labels, "
-        )
-        return brief.concept, text_inst
+            parts.append(f'with subtitle "{brief.tagline_text}"')
+        return f"{', '.join(parts)} in {typography}."
 
-    scene, short_text = _split_concept(brief.concept)
+    _, short_text = _split_concept(brief.concept)
     if short_text:
-        return scene, f'that says "{short_text}" in {typography}, '
-    return brief.concept, "do not include any text or lettering in the image, "
+        return f'Text reading "{short_text}" in {typography}.'
+    return ""
 
 
 def _feedback_section(brief: DesignBrief) -> str:
     if not brief.regeneration_feedback:
         return ""
-    return f". Additional creative direction: {brief.regeneration_feedback}"
+    return f" {brief.regeneration_feedback}."
 
 
 def build_prompt_from_brief(brief: DesignBrief) -> str:
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
-    scene, text_instruction = _text_prompt_section(brief)
+    text_instruction = _text_prompt_section(brief)
+    scene = _scene_for_prompt(brief)
     feedback = _feedback_section(brief)
-    if brief.product_type == "dtf_apparel":
-        return (
-            f"{scene}, {text_instruction}"
-            f"Style: {brief.visual_style}. "
-            f"{product_context}, high quality, professional illustration"
-            f"{feedback}"
-        )
-    return (
-        f"{scene}, {text_instruction}"
-        f"{brief.visual_style}, "
-        f"{product_context}, high quality, professional illustration"
-        f"{feedback}"
-    )
+
+    parts: list[str] = []
+    if text_instruction:
+        parts.append(text_instruction)
+    parts.append(f"{scene}, {brief.visual_style}, {product_context}.")
+    parts.append("Do not draw anything else.")
+    if feedback:
+        parts.append(feedback.strip())
+    return " ".join(parts)
 
 
 def generate_image(

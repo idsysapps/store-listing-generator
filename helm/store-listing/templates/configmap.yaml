@@ -345,3 +345,4 @@ data:
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS tagline_text TEXT;
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS font_color VARCHAR(20);
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS regeneration_feedback TEXT;
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS scene_description TEXT;

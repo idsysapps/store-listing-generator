@@ -72,6 +72,7 @@ def _generate_single_brief(
         tagline_text=brief_row.get("tagline_text"),
         font_color=brief_row.get("font_color"),
         regeneration_feedback=brief_row.get("regeneration_feedback"),
+        scene_description=brief_row.get("scene_description"),
     )
 
     if leonardo_client is not None:

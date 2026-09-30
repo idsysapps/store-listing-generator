@@ -33,11 +33,6 @@ def _make_brief(**overrides: Any) -> DesignBrief:
 
 
 class TestBuildPromptFromBrief:
-    def test_includes_concept(self) -> None:
-        brief = _make_brief(concept="Skeleton doing yoga poses")
-        prompt = build_prompt_from_brief(brief)
-        assert "Skeleton doing yoga poses" in prompt
-
     def test_includes_visual_style(self) -> None:
         brief = _make_brief(visual_style="Watercolor pastel, soft pink and blue tones")
         prompt = build_prompt_from_brief(brief)
@@ -46,23 +41,12 @@ class TestBuildPromptFromBrief:
     def test_includes_product_context(self) -> None:
         brief = _make_brief(product_type="dtf_apparel")
         prompt = build_prompt_from_brief(brief)
-        assert "print" in prompt.lower() or "apparel" in prompt.lower()
-
-    def test_includes_print_ready_instruction(self) -> None:
-        brief = _make_brief()
-        prompt = build_prompt_from_brief(brief)
-        assert "print" in prompt.lower()
+        assert "DTF" in prompt
 
     def test_headline_text_wrapped_in_double_quotes(self) -> None:
         brief = _make_brief(headline_text="SPOOKY SEASON")
         prompt = build_prompt_from_brief(brief)
         assert '"SPOOKY SEASON"' in prompt
-
-    def test_headline_text_suppresses_other_text(self) -> None:
-        brief = _make_brief(headline_text="SPOOKY SEASON")
-        prompt = build_prompt_from_brief(brief)
-        assert "do not include any other text" in prompt
-        assert "no speech bubbles" in prompt
 
     def test_tagline_text_wrapped_in_double_quotes(self) -> None:
         brief = _make_brief(headline_text="Born To Be", tagline_text="Spooky")
@@ -79,28 +63,6 @@ class TestBuildPromptFromBrief:
         assert "retro" in prompt.lower()
         assert "lettering" in prompt.lower()
 
-    def test_long_concept_with_separator_quotes_short_part(self) -> None:
-        brief = _make_brief(
-            concept="This Meeting Could Have Been An Email - Skeleton Edition",
-            headline_text=None,
-        )
-        prompt = build_prompt_from_brief(brief)
-        assert '"Skeleton Edition"' in prompt
-        assert "This Meeting Could Have Been An Email" in prompt
-
-    def test_long_concept_no_separator_suppresses_text(self) -> None:
-        brief = _make_brief(
-            concept="A very long concept with many words and no separator",
-            headline_text=None,
-        )
-        prompt = build_prompt_from_brief(brief)
-        assert "do not include any text" in prompt.lower()
-
-    def test_short_concept_quotes_itself(self) -> None:
-        brief = _make_brief(concept="Yoga Cat", headline_text=None)
-        prompt = build_prompt_from_brief(brief)
-        assert '"Yoga Cat"' in prompt
-
     def test_neon_style_uses_neon_typography(self) -> None:
         brief = _make_brief(visual_style="neon glow effect", headline_text="OPEN")
         prompt = build_prompt_from_brief(brief)
@@ -115,17 +77,84 @@ class TestBuildPromptFromBrief:
     def test_no_feedback_section_when_feedback_is_none(self) -> None:
         brief = _make_brief(regeneration_feedback=None)
         prompt = build_prompt_from_brief(brief)
-        assert "additional creative direction" not in prompt.lower()
+        assert "creative direction" not in prompt.lower()
 
-    def test_dtf_apparel_prompt_mentions_isolated_subject(self) -> None:
+    def test_ends_with_do_not_draw_anything_else(self) -> None:
+        brief = _make_brief()
+        prompt = build_prompt_from_brief(brief)
+        assert "Do not draw anything else." in prompt
+
+    def test_text_instruction_comes_before_scene(self) -> None:
+        brief = _make_brief(
+            headline_text="STAY WEIRD",
+            scene_description="a skeleton meditating on a yoga mat",
+        )
+        prompt = build_prompt_from_brief(brief)
+        text_pos = prompt.index('"STAY WEIRD"')
+        scene_pos = prompt.index("skeleton meditating")
+        assert text_pos < scene_pos
+
+    def test_scene_description_used_instead_of_concept(self) -> None:
+        brief = _make_brief(
+            concept="This Meeting Could Have Been An Email - Skeleton Edition",
+            headline_text="STILL IN THIS MEETING",
+            scene_description="a skeleton sitting at an office desk holding coffee",
+        )
+        prompt = build_prompt_from_brief(brief)
+        assert "skeleton sitting at an office desk" in prompt
+        assert "This Meeting Could Have Been An Email" not in prompt
+
+    def test_falls_back_to_concept_when_scene_description_is_none(self) -> None:
+        brief = _make_brief(
+            concept="Skeleton doing yoga poses",
+            headline_text="NAMASTE",
+            scene_description=None,
+        )
+        prompt = build_prompt_from_brief(brief)
+        assert "Skeleton doing yoga poses" in prompt
+
+    def test_prompt_under_80_words_for_typical_dtf_with_headline(self) -> None:
+        brief = _make_brief(
+            concept="Skeleton Meeting",
+            headline_text="STILL IN THIS MEETING",
+            scene_description="a skeleton at an office desk holding coffee",
+            visual_style="retro vintage",
+        )
+        prompt = build_prompt_from_brief(brief)
+        word_count = len(prompt.split())
+        assert word_count < 80, f"Prompt has {word_count} words: {prompt}"
+
+    def test_long_concept_with_separator_quotes_short_part(self) -> None:
+        brief = _make_brief(
+            concept="This Meeting Could Have Been An Email - Skeleton Edition",
+            headline_text=None,
+        )
+        prompt = build_prompt_from_brief(brief)
+        assert '"Skeleton Edition"' in prompt
+        assert "This Meeting Could Have Been An Email" in prompt
+
+    def test_long_concept_no_separator_no_text_instruction(self) -> None:
+        brief = _make_brief(
+            concept="A very long concept with many words and no separator",
+            headline_text=None,
+        )
+        prompt = build_prompt_from_brief(brief)
+        assert "Text reading" not in prompt
+
+    def test_short_concept_quotes_itself(self) -> None:
+        brief = _make_brief(concept="Yoga Cat", headline_text=None)
+        prompt = build_prompt_from_brief(brief)
+        assert '"Yoga Cat"' in prompt
+
+    def test_dtf_apparel_prompt_mentions_white_background(self) -> None:
         brief = _make_brief(product_type="dtf_apparel")
         prompt = build_prompt_from_brief(brief)
-        assert "isolated" in prompt.lower() or "single subject" in prompt.lower()
+        assert "white background" in prompt.lower()
 
-    def test_dtf_apparel_prompt_mentions_no_background_scene(self) -> None:
-        brief = _make_brief(product_type="dtf_apparel")
+    def test_sublimation_prompt_mentions_sublimation(self) -> None:
+        brief = _make_brief(product_type="sublimation")
         prompt = build_prompt_from_brief(brief)
-        assert "no background" in prompt.lower() or "plain white" in prompt.lower()
+        assert "sublimation" in prompt.lower()
 
 
 class TestGenerateImage:
