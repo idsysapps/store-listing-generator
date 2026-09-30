@@ -98,12 +98,34 @@ def test_harvester_writes_amazon_and_etsy_discoveries() -> None:
     assert sources == {"amazon", "etsy"}
     amazon_results = [r for r in results if r.source == "amazon"]
     assert amazon_results[0].query_type == "search"
-    assert amazon_results[0].score == 1
+    assert amazon_results[0].score == 11  # first suggestion: max(1, 11 - 0)
 
     assert len(db.insert_trend_query.call_args_list) == len(results)
     kwargs_sources = {call.kwargs["source"] for call in db.insert_trend_query.call_args_list}
     assert kwargs_sources == {"amazon", "etsy"}
     db.upsert_seed_candidate.assert_called()
+
+
+def test_harvester_scores_amazon_by_position() -> None:
+    class AmazonRanked:
+        def suggest(self, prefix: str) -> list[str]:
+            return ["top result", "second result", "third result"]
+
+    class NoEtsy:
+        def suggest(self, prefix: str) -> list[str]:
+            return []
+
+    db = MagicMock()
+    db.insert_trend_query.return_value = 1
+    harvester = AutocompleteHarvester(db_client=db, amazon=AmazonRanked(), etsy=NoEtsy())
+
+    results, _ = harvester.harvest_and_store(TrendHarvestRequest(seed_keywords=["test"]))
+
+    amazon_results = [r for r in results if r.source == "amazon"]
+    assert len(amazon_results) == 3
+    assert amazon_results[0].score == 11  # position 0: max(1, 11 - 0)
+    assert amazon_results[1].score == 10  # position 1: max(1, 11 - 1)
+    assert amazon_results[2].score == 9  # position 2: max(1, 11 - 2)
 
 
 def test_harvester_skips_suggestion_equal_to_seed() -> None:

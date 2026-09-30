@@ -141,6 +141,16 @@ spec:
                   key: AWS_SECRET_ACCESS_KEY
             - name: AWS_DEFAULT_REGION
               value: {{ .Values.config.awsDefaultRegion | default "us-west-2" | quote }}
+            - name: BEDROCK_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: BEDROCK_ACCESS_KEY_ID
+            - name: BEDROCK_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: BEDROCK_SECRET_ACCESS_KEY
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}
@@ -273,6 +283,16 @@ spec:
                   key: AWS_SECRET_ACCESS_KEY
             - name: AWS_DEFAULT_REGION
               value: {{ .Values.config.awsDefaultRegion | default "us-west-2" | quote }}
+            - name: BEDROCK_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: BEDROCK_ACCESS_KEY_ID
+            - name: BEDROCK_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: BEDROCK_SECRET_ACCESS_KEY
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}

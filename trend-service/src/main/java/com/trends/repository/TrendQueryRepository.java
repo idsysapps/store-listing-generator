@@ -64,15 +64,25 @@ public class TrendQueryRepository implements PanacheRepository<TrendQuery> {
     public List<TrendQuery> findTopByLatestScore(int limit) {
         return getEntityManager()
                 .createNativeQuery("""
+                    WITH max_scores AS (
+                        SELECT source, MAX(score) as max_score
+                        FROM trend_scores
+                        WHERE source IS NOT NULL
+                        GROUP BY source
+                    )
                     SELECT tq.*
                     FROM trend_queries tq
+                    JOIN active_seeds aseed ON aseed.query = tq.seed_keyword
+                        AND aseed.archived_at IS NULL
                     JOIN (
-                        SELECT ts.query_id, ts.score, ts.delta,
+                        SELECT ts.query_id, ts.score, ts.delta, ts.source,
                                ROW_NUMBER() OVER (PARTITION BY ts.query_id ORDER BY ts.fetched_at DESC) as rn
                         FROM trend_scores ts
                     ) latest ON latest.query_id = tq.id
-                    WHERE latest.rn = 1 AND latest.score > 0
-                    ORDER BY latest.score DESC, COALESCE(latest.delta, 0) DESC
+                    JOIN max_scores ms ON ms.source = latest.source
+                    WHERE latest.rn = 1 AND latest.score > 0 AND ms.max_score > 0
+                    ORDER BY (latest.score * 100 / ms.max_score) DESC,
+                             COALESCE(ABS(latest.delta), 0) DESC
                     LIMIT :limit
                     """, TrendQuery.class)
                 .setParameter("limit", limit)

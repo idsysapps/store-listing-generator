@@ -170,36 +170,23 @@ class YouTubeClient:
     def _derive_results(seed: str, shorts: list[YouTubeShort]) -> list[TrendResult]:
         timestamp = datetime.now(UTC)
         results: list[TrendResult] = []
-        seen_titles: set[str] = set()
         tag_views: dict[str, int] = {}
         tag_count: dict[str, int] = {}
 
         for short in shorts:
-            title = short.title.strip()
-            if title and title.lower() not in seen_titles and title.lower() != seed.lower():
-                seen_titles.add(title.lower())
-                results.append(
-                    TrendResult(
-                        query=title,
-                        score=short.view_count,
-                        delta=short.like_count,
-                        region="US",
-                        query_type="video",
-                        source="youtube",
-                        fetched_at=timestamp,
-                    )
-                )
             for tag in short.tags:
                 if tag and tag.lower() != seed.lower():
                     tag_views[tag] = tag_views.get(tag, 0) + short.view_count
                     tag_count[tag] = tag_count.get(tag, 0) + 1
 
         for tag in sorted(tag_views):
+            count = tag_count[tag]
+            score = max(count, min(10_000, count * (tag_views[tag] // 1_000_000)))
             results.append(
                 TrendResult(
                     query=tag,
-                    score=tag_views[tag],
-                    delta=tag_count[tag],
+                    score=score,
+                    delta=count,
                     region="US",
                     query_type="hashtag",
                     source="youtube",
