@@ -26,10 +26,11 @@ BEDROCK_REGION: str = os.environ.get("AWS_BEDROCK_REGION", "us-west-2")
 
 PRODUCT_TYPE_CONTEXT: dict[str, str] = {
     "dtf_apparel": (
-        "centered raster illustration on a plain white background, "
-        "compact composition with generous negative space on all sides, "
-        "the design should look like a decal or patch not edge-to-edge, "
-        "suitable for DTF transfer print on apparel"
+        "single isolated subject on a plain white background with no scene or environment, "
+        "the artwork should be a self-contained graphic like a sticker sheet or iron-on transfer, "
+        "compact composition centered in frame with generous negative space on all sides, "
+        "bold outlines, flat color fills, high contrast, no gradients fading into background, "
+        "suitable for DTF heat-transfer print on a t-shirt"
     ),
     "sublimation": "full-color sublimation print design, seamless edges, vibrant colors, print-ready",
     "sticker_vinyl": "sticker or vinyl decal design, clean cut lines, bold outlines, print-ready",
@@ -94,19 +95,28 @@ def _text_prompt_section(brief: DesignBrief) -> tuple[str, str]:
     return brief.concept, "do not include any text or lettering in the image, "
 
 
+def _feedback_section(brief: DesignBrief) -> str:
+    if not brief.regeneration_feedback:
+        return ""
+    return f". Additional creative direction: {brief.regeneration_feedback}"
+
+
 def build_prompt_from_brief(brief: DesignBrief) -> str:
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
     scene, text_instruction = _text_prompt_section(brief)
+    feedback = _feedback_section(brief)
     if brief.product_type == "dtf_apparel":
         return (
             f"{scene}, {text_instruction}"
             f"Style: {brief.visual_style}. "
             f"{product_context}, high quality, professional illustration"
+            f"{feedback}"
         )
     return (
         f"{scene}, {text_instruction}"
         f"{brief.visual_style}, "
         f"{product_context}, high quality, professional illustration"
+        f"{feedback}"
     )
 
 

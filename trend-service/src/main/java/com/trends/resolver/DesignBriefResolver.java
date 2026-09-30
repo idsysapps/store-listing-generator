@@ -4,6 +4,7 @@ import com.trends.config.ImageStorageConfig;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefSummary;
+import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
 import io.quarkus.security.Authenticated;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,6 +30,9 @@ public class DesignBriefResolver {
 
     @Inject
     ImageStorageConfig imageStorageConfig;
+
+    @Inject
+    CeleryTaskDispatcher celeryTaskDispatcher;
 
     @Authenticated
     @Query("designBriefs")
@@ -63,6 +67,12 @@ public class DesignBriefResolver {
         brief.imageKeyTransparent = null;
         brief.regenerationFeedback = feedback;
         designBriefRepository.persist(brief);
+
+        celeryTaskDispatcher.dispatchGenerateSingleBriefImage(briefId)
+                .subscribe().with(
+                        v -> LOG.infof("Dispatched image generation for briefId=%d", briefId),
+                        e -> LOG.errorf(e, "Failed to dispatch image generation for briefId=%d", briefId)
+                );
 
         return toSummary(brief);
     }

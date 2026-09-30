@@ -10,7 +10,10 @@ from unittest.mock import MagicMock
 
 from PIL import Image
 
-from store_listing.orchestration.image_pipeline import generate_images_for_briefs
+from store_listing.orchestration.image_pipeline import (
+    generate_image_for_brief,
+    generate_images_for_briefs,
+)
 
 
 def _real_png(width: int = 64, height: int = 64, color: str = "white") -> bytes:
@@ -207,3 +210,91 @@ class TestGenerateImagesForBriefs:
 
         assert result["images_generated"] == 1
         assert result["errors"] == 1
+
+
+class TestGenerateImageForBrief:
+    def test_returns_error_when_brief_not_found(self) -> None:
+        db = MagicMock()
+        db.get_brief_by_id.return_value = None
+
+        result = generate_image_for_brief(
+            brief_id=999,
+            db_client=db,
+            bedrock_client=MagicMock(),
+            s3_client=MagicMock(),
+        )
+
+        assert result["status"] == "error"
+        assert "999" in result["error"]
+
+    def test_generates_image_for_specific_brief(self) -> None:
+        brief_row = {
+            "id": 7,
+            "concept": "Yoga Cat",
+            "product_type": "dtf_apparel",
+            "audience": "cat lovers",
+            "visual_style": "retro vintage",
+            "layout_type": "full_bleed",
+            "headline_text": None,
+            "tagline_text": None,
+            "font_color": None,
+            "regeneration_feedback": "make it more cartoonish",
+        }
+        db = MagicMock()
+        db.get_brief_by_id.return_value = brief_row
+
+        fake_raw = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+        fake_transparent = b"\x89PNG\r\n\x1a\n" + b"\x01" * 50
+        bedrock = MagicMock()
+        bedrock.invoke_model.side_effect = [
+            _mock_bedrock_response(fake_raw),
+            _mock_bedrock_response(fake_transparent),
+        ]
+
+        s3 = MagicMock()
+
+        result = generate_image_for_brief(
+            brief_id=7,
+            db_client=db,
+            bedrock_client=bedrock,
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        assert result["status"] == "success"
+        assert result["brief_id"] == 7
+        db.update_brief_image_keys.assert_called_once()
+
+    def test_passes_regeneration_feedback_to_prompt(self) -> None:
+        brief_row = {
+            "id": 7,
+            "concept": "Yoga Cat",
+            "product_type": "sublimation",
+            "audience": "cat lovers",
+            "visual_style": "retro vintage",
+            "layout_type": "full_bleed",
+            "headline_text": None,
+            "tagline_text": None,
+            "font_color": None,
+            "regeneration_feedback": "more vibrant colors please",
+        }
+        db = MagicMock()
+        db.get_brief_by_id.return_value = brief_row
+
+        fake_raw = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+        bedrock = MagicMock()
+        bedrock.invoke_model.return_value = _mock_bedrock_response(fake_raw)
+
+        s3 = MagicMock()
+
+        generate_image_for_brief(
+            brief_id=7,
+            db_client=db,
+            bedrock_client=bedrock,
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        call_kwargs = bedrock.invoke_model.call_args
+        body_str = call_kwargs.kwargs.get("body", call_kwargs[1].get("body", ""))
+        assert "more vibrant colors please" in body_str

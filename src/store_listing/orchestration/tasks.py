@@ -342,3 +342,42 @@ def generate_design_images_task() -> dict:
         endpoint_url=S3_ENDPOINT_URL,
         leonardo_client=leo_client,
     )
+
+
+@celery_app.task
+def generate_single_brief_image_task(brief_id: int) -> dict:
+    """Generate image for a single design brief — triggered by requestRegeneration."""
+    import boto3
+
+    from store_listing.orchestration.image_generation import BEDROCK_REGION
+    from store_listing.orchestration.image_pipeline import generate_image_for_brief
+    from store_listing.orchestration.image_storage import S3_BUCKET, S3_ENDPOINT_URL
+    from store_listing.orchestration.leonardo_client import LeonardoClient
+
+    bedrock_kwargs: dict[str, str] = {"region_name": BEDROCK_REGION}
+    bedrock_key = os.environ.get("BEDROCK_ACCESS_KEY_ID", "")
+    bedrock_secret = os.environ.get("BEDROCK_SECRET_ACCESS_KEY", "")
+    if bedrock_key and bedrock_secret:
+        bedrock_kwargs["aws_access_key_id"] = bedrock_key
+        bedrock_kwargs["aws_secret_access_key"] = bedrock_secret
+    bedrock_client = boto3.client("bedrock-runtime", **bedrock_kwargs)
+
+    s3_kwargs: dict[str, str] = {}
+    if S3_ENDPOINT_URL:
+        s3_kwargs["endpoint_url"] = S3_ENDPOINT_URL
+    s3_client = boto3.client("s3", **s3_kwargs)
+
+    leonardo_key = os.environ.get("LEONARDO_API_KEY", "")
+    leo_client: LeonardoClient | None = None
+    if leonardo_key:
+        leo_client = LeonardoClient(api_key=leonardo_key)
+
+    return generate_image_for_brief(
+        brief_id=brief_id,
+        db_client=DatabaseClient(),
+        bedrock_client=bedrock_client,
+        s3_client=s3_client,
+        bucket=S3_BUCKET,
+        endpoint_url=S3_ENDPOINT_URL,
+        leonardo_client=leo_client,
+    )

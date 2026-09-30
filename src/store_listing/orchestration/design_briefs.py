@@ -94,6 +94,7 @@ class DesignBrief:
     headline_text: str | None = None
     tagline_text: str | None = None
     font_color: str | None = None
+    regeneration_feedback: str | None = None
 
 
 class DesignBriefDBClient(Protocol):
