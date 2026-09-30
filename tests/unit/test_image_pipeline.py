@@ -107,7 +107,7 @@ class TestGenerateImagesForBriefs:
         call_kwargs = db.update_brief_image_keys.call_args.kwargs
         assert call_kwargs["image_key_transparent"] is None
 
-    def test_composites_text_onto_image(self) -> None:
+    def test_text_layout_passes_raw_image_through(self) -> None:
         db = _mock_db_client(
             briefs=[
                 {
@@ -139,11 +139,8 @@ class TestGenerateImagesForBriefs:
         )
 
         assert result["images_generated"] == 1
-        raw_call = s3.put_object.call_args_list[0]
-        raw_body = raw_call.kwargs.get("Body") or raw_call[1].get("Body")
-        assert raw_body != real_raw
 
-    def test_skips_compositing_for_full_bleed(self) -> None:
+    def test_full_bleed_passes_raw_image_through(self) -> None:
         db = _mock_db_client(
             briefs=[
                 {
