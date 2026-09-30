@@ -308,12 +308,13 @@ def generate_design_briefs_task() -> dict:
 
 @celery_app.task
 def generate_design_images_task() -> dict:
-    """Generate images for design briefs via Bedrock, store in S3, update DB."""
+    """Generate images for design briefs via Leonardo/Bedrock, store in S3, update DB."""
     import boto3
 
     from store_listing.orchestration.image_generation import BEDROCK_REGION
     from store_listing.orchestration.image_pipeline import generate_images_for_briefs
     from store_listing.orchestration.image_storage import S3_BUCKET, S3_ENDPOINT_URL
+    from store_listing.orchestration.leonardo_client import LeonardoClient
 
     bedrock_kwargs: dict[str, str] = {"region_name": BEDROCK_REGION}
     bedrock_key = os.environ.get("BEDROCK_ACCESS_KEY_ID", "")
@@ -328,10 +329,16 @@ def generate_design_images_task() -> dict:
         s3_kwargs["endpoint_url"] = S3_ENDPOINT_URL
     s3_client = boto3.client("s3", **s3_kwargs)
 
+    leonardo_key = os.environ.get("LEONARDO_API_KEY", "")
+    leo_client: LeonardoClient | None = None
+    if leonardo_key:
+        leo_client = LeonardoClient(api_key=leonardo_key)
+
     return generate_images_for_briefs(
         db_client=DatabaseClient(),
         bedrock_client=bedrock_client,
         s3_client=s3_client,
         bucket=S3_BUCKET,
         endpoint_url=S3_ENDPOINT_URL,
+        leonardo_client=leo_client,
     )

@@ -6,8 +6,9 @@ import logging
 from typing import Any
 
 from store_listing.orchestration.design_briefs import DesignBrief
-from store_listing.orchestration.image_generation import generate_image
+from store_listing.orchestration.image_generation import generate_image, generate_image_leonardo
 from store_listing.orchestration.image_storage import ImageStorageClient
+from store_listing.orchestration.leonardo_client import LeonardoClient
 from store_listing.orchestration.text_compositor import LayoutSpec, composite_text
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ def generate_images_for_briefs(
     bucket: str = "store-listing-designs",
     endpoint_url: str | None = None,
     limit: int = 20,
+    leonardo_client: LeonardoClient | None = None,
 ) -> dict[str, Any]:
     briefs = db_client.list_briefs_without_images(limit)
     if not briefs:
@@ -48,7 +50,12 @@ def generate_images_for_briefs(
             font_color=brief_row.get("font_color"),
         )
 
-        result = generate_image(brief, bedrock_client=bedrock_client)
+        if leonardo_client is not None:
+            result = generate_image_leonardo(
+                brief, leonardo_client=leonardo_client, bedrock_client=bedrock_client
+            )
+        else:
+            result = generate_image(brief, bedrock_client=bedrock_client)
         if result.image_bytes is None:
             logger.warning(
                 "Image generation failed for brief %d: %s",

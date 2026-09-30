@@ -39,6 +39,7 @@ secrets:
   awsSecretAccessKey: ""
   bedrockAccessKeyId: ""
   bedrockSecretAccessKey: ""
+  leonardoApiKey: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest

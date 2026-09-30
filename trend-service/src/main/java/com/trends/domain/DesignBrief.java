@@ -49,6 +49,9 @@ public class DesignBrief extends PanacheEntityBase {
     @Column(name = "image_key_transparent")
     public String imageKeyTransparent;
 
+    @Column(name = "regeneration_feedback", columnDefinition = "TEXT")
+    public String regenerationFeedback;
+
     @OneToMany(mappedBy = "designBrief", fetch = FetchType.LAZY)
     public List<DesignBriefSource> sources;
 

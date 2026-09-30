@@ -8,7 +8,9 @@ import com.trends.repository.DesignBriefRepository;
 import io.quarkus.security.Authenticated;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.transaction.Transactional;
 import org.eclipse.microprofile.graphql.GraphQLApi;
+import org.eclipse.microprofile.graphql.Mutation;
 import org.eclipse.microprofile.graphql.Query;
 import org.jboss.logging.Logger;
 
@@ -46,6 +48,23 @@ public class DesignBriefResolver {
         return briefs.stream()
                 .map(this::toSummary)
                 .collect(Collectors.toList());
+    }
+
+    @Authenticated
+    @Mutation("requestRegeneration")
+    @Transactional
+    public DesignBriefSummary requestRegeneration(int briefId, String feedback) {
+        DesignBrief brief = designBriefRepository.findById((long) briefId);
+        if (brief == null) {
+            return null;
+        }
+
+        brief.imageKeyRaw = null;
+        brief.imageKeyTransparent = null;
+        brief.regenerationFeedback = feedback;
+        designBriefRepository.persist(brief);
+
+        return toSummary(brief);
     }
 
     private DesignBriefSummary toSummary(DesignBrief brief) {
