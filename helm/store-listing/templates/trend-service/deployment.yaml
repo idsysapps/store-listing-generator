@@ -71,6 +71,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: QUARKUS_PROFILE
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: REDIS_URL
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}

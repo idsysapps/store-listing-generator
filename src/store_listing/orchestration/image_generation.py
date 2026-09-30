@@ -87,7 +87,12 @@ def _text_prompt_section(brief: DesignBrief) -> tuple[str, str]:
         parts = [f'that says "{brief.headline_text}"']
         if brief.tagline_text:
             parts.append(f'with the subtitle "{brief.tagline_text}"')
-        return brief.concept, f"{', '.join(parts)} in {typography}, "
+        text_inst = (
+            f"{', '.join(parts)} in {typography}, "
+            f"do not include any other text or words beyond the quoted text above, "
+            f"no speech bubbles, no captions, no labels, "
+        )
+        return brief.concept, text_inst
 
     scene, short_text = _split_concept(brief.concept)
     if short_text:

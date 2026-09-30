@@ -58,6 +58,12 @@ class TestBuildPromptFromBrief:
         prompt = build_prompt_from_brief(brief)
         assert '"SPOOKY SEASON"' in prompt
 
+    def test_headline_text_suppresses_other_text(self) -> None:
+        brief = _make_brief(headline_text="SPOOKY SEASON")
+        prompt = build_prompt_from_brief(brief)
+        assert "do not include any other text" in prompt
+        assert "no speech bubbles" in prompt
+
     def test_tagline_text_wrapped_in_double_quotes(self) -> None:
         brief = _make_brief(headline_text="Born To Be", tagline_text="Spooky")
         prompt = build_prompt_from_brief(brief)
