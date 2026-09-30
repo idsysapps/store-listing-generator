@@ -151,6 +151,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: BEDROCK_SECRET_ACCESS_KEY
+            - name: LEONARDO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: LEONARDO_API_KEY
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}
@@ -293,6 +298,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: BEDROCK_SECRET_ACCESS_KEY
+            - name: LEONARDO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: LEONARDO_API_KEY
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}

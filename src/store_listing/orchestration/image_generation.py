@@ -1,11 +1,14 @@
-"""Bedrock-based image generation from design briefs.
+"""Image generation from design briefs.
 
-Temporary solution using AWS Bedrock Stable Image Core until DGX hardware
-is available for self-hosted ComfyUI + Flux Schnell. See issue #111.
+Supports Leonardo.ai (Flux) and AWS Bedrock (Stability) backends.
+Leonardo is the default for generation; Bedrock is kept for background
+removal. Both are temporary until DGX hardware arrives for self-hosted
+ComfyUI + Flux Schnell. See issue #111.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -14,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from store_listing.orchestration.design_briefs import DesignBrief
+from store_listing.orchestration.leonardo_client import LeonardoClient, LeonardoGenerationResult
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +103,41 @@ def generate_image(
     if brief.product_type == "dtf_apparel":
         try:
             image_bytes = remove_background(image_bytes, bedrock_client=bedrock_client)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Background removal failed, returning raw image: %s", e)
+
+    return ImageResult(image_bytes=image_bytes, prompt=prompt, raw_bytes=raw_bytes)
+
+
+def generate_image_leonardo(
+    brief: DesignBrief,
+    *,
+    leonardo_client: LeonardoClient,
+    bedrock_client: Any | None = None,
+) -> ImageResult:
+    prompt = build_prompt_from_brief(brief)
+
+    try:
+        leo_result: LeonardoGenerationResult = asyncio.get_event_loop().run_until_complete(
+            leonardo_client.generate(prompt=prompt)
+        )
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            leo_result = loop.run_until_complete(leonardo_client.generate(prompt=prompt))
+        finally:
+            loop.close()
+
+    if leo_result.image_bytes is None:
+        logger.warning("Leonardo image generation failed: %s", leo_result.error)
+        return ImageResult(image_bytes=None, prompt=prompt, error=leo_result.error)
+
+    raw_bytes = leo_result.image_bytes
+    image_bytes = raw_bytes
+
+    if brief.product_type == "dtf_apparel" and bedrock_client is not None:
+        try:
+            image_bytes = remove_background(raw_bytes, bedrock_client=bedrock_client)
         except Exception as e:  # noqa: BLE001
             logger.warning("Background removal failed, returning raw image: %s", e)
 
