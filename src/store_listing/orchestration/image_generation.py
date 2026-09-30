@@ -17,13 +17,15 @@ from store_listing.orchestration.design_briefs import DesignBrief
 
 logger = logging.getLogger(__name__)
 
-BEDROCK_MODEL_ID: str = os.environ.get("BEDROCK_IMAGE_MODEL_ID", "stability.stable-image-core-v1:1")
+BEDROCK_MODEL_ID: str = os.environ.get("BEDROCK_IMAGE_MODEL_ID", "stability.sd3-5-large-v1:0")
 BEDROCK_REGION: str = os.environ.get("AWS_BEDROCK_REGION", "us-west-2")
 
 PRODUCT_TYPE_CONTEXT: dict[str, str] = {
     "dtf_apparel": (
-        "isolated design on a plain background, subject only with space around it, "
-        "DTF transfer print for apparel, clean edges"
+        "centered raster illustration on a plain white background, "
+        "compact composition with generous negative space on all sides, "
+        "the design should look like a decal or patch not edge-to-edge, "
+        "suitable for DTF transfer print on apparel"
     ),
     "sublimation": "full-color sublimation print design, seamless edges, vibrant colors, print-ready",
     "sticker_vinyl": "sticker or vinyl decal design, clean cut lines, bold outlines, print-ready",
@@ -42,10 +44,7 @@ def build_prompt_from_brief(brief: DesignBrief) -> str:
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
     if brief.product_type == "dtf_apparel":
         return (
-            f"A single isolated object on a pure white background. "
             f"{brief.concept}. Style: {brief.visual_style}. "
-            f"No background pattern, no background texture, no border. "
-            f"White negative space surrounding the subject. "
             f"{product_context}, high quality, professional illustration"
         )
     return (
