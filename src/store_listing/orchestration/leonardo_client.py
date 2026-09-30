@@ -57,12 +57,12 @@ class LeonardoClient:
         return {
             "model": self._model,
             "public": False,
-            "prompt_enhance": "OFF",
             "parameters": {
                 "prompt": prompt,
                 "width": width,
                 "height": height,
                 "quantity": quantity,
+                "prompt_enhance": False,
             },
         }
 
