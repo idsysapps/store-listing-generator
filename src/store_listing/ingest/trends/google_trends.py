@@ -407,6 +407,7 @@ class DatabaseClient:
         headline_text: str | None = None,
         tagline_text: str | None = None,
         font_color: str | None = None,
+        scene_description: str | None = None,
     ) -> int:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
@@ -414,8 +415,9 @@ class DatabaseClient:
                 INSERT INTO design_briefs
                     (concept, product_type, specific_products, audience,
                      visual_style, confidence, reasoning, llm_model, batch_id,
-                     layout_type, headline_text, tagline_text, font_color)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     layout_type, headline_text, tagline_text, font_color,
+                     scene_description)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -432,6 +434,7 @@ class DatabaseClient:
                     headline_text,
                     tagline_text,
                     font_color,
+                    scene_description,
                 ),
             )
             result = cur.fetchone()
@@ -460,7 +463,7 @@ class DatabaseClient:
                 """
                 SELECT id, concept, product_type, audience, visual_style,
                        layout_type, headline_text, tagline_text, font_color,
-                       regeneration_feedback
+                       regeneration_feedback, scene_description
                 FROM design_briefs
                 WHERE image_key_raw IS NULL
                 ORDER BY created_at DESC
@@ -480,6 +483,7 @@ class DatabaseClient:
                     "tagline_text": row[7],
                     "font_color": row[8],
                     "regeneration_feedback": row[9],
+                    "scene_description": row[10],
                 }
                 for row in cur.fetchall()
             ]
@@ -490,7 +494,7 @@ class DatabaseClient:
                 """
                 SELECT id, concept, product_type, audience, visual_style,
                        layout_type, headline_text, tagline_text, font_color,
-                       regeneration_feedback
+                       regeneration_feedback, scene_description
                 FROM design_briefs
                 WHERE id = %s
                 """,
@@ -510,6 +514,7 @@ class DatabaseClient:
                 "tagline_text": row[7],
                 "font_color": row[8],
                 "regeneration_feedback": row[9],
+                "scene_description": row[10],
             }
 
     def update_brief_image_keys(

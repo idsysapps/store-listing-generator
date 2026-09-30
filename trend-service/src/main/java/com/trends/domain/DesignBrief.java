@@ -52,6 +52,9 @@ public class DesignBrief extends PanacheEntityBase {
     @Column(name = "regeneration_feedback", columnDefinition = "TEXT")
     public String regenerationFeedback;
 
+    @Column(name = "scene_description", columnDefinition = "TEXT")
+    public String sceneDescription;
+
     @OneToMany(mappedBy = "designBrief", fetch = FetchType.LAZY)
     public List<DesignBriefSource> sources;
 
