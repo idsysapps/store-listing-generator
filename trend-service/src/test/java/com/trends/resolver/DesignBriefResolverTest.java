@@ -178,4 +178,47 @@ class DesignBriefResolverTest {
         assertNull(result.get(0).getImageKeyRaw());
         assertNull(result.get(0).getImageKeyTransparent());
     }
+
+    @Test
+    void testRequestRegeneration_ClearsImageKeysAndStoresFeedback() {
+        DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
+        brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
+        brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
+
+        when(designBriefRepository.findById(1L)).thenReturn(brief);
+
+        DesignBriefSummary result = designBriefResolver.requestRegeneration(
+                1, "Make the skeleton more cartoonish, use brighter colors");
+
+        assertNotNull(result);
+        assertNull(brief.imageKeyRaw);
+        assertNull(brief.imageKeyTransparent);
+        assertEquals("Make the skeleton more cartoonish, use brighter colors",
+                brief.regenerationFeedback);
+        verify(designBriefRepository).persist(brief);
+    }
+
+    @Test
+    void testRequestRegeneration_ReturnsNullForMissingBrief() {
+        when(designBriefRepository.findById(999L)).thenReturn(null);
+
+        DesignBriefSummary result = designBriefResolver.requestRegeneration(
+                999, "some feedback");
+
+        assertNull(result);
+    }
+
+    @Test
+    void testRequestRegeneration_WorksWithNullFeedback() {
+        DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
+        brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
+
+        when(designBriefRepository.findById(1L)).thenReturn(brief);
+
+        DesignBriefSummary result = designBriefResolver.requestRegeneration(1, null);
+
+        assertNotNull(result);
+        assertNull(brief.imageKeyRaw);
+        assertNull(brief.regenerationFeedback);
+    }
 }

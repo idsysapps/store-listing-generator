@@ -153,7 +153,8 @@ CREATE TABLE design_briefs (
     layout_type VARCHAR(30) DEFAULT 'full_bleed',
     headline_text TEXT,
     tagline_text TEXT,
-    font_color VARCHAR(20)
+    font_color VARCHAR(20),
+    regeneration_feedback TEXT
 );
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);
