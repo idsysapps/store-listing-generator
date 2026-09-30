@@ -9,6 +9,7 @@ from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.image_generation import generate_image, generate_image_leonardo
 from store_listing.orchestration.image_storage import ImageStorageClient
 from store_listing.orchestration.leonardo_client import LeonardoClient
+from store_listing.orchestration.text_compositor import LayoutSpec, composite_text
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +91,24 @@ def _generate_single_brief(
         )
         return False
 
+    layout = LayoutSpec(
+        layout_type=brief_row.get("layout_type", "full_bleed"),
+        headline_text=brief_row.get("headline_text"),
+        tagline_text=brief_row.get("tagline_text"),
+        font_color=brief_row.get("font_color", "#000000"),
+    )
+
     is_dtf = brief_row["product_type"] == "dtf_apparel"
     raw_bytes = result.raw_bytes if result.raw_bytes else result.image_bytes
     transparent_bytes: bytes | None = None
     if is_dtf and result.image_bytes:
         transparent_bytes = result.image_bytes
+
+    if layout.needs_text:
+        composited = composite_text(raw_bytes, layout)
+        raw_bytes = composited
+        if transparent_bytes is not None:
+            transparent_bytes = composite_text(transparent_bytes, layout)
 
     keys = storage.upload_design(
         raw_bytes=raw_bytes,

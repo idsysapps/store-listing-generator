@@ -62,7 +62,8 @@ class LeonardoClient:
                 "width": width,
                 "height": height,
                 "quantity": quantity,
-                "prompt_enhance": False,
+                "prompt_enhance": "OFF",
+                "style_ids": ["556c1ee5-ec38-42e8-955a-1e82dad0ffa1"],
             },
         }
 

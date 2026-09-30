@@ -42,21 +42,6 @@ class ImageResult:
     raw_bytes: bytes | None = None
 
 
-def _typography_hint(visual_style: str) -> str:
-    if not visual_style:
-        return "bold clean block font"
-    style_lower = visual_style.lower()
-    if "retro" in style_lower or "vintage" in style_lower:
-        return "retro vintage block lettering"
-    if "neon" in style_lower:
-        return "neon glowing lettering"
-    if "handwritten" in style_lower or "script" in style_lower:
-        return "hand-lettered script font"
-    if "gothic" in style_lower:
-        return "gothic serif lettering"
-    return "bold clean block font"
-
-
 def _split_concept(concept: str) -> tuple[str, str | None]:
     """Split concept into scene description and short text to render.
 
@@ -86,22 +71,6 @@ def _scene_for_prompt(brief: DesignBrief) -> str:
     return scene
 
 
-def _text_prompt_section(brief: DesignBrief) -> str:
-    """Return text instruction to LEAD the prompt (Flux best practice)."""
-    typography = _typography_hint(brief.visual_style)
-
-    if brief.headline_text:
-        parts = [f'Large text reading "{brief.headline_text}"']
-        if brief.tagline_text:
-            parts.append(f'with subtitle "{brief.tagline_text}"')
-        return f"{', '.join(parts)} in {typography}."
-
-    _, short_text = _split_concept(brief.concept)
-    if short_text:
-        return f'Text reading "{short_text}" in {typography}.'
-    return ""
-
-
 def _feedback_section(brief: DesignBrief) -> str:
     if not brief.regeneration_feedback:
         return ""
@@ -110,14 +79,12 @@ def _feedback_section(brief: DesignBrief) -> str:
 
 def build_prompt_from_brief(brief: DesignBrief) -> str:
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
-    text_instruction = _text_prompt_section(brief)
     scene = _scene_for_prompt(brief)
     feedback = _feedback_section(brief)
 
     parts: list[str] = []
-    if text_instruction:
-        parts.append(text_instruction)
     parts.append(f"{scene}, {brief.visual_style}, {product_context}.")
+    parts.append("Do not include any text or lettering.")
     parts.append("Do not draw anything else.")
     if feedback:
         parts.append(feedback.strip())

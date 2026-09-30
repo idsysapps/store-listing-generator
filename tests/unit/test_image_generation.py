@@ -43,31 +43,17 @@ class TestBuildPromptFromBrief:
         prompt = build_prompt_from_brief(brief)
         assert "DTF" in prompt
 
-    def test_headline_text_wrapped_in_double_quotes(self) -> None:
+    def test_no_text_instruction_in_prompt(self) -> None:
         brief = _make_brief(headline_text="SPOOKY SEASON")
         prompt = build_prompt_from_brief(brief)
-        assert '"SPOOKY SEASON"' in prompt
+        assert "SPOOKY SEASON" not in prompt
+        assert "do not include any text or lettering" in prompt.lower()
 
-    def test_tagline_text_wrapped_in_double_quotes(self) -> None:
+    def test_no_text_instruction_even_with_tagline(self) -> None:
         brief = _make_brief(headline_text="Born To Be", tagline_text="Spooky")
         prompt = build_prompt_from_brief(brief)
-        assert '"Born To Be"' in prompt
-        assert '"Spooky"' in prompt
-
-    def test_typography_style_derived_from_visual_style(self) -> None:
-        brief = _make_brief(
-            visual_style="Retro vintage, distressed texture",
-            headline_text="COFFEE",
-        )
-        prompt = build_prompt_from_brief(brief)
-        assert "retro" in prompt.lower()
-        assert "lettering" in prompt.lower()
-
-    def test_neon_style_uses_neon_typography(self) -> None:
-        brief = _make_brief(visual_style="neon glow effect", headline_text="OPEN")
-        prompt = build_prompt_from_brief(brief)
-        assert "neon" in prompt.lower()
-        assert "lettering" in prompt.lower()
+        assert "Born To Be" not in prompt
+        assert "Spooky" not in prompt
 
     def test_regeneration_feedback_appended_to_prompt(self) -> None:
         brief = _make_brief(regeneration_feedback="make the skeleton more cartoonish")
@@ -84,15 +70,10 @@ class TestBuildPromptFromBrief:
         prompt = build_prompt_from_brief(brief)
         assert "Do not draw anything else." in prompt
 
-    def test_text_instruction_comes_before_scene(self) -> None:
-        brief = _make_brief(
-            headline_text="STAY WEIRD",
-            scene_description="a skeleton meditating on a yoga mat",
-        )
+    def test_includes_no_text_instruction(self) -> None:
+        brief = _make_brief()
         prompt = build_prompt_from_brief(brief)
-        text_pos = prompt.index('"STAY WEIRD"')
-        scene_pos = prompt.index("skeleton meditating")
-        assert text_pos < scene_pos
+        assert "Do not include any text or lettering." in prompt
 
     def test_scene_description_used_instead_of_concept(self) -> None:
         brief = _make_brief(
@@ -113,7 +94,7 @@ class TestBuildPromptFromBrief:
         prompt = build_prompt_from_brief(brief)
         assert "Skeleton doing yoga poses" in prompt
 
-    def test_prompt_under_80_words_for_typical_dtf_with_headline(self) -> None:
+    def test_prompt_under_80_words(self) -> None:
         brief = _make_brief(
             concept="Skeleton Meeting",
             headline_text="STILL IN THIS MEETING",
@@ -123,28 +104,6 @@ class TestBuildPromptFromBrief:
         prompt = build_prompt_from_brief(brief)
         word_count = len(prompt.split())
         assert word_count < 80, f"Prompt has {word_count} words: {prompt}"
-
-    def test_long_concept_with_separator_quotes_short_part(self) -> None:
-        brief = _make_brief(
-            concept="This Meeting Could Have Been An Email - Skeleton Edition",
-            headline_text=None,
-        )
-        prompt = build_prompt_from_brief(brief)
-        assert '"Skeleton Edition"' in prompt
-        assert "This Meeting Could Have Been An Email" in prompt
-
-    def test_long_concept_no_separator_no_text_instruction(self) -> None:
-        brief = _make_brief(
-            concept="A very long concept with many words and no separator",
-            headline_text=None,
-        )
-        prompt = build_prompt_from_brief(brief)
-        assert "Text reading" not in prompt
-
-    def test_short_concept_quotes_itself(self) -> None:
-        brief = _make_brief(concept="Yoga Cat", headline_text=None)
-        prompt = build_prompt_from_brief(brief)
-        assert '"Yoga Cat"' in prompt
 
     def test_dtf_apparel_prompt_mentions_white_background(self) -> None:
         brief = _make_brief(product_type="dtf_apparel")
@@ -198,13 +157,17 @@ class TestGenerateImage:
             ),
         }
 
-        brief = _make_brief(concept="Galaxy cat astronaut", product_type="sublimation")
+        brief = _make_brief(
+            concept="Galaxy cat astronaut",
+            product_type="sublimation",
+            scene_description="a cat in a spacesuit floating among galaxies",
+        )
         generate_image(brief, bedrock_client=mock_client)
 
         call_kwargs = mock_client.invoke_model.call_args
         body_str = call_kwargs.kwargs.get("body", call_kwargs[1].get("body", ""))
         body = json.loads(body_str)
-        assert "Galaxy cat astronaut" in str(body)
+        assert "cat in a spacesuit" in str(body)
 
     def test_returns_error_on_bedrock_failure(self) -> None:
         mock_client = MagicMock()
