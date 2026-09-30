@@ -15,7 +15,11 @@ from store_listing.orchestration.leonardo_client import (
 
 
 def _generation_response(generation_id: str = "gen-123") -> dict[str, Any]:
-    return {"generationId": generation_id}
+    return {"sdGenerationJob": {"generationId": generation_id}}
+
+
+def _error_list_response(message: str = "Insufficient tokens") -> list[dict[str, Any]]:
+    return [{"message": message, "extensions": {"statusCode": 402}, "locations": [], "path": []}]
 
 
 def _poll_response_pending() -> dict[str, Any]:
@@ -212,3 +216,22 @@ class TestLeonardoGenerate:
         post_call = mock_client.post.call_args
         headers = post_call.kwargs.get("headers", {})
         assert headers.get("Authorization") == "Bearer my-secret-key"
+
+    @pytest.mark.asyncio
+    async def test_generate_handles_error_list_response(self) -> None:
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.post.return_value = httpx.Response(
+            200,
+            json=_error_list_response("Insufficient tokens"),
+            request=httpx.Request("POST", "https://example.com"),
+        )
+
+        client = LeonardoClient(api_key="test-key")
+        result = await client.generate(
+            prompt="test",
+            http_client=mock_client,
+        )
+
+        assert result.image_bytes is None
+        assert result.error is not None
+        assert "Insufficient tokens" in result.error
