@@ -315,7 +315,13 @@ def generate_design_images_task() -> dict:
     from store_listing.orchestration.image_pipeline import generate_images_for_briefs
     from store_listing.orchestration.image_storage import S3_BUCKET, S3_ENDPOINT_URL
 
-    bedrock_client = boto3.client("bedrock-runtime", region_name=BEDROCK_REGION)
+    bedrock_kwargs: dict[str, str] = {"region_name": BEDROCK_REGION}
+    bedrock_key = os.environ.get("BEDROCK_ACCESS_KEY_ID", "")
+    bedrock_secret = os.environ.get("BEDROCK_SECRET_ACCESS_KEY", "")
+    if bedrock_key and bedrock_secret:
+        bedrock_kwargs["aws_access_key_id"] = bedrock_key
+        bedrock_kwargs["aws_secret_access_key"] = bedrock_secret
+    bedrock_client = boto3.client("bedrock-runtime", **bedrock_kwargs)
 
     s3_kwargs: dict[str, str] = {}
     if S3_ENDPOINT_URL:
