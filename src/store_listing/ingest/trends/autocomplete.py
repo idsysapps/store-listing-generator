@@ -143,19 +143,22 @@ class AutocompleteHarvester:
                     failed.append(f"{source_name}:{seed}")
                     continue
 
-                for suggestion in suggestions:
+                for position, suggestion in enumerate(suggestions):
                     query = suggestion.strip().lower()
                     if not query or query == seed.lower():
                         continue
-                    result = self._store(seed, source_name, query)
+                    rank_score = max(1, 11 - position)
+                    result = self._store(seed, source_name, query, rank_score)
                     all_results.append(result)
 
         return all_results, failed
 
-    def _store(self, seed: str, source_name: Source, query: str) -> TrendResult:
+    def _store(
+        self, seed: str, source_name: Source, query: str, rank_score: int = 1
+    ) -> TrendResult:
         result = TrendResult(
             query=query,
-            score=1,
+            score=rank_score,
             delta=0,
             region="US",
             query_type="search",
@@ -172,13 +175,13 @@ class AutocompleteHarvester:
             source=source_name,
             trend_direction=result.trend_direction,
         )
-        promotion_score = compute_promotion_score(source_name, "search", 1, 0)
+        promotion_score = compute_promotion_score(source_name, "search", rank_score, 0)
         self.db_client.upsert_seed_candidate(
             source_seed=seed,
             query=result.query,
             source=source_name,
             query_type="search",
-            score=1,
+            score=rank_score,
             delta=0,
             promotion_score=promotion_score,
         )
