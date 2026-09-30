@@ -101,6 +101,26 @@ class TestBuildPromptFromBrief:
         assert "neon" in prompt.lower()
         assert "lettering" in prompt.lower()
 
+    def test_regeneration_feedback_appended_to_prompt(self) -> None:
+        brief = _make_brief(regeneration_feedback="make the skeleton more cartoonish")
+        prompt = build_prompt_from_brief(brief)
+        assert "make the skeleton more cartoonish" in prompt
+
+    def test_no_feedback_section_when_feedback_is_none(self) -> None:
+        brief = _make_brief(regeneration_feedback=None)
+        prompt = build_prompt_from_brief(brief)
+        assert "additional creative direction" not in prompt.lower()
+
+    def test_dtf_apparel_prompt_mentions_isolated_subject(self) -> None:
+        brief = _make_brief(product_type="dtf_apparel")
+        prompt = build_prompt_from_brief(brief)
+        assert "isolated" in prompt.lower() or "single subject" in prompt.lower()
+
+    def test_dtf_apparel_prompt_mentions_no_background_scene(self) -> None:
+        brief = _make_brief(product_type="dtf_apparel")
+        prompt = build_prompt_from_brief(brief)
+        assert "no background" in prompt.lower() or "plain white" in prompt.lower()
+
 
 class TestGenerateImage:
     def test_returns_image_result(self) -> None:

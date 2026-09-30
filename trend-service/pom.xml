@@ -78,6 +78,12 @@
             <artifactId>quarkus-smallrye-jwt-build</artifactId>
         </dependency>
 
+        <!-- Redis (Celery task dispatch) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-redis-client</artifactId>
+        </dependency>
+
         <!-- Health & Metrics -->
         <dependency>
             <groupId>io.quarkus</groupId>

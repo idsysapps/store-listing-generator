@@ -5,7 +5,9 @@ import com.trends.domain.ActiveSeed;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefSummary;
+import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
+import io.smallrye.mutiny.Uni;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -26,12 +28,17 @@ class DesignBriefResolverTest {
     @Mock
     ImageStorageConfig imageStorageConfig;
 
+    @Mock
+    CeleryTaskDispatcher celeryTaskDispatcher;
+
     @InjectMocks
     DesignBriefResolver designBriefResolver;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        when(celeryTaskDispatcher.dispatchGenerateSingleBriefImage(anyInt()))
+                .thenReturn(Uni.createFrom().voidItem());
     }
 
     private DesignBrief makeBrief(int id, String concept, String productType) {
@@ -206,6 +213,28 @@ class DesignBriefResolverTest {
                 999, "some feedback");
 
         assertNull(result);
+    }
+
+    @Test
+    void testRequestRegeneration_DispatchesCeleryTask() {
+        DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
+        brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
+        brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
+
+        when(designBriefRepository.findById(1L)).thenReturn(brief);
+
+        designBriefResolver.requestRegeneration(1, "brighter colors");
+
+        verify(celeryTaskDispatcher).dispatchGenerateSingleBriefImage(1);
+    }
+
+    @Test
+    void testRequestRegeneration_DoesNotDispatchForMissingBrief() {
+        when(designBriefRepository.findById(999L)).thenReturn(null);
+
+        designBriefResolver.requestRegeneration(999, "some feedback");
+
+        verify(celeryTaskDispatcher, never()).dispatchGenerateSingleBriefImage(anyInt());
     }
 
     @Test

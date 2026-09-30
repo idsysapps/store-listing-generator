@@ -459,7 +459,8 @@ class DatabaseClient:
             cur.execute(
                 """
                 SELECT id, concept, product_type, audience, visual_style,
-                       layout_type, headline_text, tagline_text, font_color
+                       layout_type, headline_text, tagline_text, font_color,
+                       regeneration_feedback
                 FROM design_briefs
                 WHERE image_key_raw IS NULL
                 ORDER BY created_at DESC
@@ -478,9 +479,38 @@ class DatabaseClient:
                     "headline_text": row[6],
                     "tagline_text": row[7],
                     "font_color": row[8],
+                    "regeneration_feedback": row[9],
                 }
                 for row in cur.fetchall()
             ]
+
+    def get_brief_by_id(self, brief_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, concept, product_type, audience, visual_style,
+                       layout_type, headline_text, tagline_text, font_color,
+                       regeneration_feedback
+                FROM design_briefs
+                WHERE id = %s
+                """,
+                (brief_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return {
+                "id": row[0],
+                "concept": row[1],
+                "product_type": row[2],
+                "audience": row[3],
+                "visual_style": row[4],
+                "layout_type": row[5] or "full_bleed",
+                "headline_text": row[6],
+                "tagline_text": row[7],
+                "font_color": row[8],
+                "regeneration_feedback": row[9],
+            }
 
     def update_brief_image_keys(
         self,
