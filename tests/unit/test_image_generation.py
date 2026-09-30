@@ -53,6 +53,29 @@ class TestBuildPromptFromBrief:
         prompt = build_prompt_from_brief(brief)
         assert "print" in prompt.lower()
 
+    def test_text_top_instructs_leave_top_space(self) -> None:
+        brief = _make_brief(layout_type="text_top", headline_text="Spooky Season")
+        prompt = build_prompt_from_brief(brief)
+        assert "top" in prompt.lower()
+        assert "Spooky Season" not in prompt
+
+    def test_text_top_bottom_instructs_leave_both_spaces(self) -> None:
+        brief = _make_brief(
+            layout_type="text_top_bottom",
+            headline_text="Born To Be",
+            tagline_text="Spooky",
+        )
+        prompt = build_prompt_from_brief(brief)
+        assert "top" in prompt.lower()
+        assert "bottom" in prompt.lower()
+        assert "Born To Be" not in prompt
+        assert "Spooky" not in prompt
+
+    def test_full_bleed_does_not_reserve_space(self) -> None:
+        brief = _make_brief(layout_type="full_bleed")
+        prompt = build_prompt_from_brief(brief)
+        assert "leave" not in prompt.lower() or "empty" not in prompt.lower()
+
 
 class TestGenerateImage:
     def test_returns_image_result(self) -> None:

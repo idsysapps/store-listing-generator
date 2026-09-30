@@ -280,6 +280,92 @@ class TestParseBriefResponse:
         response = json.dumps({"briefs": ["not a dict", 42]})
         assert parse_brief_response(response) == []
 
+    def test_parses_layout_fields(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Born To Be Spooky",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_top",
+                        "headline_text": "Born To Be Spooky",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].layout_type == "text_top"
+        assert result[0].headline_text == "Born To Be Spooky"
+        assert result[0].tagline_text is None
+
+    def test_parses_text_top_bottom_layout(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Rescue Dog Halloween",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_top_bottom",
+                        "headline_text": "Adopted My",
+                        "tagline_text": "Costume Too",
+                        "font_color": "#FF6600",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].layout_type == "text_top_bottom"
+        assert result[0].headline_text == "Adopted My"
+        assert result[0].tagline_text == "Costume Too"
+        assert result[0].font_color == "#FF6600"
+
+    def test_defaults_layout_to_full_bleed(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Abstract Pattern",
+                        "product_type": "sublimation",
+                        "confidence": 70,
+                        "source_seed_ids": [1],
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].layout_type == "full_bleed"
+        assert result[0].headline_text is None
+        assert result[0].tagline_text is None
+
+    def test_invalid_layout_type_defaults_to_full_bleed(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Test",
+                        "product_type": "dtf_apparel",
+                        "confidence": 50,
+                        "source_seed_ids": [1],
+                        "layout_type": "invalid_layout",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].layout_type == "full_bleed"
+
 
 class TestGenerateDesignBriefs:
     def _mock_db(self, candidates: list[BriefableCandidate] | None = None) -> MagicMock:

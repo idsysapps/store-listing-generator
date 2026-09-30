@@ -4,10 +4,20 @@ from __future__ import annotations
 
 import base64
 import json
+from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock
 
+from PIL import Image
+
 from store_listing.orchestration.image_pipeline import generate_images_for_briefs
+
+
+def _real_png(width: int = 64, height: int = 64, color: str = "white") -> bytes:
+    img = Image.new("RGBA", (width, height), color)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _mock_bedrock_response(image_bytes: bytes) -> dict[str, Any]:
@@ -96,6 +106,74 @@ class TestGenerateImagesForBriefs:
         assert s3.put_object.call_count == 1
         call_kwargs = db.update_brief_image_keys.call_args.kwargs
         assert call_kwargs["image_key_transparent"] is None
+
+    def test_composites_text_onto_image(self) -> None:
+        db = _mock_db_client(
+            briefs=[
+                {
+                    "id": 50,
+                    "concept": "Born To Be Spooky",
+                    "product_type": "dtf_apparel",
+                    "audience": "October birthday people",
+                    "visual_style": "retro halloween cake",
+                    "layout_type": "text_top",
+                    "headline_text": "Born To Be Spooky",
+                    "tagline_text": None,
+                    "font_color": "#FF6600",
+                }
+            ]
+        )
+
+        real_raw = _real_png(color="white")
+        real_transparent = _real_png(color="red")
+        bedrock = MagicMock()
+        bedrock.invoke_model.side_effect = [
+            _mock_bedrock_response(real_raw),
+            _mock_bedrock_response(real_transparent),
+        ]
+
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db, bedrock_client=bedrock, s3_client=s3, bucket="test-bucket"
+        )
+
+        assert result["images_generated"] == 1
+        raw_call = s3.put_object.call_args_list[0]
+        raw_body = raw_call.kwargs.get("Body") or raw_call[1].get("Body")
+        assert raw_body != real_raw
+
+    def test_skips_compositing_for_full_bleed(self) -> None:
+        db = _mock_db_client(
+            briefs=[
+                {
+                    "id": 51,
+                    "concept": "Abstract Pattern",
+                    "product_type": "sublimation",
+                    "audience": "art lovers",
+                    "visual_style": "geometric",
+                    "layout_type": "full_bleed",
+                    "headline_text": None,
+                    "tagline_text": None,
+                    "font_color": None,
+                }
+            ]
+        )
+
+        real_raw = _real_png()
+        bedrock = MagicMock()
+        bedrock.invoke_model.return_value = _mock_bedrock_response(real_raw)
+
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db, bedrock_client=bedrock, s3_client=s3, bucket="test-bucket"
+        )
+
+        assert result["images_generated"] == 1
+        raw_call = s3.put_object.call_args_list[0]
+        raw_body = raw_call.kwargs.get("Body") or raw_call[1].get("Body")
+        assert raw_body == real_raw
 
     def test_continues_on_generation_failure(self) -> None:
         db = _mock_db_client(

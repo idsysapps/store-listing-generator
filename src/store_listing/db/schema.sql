@@ -149,7 +149,11 @@ CREATE TABLE design_briefs (
     batch_id VARCHAR(50),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     image_key_raw TEXT,
-    image_key_transparent TEXT
+    image_key_transparent TEXT,
+    layout_type VARCHAR(30) DEFAULT 'full_bleed',
+    headline_text TEXT,
+    tagline_text TEXT,
+    font_color VARCHAR(20)
 );
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);

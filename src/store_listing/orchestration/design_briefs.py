@@ -38,16 +38,30 @@ SYSTEM_PROMPT: Final[str] = (
     "- product_type: exactly one of 'dtf_apparel', 'sublimation', 'sticker_vinyl'\n"
     "- specific_products: array of 1-3 specific products from the catalog above\n"
     "- audience: who would buy this (demographics, interests)\n"
-    "- visual_style: art direction notes (color palette, illustration style, typography)\n"
+    "- visual_style: art direction notes (color palette, illustration style, "
+    "typography). Do NOT include any text/slogan in this field — text is rendered "
+    "separately via the layout fields below.\n"
     "- confidence: 0-100, how confident you are this will sell\n"
     "- reasoning: why this concept is timely and marketable (cite the trend signals)\n"
     "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
+    "TEXT LAYOUT — controls how text is composited onto the design:\n"
+    "- layout_type: one of 'full_bleed' (no text, illustration fills canvas), "
+    "'text_top' (headline at top, art below), 'text_top_bottom' (headline top, "
+    "tagline bottom, art in center). Use 'full_bleed' for purely visual designs "
+    "with no slogan. Use text layouts when a catchphrase or slogan strengthens the product.\n"
+    "- headline_text: (required if layout_type is not 'full_bleed') the main text "
+    "line, short and punchy (1-6 words)\n"
+    "- tagline_text: (optional, only for 'text_top_bottom') secondary text line\n"
+    "- font_color: hex color for text (e.g. '#FFFFFF' for white, '#000000' for black), "
+    "choose to contrast with the design background\n\n"
     "IMPORTANT: Do not suggest designs requiring licensed IP (movie characters, "
     "team logos, brand names). Create original concepts inspired by cultural moments.\n\n"
     "Return ONLY valid JSON with this exact structure:\n"
     '{"briefs": [{"concept": "...", "product_type": "...", "specific_products": [...], '
     '"audience": "...", "visual_style": "...", "confidence": 0-100, '
-    '"reasoning": "...", "source_seed_ids": [id1, id2]}]}'
+    '"reasoning": "...", "source_seed_ids": [id1, id2], '
+    '"layout_type": "text_top", "headline_text": "...", '
+    '"tagline_text": "...", "font_color": "#000000"}]}'
 )
 
 
@@ -63,6 +77,9 @@ class BriefableCandidate:
     product_tags: list[str] = field(default_factory=list)
 
 
+VALID_LAYOUT_TYPES: set[str] = {"full_bleed", "text_top", "text_top_bottom"}
+
+
 @dataclass(frozen=True)
 class DesignBrief:
     concept: str
@@ -73,6 +90,10 @@ class DesignBrief:
     confidence: int
     reasoning: str
     source_seed_ids: list[int]
+    layout_type: str = "full_bleed"
+    headline_text: str | None = None
+    tagline_text: str | None = None
+    font_color: str | None = None
 
 
 class DesignBriefDBClient(Protocol):
@@ -89,6 +110,10 @@ class DesignBriefDBClient(Protocol):
         reasoning: str,
         llm_model: str,
         batch_id: str,
+        layout_type: str = "full_bleed",
+        headline_text: str | None = None,
+        tagline_text: str | None = None,
+        font_color: str | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -174,6 +199,22 @@ def parse_brief_response(text: str) -> list[DesignBrief]:
 
         source_seed_ids = [i for i in b.get("source_seed_ids", []) if isinstance(i, int)]
 
+        layout_type = b.get("layout_type", "full_bleed")
+        if layout_type not in VALID_LAYOUT_TYPES:
+            layout_type = "full_bleed"
+
+        headline_text = b.get("headline_text")
+        if headline_text is not None and not isinstance(headline_text, str):
+            headline_text = None
+
+        tagline_text = b.get("tagline_text")
+        if tagline_text is not None and not isinstance(tagline_text, str):
+            tagline_text = None
+
+        font_color = b.get("font_color")
+        if font_color is not None and not isinstance(font_color, str):
+            font_color = None
+
         result.append(
             DesignBrief(
                 concept=concept,
@@ -184,6 +225,10 @@ def parse_brief_response(text: str) -> list[DesignBrief]:
                 confidence=confidence,
                 reasoning=str(b.get("reasoning", "")),
                 source_seed_ids=source_seed_ids,
+                layout_type=layout_type,
+                headline_text=headline_text,
+                tagline_text=tagline_text,
+                font_color=font_color,
             )
         )
 
@@ -228,6 +273,10 @@ def generate_design_briefs(
             reasoning=brief.reasoning,
             llm_model=model,
             batch_id=batch_id,
+            layout_type=brief.layout_type,
+            headline_text=brief.headline_text,
+            tagline_text=brief.tagline_text,
+            font_color=brief.font_color,
         )
         for seed_id in brief.source_seed_ids:
             if seed_id in valid_ids:

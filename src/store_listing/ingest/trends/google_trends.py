@@ -403,14 +403,19 @@ class DatabaseClient:
         reasoning: str,
         llm_model: str,
         batch_id: str,
+        layout_type: str = "full_bleed",
+        headline_text: str | None = None,
+        tagline_text: str | None = None,
+        font_color: str | None = None,
     ) -> int:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO design_briefs
                     (concept, product_type, specific_products, audience,
-                     visual_style, confidence, reasoning, llm_model, batch_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     visual_style, confidence, reasoning, llm_model, batch_id,
+                     layout_type, headline_text, tagline_text, font_color)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -423,6 +428,10 @@ class DatabaseClient:
                     reasoning,
                     llm_model,
                     batch_id,
+                    layout_type,
+                    headline_text,
+                    tagline_text,
+                    font_color,
                 ),
             )
             result = cur.fetchone()
@@ -449,7 +458,8 @@ class DatabaseClient:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, concept, product_type, audience, visual_style
+                SELECT id, concept, product_type, audience, visual_style,
+                       layout_type, headline_text, tagline_text, font_color
                 FROM design_briefs
                 WHERE image_key_raw IS NULL
                 ORDER BY created_at DESC
@@ -464,6 +474,10 @@ class DatabaseClient:
                     "product_type": row[2],
                     "audience": row[3],
                     "visual_style": row[4],
+                    "layout_type": row[5] or "full_bleed",
+                    "headline_text": row[6],
+                    "tagline_text": row[7],
+                    "font_color": row[8],
                 }
                 for row in cur.fetchall()
             ]

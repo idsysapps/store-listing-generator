@@ -40,15 +40,29 @@ class ImageResult:
     raw_bytes: bytes | None = None
 
 
+def _layout_space_instruction(layout_type: str) -> str:
+    if layout_type == "text_top":
+        return "leave the top 15% of the canvas empty as plain background for text overlay, "
+    if layout_type == "text_top_bottom":
+        return (
+            "leave the top 15% and bottom 12% of the canvas empty as plain background "
+            "for text overlay, "
+        )
+    return ""
+
+
 def build_prompt_from_brief(brief: DesignBrief) -> str:
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
+    space_instruction = _layout_space_instruction(brief.layout_type)
     if brief.product_type == "dtf_apparel":
         return (
             f"{brief.concept}. Style: {brief.visual_style}. "
+            f"{space_instruction}"
             f"{product_context}, high quality, professional illustration"
         )
     return (
         f"{brief.concept}, {brief.visual_style}, "
+        f"{space_instruction}"
         f"{product_context}, high quality, professional illustration"
     )
 
