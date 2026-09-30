@@ -336,3 +336,11 @@ data:
 
     CREATE INDEX IF NOT EXISTS idx_design_brief_sources_brief ON design_brief_sources(brief_id);
     CREATE INDEX IF NOT EXISTS idx_design_brief_sources_seed ON design_brief_sources(active_seed_id);
+
+    -- Add image storage and text layout columns to design_briefs
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS image_key_raw TEXT;
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS image_key_transparent TEXT;
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS layout_type VARCHAR(30) DEFAULT 'full_bleed';
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS headline_text TEXT;
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS tagline_text TEXT;
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS font_color VARCHAR(20);
