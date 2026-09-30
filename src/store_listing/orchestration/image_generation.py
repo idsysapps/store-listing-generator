@@ -44,29 +44,40 @@ class ImageResult:
     raw_bytes: bytes | None = None
 
 
-def _layout_space_instruction(layout_type: str) -> str:
-    if layout_type == "text_top":
-        return "leave the top 15% of the canvas empty as plain background for text overlay, "
-    if layout_type == "text_top_bottom":
-        return (
-            "leave the top 15% and bottom 12% of the canvas empty as plain background "
-            "for text overlay, "
-        )
-    return ""
+def _text_prompt_section(brief: DesignBrief) -> str:
+    parts: list[str] = []
+    if brief.headline_text:
+        parts.append(f'that says "{brief.headline_text}"')
+    if brief.tagline_text:
+        parts.append(f'with the subtitle "{brief.tagline_text}"')
+    if not parts:
+        return ""
+    typography = "bold clean block font"
+    if brief.visual_style:
+        style_lower = brief.visual_style.lower()
+        if "retro" in style_lower or "vintage" in style_lower:
+            typography = "retro vintage block lettering"
+        elif "neon" in style_lower:
+            typography = "neon glowing lettering"
+        elif "handwritten" in style_lower or "script" in style_lower:
+            typography = "hand-lettered script font"
+        elif "gothic" in style_lower:
+            typography = "gothic serif lettering"
+    return f"{', '.join(parts)} in {typography}, "
 
 
 def build_prompt_from_brief(brief: DesignBrief) -> str:
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
-    space_instruction = _layout_space_instruction(brief.layout_type)
+    text_section = _text_prompt_section(brief)
     if brief.product_type == "dtf_apparel":
         return (
-            f"{brief.concept}. Style: {brief.visual_style}. "
-            f"{space_instruction}"
+            f"{brief.concept} {text_section}"
+            f"Style: {brief.visual_style}. "
             f"{product_context}, high quality, professional illustration"
         )
     return (
-        f"{brief.concept}, {brief.visual_style}, "
-        f"{space_instruction}"
+        f"{brief.concept}, {text_section}"
+        f"{brief.visual_style}, "
         f"{product_context}, high quality, professional illustration"
     )
 

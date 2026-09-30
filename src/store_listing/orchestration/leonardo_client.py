@@ -127,8 +127,10 @@ class LeonardoClient:
             logger.warning("Leonardo API returned error list: %s", error_msg)
             return LeonardoGenerationResult(image_bytes=None, prompt=prompt, error=error_msg)
 
-        generation_id = data.get("sdGenerationJob", {}).get("generationId") or data.get(
-            "generationId"
+        generation_id = (
+            data.get("sdGenerationJob", {}).get("generationId")
+            or data.get("generate", {}).get("generationId")
+            or data.get("generationId")
         )
         if not generation_id:
             return LeonardoGenerationResult(

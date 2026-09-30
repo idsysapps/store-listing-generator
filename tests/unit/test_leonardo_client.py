@@ -15,7 +15,9 @@ from store_listing.orchestration.leonardo_client import (
 
 
 def _generation_response(generation_id: str = "gen-123") -> dict[str, Any]:
-    return {"sdGenerationJob": {"generationId": generation_id}}
+    return {
+        "generate": {"generationId": generation_id, "cost": {"amount": "0.003", "unit": "DOLLARS"}}
+    }
 
 
 def _error_list_response(message: str = "Insufficient tokens") -> list[dict[str, Any]]:

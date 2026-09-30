@@ -53,28 +53,37 @@ class TestBuildPromptFromBrief:
         prompt = build_prompt_from_brief(brief)
         assert "print" in prompt.lower()
 
-    def test_text_top_instructs_leave_top_space(self) -> None:
-        brief = _make_brief(layout_type="text_top", headline_text="Spooky Season")
+    def test_headline_text_wrapped_in_double_quotes(self) -> None:
+        brief = _make_brief(headline_text="SPOOKY SEASON")
         prompt = build_prompt_from_brief(brief)
-        assert "top" in prompt.lower()
-        assert "Spooky Season" not in prompt
+        assert '"SPOOKY SEASON"' in prompt
 
-    def test_text_top_bottom_instructs_leave_both_spaces(self) -> None:
+    def test_tagline_text_wrapped_in_double_quotes(self) -> None:
+        brief = _make_brief(headline_text="Born To Be", tagline_text="Spooky")
+        prompt = build_prompt_from_brief(brief)
+        assert '"Born To Be"' in prompt
+        assert '"Spooky"' in prompt
+
+    def test_typography_style_derived_from_visual_style(self) -> None:
         brief = _make_brief(
-            layout_type="text_top_bottom",
-            headline_text="Born To Be",
-            tagline_text="Spooky",
+            visual_style="Retro vintage, distressed texture",
+            headline_text="COFFEE",
         )
         prompt = build_prompt_from_brief(brief)
-        assert "top" in prompt.lower()
-        assert "bottom" in prompt.lower()
-        assert "Born To Be" not in prompt
-        assert "Spooky" not in prompt
+        assert "retro" in prompt.lower()
+        assert "lettering" in prompt.lower()
 
-    def test_full_bleed_does_not_reserve_space(self) -> None:
-        brief = _make_brief(layout_type="full_bleed")
+    def test_no_headline_omits_text_section(self) -> None:
+        brief = _make_brief(headline_text=None, tagline_text=None)
         prompt = build_prompt_from_brief(brief)
-        assert "leave" not in prompt.lower() or "empty" not in prompt.lower()
+        assert "says" not in prompt.lower()
+        assert "lettering" not in prompt.lower()
+
+    def test_neon_style_uses_neon_typography(self) -> None:
+        brief = _make_brief(visual_style="neon glow effect", headline_text="OPEN")
+        prompt = build_prompt_from_brief(brief)
+        assert "neon" in prompt.lower()
+        assert "lettering" in prompt.lower()
 
 
 class TestGenerateImage:
