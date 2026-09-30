@@ -121,12 +121,20 @@ class LeonardoClient:
             return LeonardoGenerationResult(image_bytes=None, prompt=prompt, error=error_msg)
 
         data = resp.json()
-        generation_id = data.get("generationId")
+
+        if isinstance(data, list):
+            error_msg = data[0].get("message", "Unknown error") if data else "Empty response"
+            logger.warning("Leonardo API returned error list: %s", error_msg)
+            return LeonardoGenerationResult(image_bytes=None, prompt=prompt, error=error_msg)
+
+        generation_id = data.get("sdGenerationJob", {}).get("generationId") or data.get(
+            "generationId"
+        )
         if not generation_id:
             return LeonardoGenerationResult(
                 image_bytes=None,
                 prompt=prompt,
-                error="No generationId in response",
+                error=f"No generationId in response: {data}",
             )
 
         for _ in range(max_polls):
