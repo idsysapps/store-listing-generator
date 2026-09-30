@@ -73,11 +73,27 @@ class TestBuildPromptFromBrief:
         assert "retro" in prompt.lower()
         assert "lettering" in prompt.lower()
 
-    def test_no_headline_omits_text_section(self) -> None:
-        brief = _make_brief(headline_text=None, tagline_text=None)
+    def test_long_concept_with_separator_quotes_short_part(self) -> None:
+        brief = _make_brief(
+            concept="This Meeting Could Have Been An Email - Skeleton Edition",
+            headline_text=None,
+        )
         prompt = build_prompt_from_brief(brief)
-        assert "says" not in prompt.lower()
-        assert "lettering" not in prompt.lower()
+        assert '"Skeleton Edition"' in prompt
+        assert "This Meeting Could Have Been An Email" in prompt
+
+    def test_long_concept_no_separator_suppresses_text(self) -> None:
+        brief = _make_brief(
+            concept="A very long concept with many words and no separator",
+            headline_text=None,
+        )
+        prompt = build_prompt_from_brief(brief)
+        assert "do not include any text" in prompt.lower()
+
+    def test_short_concept_quotes_itself(self) -> None:
+        brief = _make_brief(concept="Yoga Cat", headline_text=None)
+        prompt = build_prompt_from_brief(brief)
+        assert '"Yoga Cat"' in prompt
 
     def test_neon_style_uses_neon_typography(self) -> None:
         brief = _make_brief(visual_style="neon glow effect", headline_text="OPEN")
