@@ -44,39 +44,67 @@ class ImageResult:
     raw_bytes: bytes | None = None
 
 
-def _text_prompt_section(brief: DesignBrief) -> str:
-    parts: list[str] = []
+def _typography_hint(visual_style: str) -> str:
+    if not visual_style:
+        return "bold clean block font"
+    style_lower = visual_style.lower()
+    if "retro" in style_lower or "vintage" in style_lower:
+        return "retro vintage block lettering"
+    if "neon" in style_lower:
+        return "neon glowing lettering"
+    if "handwritten" in style_lower or "script" in style_lower:
+        return "hand-lettered script font"
+    if "gothic" in style_lower:
+        return "gothic serif lettering"
+    return "bold clean block font"
+
+
+def _split_concept(concept: str) -> tuple[str, str | None]:
+    """Split concept into scene description and short text to render.
+
+    Handles patterns like 'Concept Name - Subtitle' or 'Title: Description'.
+    Returns (scene_description, short_text_or_none).
+    """
+    for sep in (" - ", ": ", " — "):
+        if sep in concept:
+            parts = concept.split(sep, 1)
+            shorter = min(parts, key=len)
+            longer = max(parts, key=len)
+            if len(shorter.split()) <= 6:
+                return longer, shorter
+            return concept, None
+    if len(concept.split()) <= 5:
+        return concept, concept
+    return concept, None
+
+
+def _text_prompt_section(brief: DesignBrief) -> tuple[str, str]:
+    """Return (scene_description, text_instruction) for the prompt."""
+    typography = _typography_hint(brief.visual_style)
+
     if brief.headline_text:
-        parts.append(f'that says "{brief.headline_text}"')
-    if brief.tagline_text:
-        parts.append(f'with the subtitle "{brief.tagline_text}"')
-    if not parts:
-        return ""
-    typography = "bold clean block font"
-    if brief.visual_style:
-        style_lower = brief.visual_style.lower()
-        if "retro" in style_lower or "vintage" in style_lower:
-            typography = "retro vintage block lettering"
-        elif "neon" in style_lower:
-            typography = "neon glowing lettering"
-        elif "handwritten" in style_lower or "script" in style_lower:
-            typography = "hand-lettered script font"
-        elif "gothic" in style_lower:
-            typography = "gothic serif lettering"
-    return f"{', '.join(parts)} in {typography}, "
+        parts = [f'that says "{brief.headline_text}"']
+        if brief.tagline_text:
+            parts.append(f'with the subtitle "{brief.tagline_text}"')
+        return brief.concept, f"{', '.join(parts)} in {typography}, "
+
+    scene, short_text = _split_concept(brief.concept)
+    if short_text:
+        return scene, f'that says "{short_text}" in {typography}, '
+    return brief.concept, "do not include any text or lettering in the image, "
 
 
 def build_prompt_from_brief(brief: DesignBrief) -> str:
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
-    text_section = _text_prompt_section(brief)
+    scene, text_instruction = _text_prompt_section(brief)
     if brief.product_type == "dtf_apparel":
         return (
-            f"{brief.concept} {text_section}"
+            f"{scene}, {text_instruction}"
             f"Style: {brief.visual_style}. "
             f"{product_context}, high quality, professional illustration"
         )
     return (
-        f"{brief.concept}, {text_section}"
+        f"{scene}, {text_instruction}"
         f"{brief.visual_style}, "
         f"{product_context}, high quality, professional illustration"
     )
