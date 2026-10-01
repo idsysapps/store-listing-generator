@@ -73,6 +73,8 @@ SYSTEM_PROMPT = (
     "jigsaw puzzles, ornaments, wall art, pillows, blankets, socks\n"
     '- "sticker_vinyl": stickers and vinyl decals\n\n'
     "A seed can have multiple tags if the design works across methods.\n\n"
+    "You MUST classify every candidate as either promoted or rejected. "
+    "Do not skip any candidate.\n\n"
     "Return ONLY valid JSON with this exact structure:\n"
     '{"promote": [candidate_ids], "reject": [candidate_ids], '
     '"product_tags": {"candidate_id": ["dtf_apparel", ...]}, '
@@ -80,7 +82,9 @@ SYSTEM_PROMPT = (
     '"product_tags": ["dtf_apparel", ...]}], '
     '"event_seeds": [{"seed": "keyword", "reason": "why", "event": "event_name", '
     '"product_tags": ["dtf_apparel", ...]}], '
-    '"reasoning": {"candidate_id": "explanation"}}'
+    '"reasoning": {"promoted_candidate_id": "explanation"}}\n\n'
+    "IMPORTANT: Only include reasoning for PROMOTED candidates. "
+    "Do NOT include reasoning for rejected candidates — just list their IDs in the reject array."
 )
 
 MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "10"))
