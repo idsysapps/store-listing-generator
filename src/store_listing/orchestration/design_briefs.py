@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
 from store_listing.orchestration.context_seeds import get_upcoming_events
-from store_listing.orchestration.seed_curation import PRODUCT_TAGS
+from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +265,18 @@ def generate_design_briefs(
     messages = build_brief_prompt(candidates, context, today)
 
     try:
-        response = llm_completions.create(model=model, messages=messages)
+        raw = llm_completions.with_raw_response.create(model=model, messages=messages)
+        headers = raw.headers
+        response = raw.parse()
+        _log_llm_response(response, headers, "briefs")
+        if not response.choices:
+            logger.warning(
+                "LLM brief generation returned empty choices: model=%s, id=%s, body=%s",
+                getattr(response, "model", None),
+                getattr(response, "id", None),
+                getattr(raw, "text", None),
+            )
+            return {"status": "error", "error": "LLM returned empty choices"}
         content = response.choices[0].message.content or ""
     except Exception as e:  # noqa: BLE001
         logger.warning("LLM brief generation call failed: %s", e)
