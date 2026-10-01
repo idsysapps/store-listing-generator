@@ -36,15 +36,36 @@ public class DesignBriefResolver {
 
     @Authenticated
     @Query("designBriefs")
-    public List<DesignBriefSummary> getDesignBriefs(String productType, String batchId, int limit) {
-        LOG.debugf("Fetching design briefs: productType=%s, batchId=%s, limit=%d",
-                productType, batchId, limit);
+    public List<DesignBriefSummary> getDesignBriefs(
+            String productType, String batchId,
+            String startDate, String endDate,
+            Integer minConfidence, Integer maxConfidence,
+            List<String> sourceSeeds, List<String> specificProducts,
+            String audienceContains, int limit) {
+
+        String pt = nullIfEmpty(productType);
+        String bi = nullIfEmpty(batchId);
+        String sd = nullIfEmpty(startDate);
+        String ed = nullIfEmpty(endDate);
+        String ac = nullIfEmpty(audienceContains);
+
+        LOG.debugf("Fetching design briefs: productType=%s, batchId=%s, limit=%d", pt, bi, limit);
+
+        boolean hasAdvancedFilters = sd != null || ed != null
+                || minConfidence != null || maxConfidence != null
+                || (sourceSeeds != null && !sourceSeeds.isEmpty())
+                || (specificProducts != null && !specificProducts.isEmpty())
+                || ac != null;
 
         List<DesignBrief> briefs;
-        if (batchId != null && !batchId.isEmpty()) {
-            briefs = designBriefRepository.findByBatchId(batchId);
-        } else if (productType != null && !productType.isEmpty()) {
-            briefs = designBriefRepository.findByProductType(productType, limit);
+        if (hasAdvancedFilters || (pt != null && bi != null)) {
+            briefs = designBriefRepository.findWithFilters(
+                    pt, bi, sd, ed, minConfidence, maxConfidence,
+                    sourceSeeds, specificProducts, ac, limit);
+        } else if (bi != null) {
+            briefs = designBriefRepository.findByBatchId(bi);
+        } else if (pt != null) {
+            briefs = designBriefRepository.findByProductType(pt, limit);
         } else {
             briefs = designBriefRepository.findRecent(limit);
         }
@@ -52,6 +73,10 @@ public class DesignBriefResolver {
         return briefs.stream()
                 .map(this::toSummary)
                 .collect(Collectors.toList());
+    }
+
+    private static String nullIfEmpty(String value) {
+        return (value != null && !value.isEmpty()) ? value : null;
     }
 
     @Authenticated

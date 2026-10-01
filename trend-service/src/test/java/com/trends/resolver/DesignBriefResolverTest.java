@@ -58,12 +58,17 @@ class DesignBriefResolverTest {
         return brief;
     }
 
+    private List<DesignBriefSummary> queryBriefs(String productType, String batchId, int limit) {
+        return designBriefResolver.getDesignBriefs(
+                productType, batchId, null, null, null, null, null, null, null, limit);
+    }
+
     @Test
     void testGetDesignBriefs_ReturnsRecent() {
         DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
         when(designBriefRepository.findRecent(10)).thenReturn(List.of(brief));
 
-        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, null, 10);
+        List<DesignBriefSummary> result = queryBriefs(null, null, 10);
 
         assertEquals(1, result.size());
         assertEquals("Dad Jokes Shirt", result.get(0).getConcept());
@@ -77,7 +82,7 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Coffee Mug Design", "sublimation");
         when(designBriefRepository.findByProductType("sublimation", 10)).thenReturn(List.of(brief));
 
-        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs("sublimation", null, 10);
+        List<DesignBriefSummary> result = queryBriefs("sublimation", null, 10);
 
         assertEquals(1, result.size());
         assertEquals("sublimation", result.get(0).getProductType());
@@ -90,7 +95,7 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Test Brief", "dtf_apparel");
         when(designBriefRepository.findByBatchId("2026-10-01")).thenReturn(List.of(brief));
 
-        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, "2026-10-01", 10);
+        List<DesignBriefSummary> result = queryBriefs(null, "2026-10-01", 10);
 
         assertEquals(1, result.size());
         verify(designBriefRepository).findByBatchId("2026-10-01");
@@ -118,7 +123,7 @@ class DesignBriefResolverTest {
 
         when(designBriefRepository.findRecent(10)).thenReturn(List.of(brief));
 
-        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, null, 10);
+        List<DesignBriefSummary> result = queryBriefs(null, null, 10);
 
         assertEquals(1, result.size());
         assertEquals(List.of("dad jokes", "funny t-shirt"), result.get(0).getSourceSeeds());
@@ -131,7 +136,7 @@ class DesignBriefResolverTest {
 
         when(designBriefRepository.findRecent(10)).thenReturn(List.of(brief));
 
-        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, null, 10);
+        List<DesignBriefSummary> result = queryBriefs(null, null, 10);
 
         assertEquals(1, result.size());
         assertTrue(result.get(0).getSourceSeeds().isEmpty());
@@ -144,7 +149,7 @@ class DesignBriefResolverTest {
 
         when(designBriefRepository.findRecent(10)).thenReturn(List.of(brief));
 
-        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, null, 10);
+        List<DesignBriefSummary> result = queryBriefs(null, null, 10);
 
         assertEquals(1, result.size());
         assertTrue(result.get(0).getSpecificProducts().isEmpty());
@@ -162,7 +167,7 @@ class DesignBriefResolverTest {
         when(imageStorageConfig.buildUrl("designs/2026/09/dtf_apparel/1_transparent.png"))
                 .thenReturn("https://minio.local:9000/designs/designs/2026/09/dtf_apparel/1_transparent.png");
 
-        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, null, 10);
+        List<DesignBriefSummary> result = queryBriefs(null, null, 10);
 
         assertEquals(1, result.size());
         assertEquals("designs/2026/09/dtf_apparel/1_raw.png", result.get(0).getImageKeyRaw());
@@ -179,7 +184,7 @@ class DesignBriefResolverTest {
 
         when(designBriefRepository.findRecent(10)).thenReturn(List.of(brief));
 
-        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(null, null, 10);
+        List<DesignBriefSummary> result = queryBriefs(null, null, 10);
 
         assertEquals(1, result.size());
         assertNull(result.get(0).getImageKeyRaw());
@@ -249,5 +254,127 @@ class DesignBriefResolverTest {
         assertNotNull(result);
         assertNull(brief.imageKeyRaw);
         assertNull(brief.regenerationFeedback);
+    }
+
+    // --- Advanced filter tests (issue #123) ---
+
+    @Test
+    void testGetDesignBriefs_FiltersByDateRange() {
+        DesignBrief brief = makeBrief(1, "Holiday Shirt", "dtf_apparel");
+        when(designBriefRepository.findWithFilters(
+                null, null, "2026-09-01", "2026-09-30",
+                null, null, null, null, null, 10))
+                .thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(
+                null, null, "2026-09-01", "2026-09-30",
+                null, null, null, null, null, 10);
+
+        assertEquals(1, result.size());
+        verify(designBriefRepository).findWithFilters(
+                null, null, "2026-09-01", "2026-09-30",
+                null, null, null, null, null, 10);
+    }
+
+    @Test
+    void testGetDesignBriefs_FiltersByMinConfidence() {
+        DesignBrief brief = makeBrief(1, "High Confidence", "dtf_apparel");
+        brief.confidence = 90;
+        when(designBriefRepository.findWithFilters(
+                null, null, null, null, 80, null, null, null, null, 10))
+                .thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, 80, null, null, null, null, 10);
+
+        assertEquals(1, result.size());
+        assertEquals(90, result.get(0).getConfidence());
+    }
+
+    @Test
+    void testGetDesignBriefs_FiltersByConfidenceRange() {
+        DesignBrief brief = makeBrief(1, "Mid Confidence", "dtf_apparel");
+        brief.confidence = 75;
+        when(designBriefRepository.findWithFilters(
+                null, null, null, null, 70, 80, null, null, null, 10))
+                .thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, 70, 80, null, null, null, 10);
+
+        assertEquals(1, result.size());
+    }
+
+    @Test
+    void testGetDesignBriefs_FiltersBySourceSeeds() {
+        DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
+        when(designBriefRepository.findWithFilters(
+                null, null, null, null, null, null,
+                List.of("dad jokes", "funny shirts"), null, null, 10))
+                .thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null,
+                List.of("dad jokes", "funny shirts"), null, null, 10);
+
+        assertEquals(1, result.size());
+    }
+
+    @Test
+    void testGetDesignBriefs_FiltersBySpecificProducts() {
+        DesignBrief brief = makeBrief(1, "Mug Design", "sublimation");
+        when(designBriefRepository.findWithFilters(
+                null, null, null, null, null, null, null,
+                List.of("mug", "tumbler"), null, 10))
+                .thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null, null,
+                List.of("mug", "tumbler"), null, 10);
+
+        assertEquals(1, result.size());
+    }
+
+    @Test
+    void testGetDesignBriefs_FiltersByAudienceContains() {
+        DesignBrief brief = makeBrief(1, "Yoga Design", "dtf_apparel");
+        brief.audience = "yoga enthusiasts who love dark humor";
+        when(designBriefRepository.findWithFilters(
+                null, null, null, null, null, null, null, null, "yoga", 10))
+                .thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null, null, null, "yoga", 10);
+
+        assertEquals(1, result.size());
+    }
+
+    @Test
+    void testGetDesignBriefs_CombinedFilters() {
+        DesignBrief brief = makeBrief(1, "Premium DTF", "dtf_apparel");
+        brief.confidence = 90;
+        when(designBriefRepository.findWithFilters(
+                "dtf_apparel", null, "2026-09-01", null, 80, null, null, null, null, 10))
+                .thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(
+                "dtf_apparel", null, "2026-09-01", null, 80, null, null, null, null, 10);
+
+        assertEquals(1, result.size());
+        assertEquals("dtf_apparel", result.get(0).getProductType());
+    }
+
+    @Test
+    void testGetDesignBriefs_EmptyStringsTreatedAsNull() {
+        DesignBrief brief = makeBrief(1, "Test Brief", "dtf_apparel");
+        when(designBriefRepository.findRecent(10)).thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(
+                "", "", "", "", null, null, null, null, "", 10);
+
+        assertEquals(1, result.size());
+        verify(designBriefRepository).findRecent(10);
+        verify(designBriefRepository, never()).findWithFilters(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), anyInt());
     }
 }
