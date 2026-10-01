@@ -19,6 +19,30 @@ from .schemas import QueryType, TrendHarvestRequest, TrendResult
 
 logger = logging.getLogger(__name__)
 
+_LICENSED_IP_RE = re.compile(
+    r"taylor swift|beyonce|drake|nike|disney|marvel|pokemon|"
+    r"star wars|harry potter|nfl\b|nba\b|mlb\b",
+    re.IGNORECASE,
+)
+_CANDIDATE_NOISE_RE = re.compile(
+    r"^(how to\b|tutorial\b|diy\b|recipe\b|review\b|unboxing\b)",
+    re.IGNORECASE,
+)
+
+
+def _is_candidate_noise(query: str) -> bool:
+    """Return True if the query is too noisy to be a useful seed candidate."""
+    if " " not in query:
+        return True
+    if len(query) <= 2 or len(query) > 80:
+        return True
+    if "&#" in query or "http" in query or "www." in query or "@" in query:
+        return True
+    if _LICENSED_IP_RE.search(query):
+        return True
+    return bool(_CANDIDATE_NOISE_RE.search(query))
+
+
 T = TypeVar("T")
 
 MAX_SEED_LENGTH = 60
@@ -144,6 +168,8 @@ class DatabaseClient:
         promotion_score: int,
     ) -> int | None:
         """Insert or refresh a pending candidate; leave promoted/rejected rows untouched."""
+        if _is_candidate_noise(query):
+            return None
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
