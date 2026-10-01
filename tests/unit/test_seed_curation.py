@@ -110,11 +110,9 @@ class TestParseCurationResponse:
             {
                 "promote": [42],
                 "reject": [99],
-                "pivot": [{"from": "hoodie", "to": "vintage hoodie", "reason": "narrows niche"}],
-                "event_seeds": [
-                    {"seed": "halloween candy shirt", "reason": "holiday", "event": "halloween"}
-                ],
-                "reasoning": {"42": "design-ready phrase", "99": "generic category"},
+                "product_tags": {"42": ["dtf_apparel"]},
+                "pivot": [{"to": "vintage hoodie", "product_tags": ["dtf_apparel"]}],
+                "event_seeds": [{"seed": "halloween candy shirt", "product_tags": ["dtf_apparel"]}],
             }
         )
 
@@ -126,7 +124,6 @@ class TestParseCurationResponse:
         assert result.pivot[0].to_seed == "vintage hoodie"
         assert len(result.event_seeds) == 1
         assert result.event_seeds[0].seed == "halloween candy shirt"
-        assert result.reasoning["42"] == "design-ready phrase"
 
     def test_handles_json_with_surrounding_text(self) -> None:
         response = 'Here is my analysis:\n{"promote": [1], "reject": []}\nDone.'
@@ -161,7 +158,7 @@ class TestParseCurationResponse:
                 "promote": [],
                 "reject": [],
                 "pivot": [
-                    {"from": "a", "to": "b", "reason": "ok"},
+                    {"to": "b", "product_tags": ["dtf_apparel"]},
                     {"from": "c"},
                     "not a dict",
                 ],
@@ -215,7 +212,7 @@ class TestCurateSeeds:
     def test_promotes_candidates_from_llm(self) -> None:
         candidates = [_candidate(42, "dad jokes shirt")]
         db = self._mock_db(candidates=candidates)
-        llm = self._mock_llm({"promote": [42], "reject": [], "reasoning": {"42": "good"}})
+        llm = self._mock_llm({"promote": [42], "reject": []})
 
         result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
 
@@ -228,7 +225,7 @@ class TestCurateSeeds:
     def test_rejects_candidates_from_llm(self) -> None:
         candidates = [_candidate(99, "compression socks")]
         db = self._mock_db(candidates=candidates)
-        llm = self._mock_llm({"promote": [], "reject": [99], "reasoning": {"99": "not POD"}})
+        llm = self._mock_llm({"promote": [], "reject": [99]})
 
         result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
 
@@ -242,7 +239,7 @@ class TestCurateSeeds:
             {
                 "promote": [],
                 "reject": [],
-                "pivot": [{"from": "hoodie", "to": "vintage band hoodie", "reason": "niche"}],
+                "pivot": [{"to": "vintage band hoodie", "product_tags": ["dtf_apparel"]}],
             }
         )
 
@@ -260,9 +257,7 @@ class TestCurateSeeds:
             {
                 "promote": [],
                 "reject": [],
-                "event_seeds": [
-                    {"seed": "halloween candy shirt", "reason": "holiday", "event": "halloween"}
-                ],
+                "event_seeds": [{"seed": "halloween candy shirt", "product_tags": ["dtf_apparel"]}],
             }
         )
 
@@ -314,7 +309,7 @@ class TestCurateSeeds:
         db = self._mock_db(candidates=candidates)
         db.insert_active_seed.return_value = None
         llm = self._mock_llm(
-            {"promote": [], "reject": [], "pivot": [{"from": "a", "to": "b", "reason": "r"}]}
+            {"promote": [], "reject": [], "pivot": [{"to": "b", "product_tags": ["dtf_apparel"]}]}
         )
 
         result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
@@ -398,9 +393,7 @@ class TestParseProductTags:
                 "reject": [],
                 "pivot": [
                     {
-                        "from": "hoodie",
                         "to": "vintage band hoodie",
-                        "reason": "niche",
                         "product_tags": ["dtf_apparel"],
                     }
                 ],
@@ -417,8 +410,6 @@ class TestParseProductTags:
                 "event_seeds": [
                     {
                         "seed": "halloween mug",
-                        "reason": "seasonal",
-                        "event": "halloween",
                         "product_tags": ["sublimation"],
                     }
                 ],
@@ -432,7 +423,7 @@ class TestParseProductTags:
             {
                 "promote": [],
                 "reject": [],
-                "pivot": [{"from": "a", "to": "b", "reason": "r"}],
+                "pivot": [{"to": "b"}],
             }
         )
         result = parse_curation_response(response)
@@ -443,7 +434,7 @@ class TestParseProductTags:
             {
                 "promote": [],
                 "reject": [],
-                "event_seeds": [{"seed": "x", "reason": "r", "event": "e"}],
+                "event_seeds": [{"seed": "x"}],
             }
         )
         result = parse_curation_response(response)
@@ -498,9 +489,7 @@ class TestCurateSeedsProductTags:
                 "reject": [],
                 "pivot": [
                     {
-                        "from": "hoodie",
                         "to": "vintage hoodie",
-                        "reason": "niche",
                         "product_tags": ["dtf_apparel"],
                     }
                 ],
@@ -524,8 +513,6 @@ class TestCurateSeedsProductTags:
                 "event_seeds": [
                     {
                         "seed": "halloween mug",
-                        "reason": "holiday",
-                        "event": "halloween",
                         "product_tags": ["sublimation"],
                     }
                 ],
