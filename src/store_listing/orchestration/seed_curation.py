@@ -20,6 +20,27 @@ logger = logging.getLogger(__name__)
 
 PRODUCT_TAGS: Final[set[str]] = {"dtf_apparel", "sublimation", "sticker_vinyl"}
 
+
+def _log_llm_response(response: Any, headers: Any, label: str) -> None:
+    usage = getattr(response, "usage", None)
+    tokens_in = getattr(usage, "prompt_tokens", None) if usage else None
+    tokens_out = getattr(usage, "completion_tokens", None) if usage else None
+    model = getattr(response, "model", None)
+    limit = headers.get("x-ratelimit-limit") if headers else None
+    remaining = headers.get("x-ratelimit-remaining") if headers else None
+    reset = headers.get("x-ratelimit-reset") if headers else None
+    logger.info(
+        "LLM %s: model=%s, tokens_in=%s, tokens_out=%s, ratelimit=%s/%s, reset=%s",
+        label,
+        model,
+        tokens_in,
+        tokens_out,
+        remaining,
+        limit,
+        reset,
+    )
+
+
 SYSTEM_PROMPT = (
     "You are a print-on-demand product strategist. Your job is to curate seed "
     "keywords that will drive the next harvest cycle toward specific, design-ready "
@@ -233,7 +254,18 @@ def curate_seeds(
     messages = build_curation_prompt(candidates, active_seeds, cross_counts, context, today)
 
     try:
-        response = llm_completions.create(model=model, messages=messages)
+        raw = llm_completions.with_raw_response.create(model=model, messages=messages)
+        headers = raw.headers
+        response = raw.parse()
+        _log_llm_response(response, headers, "curation")
+        if not response.choices:
+            logger.warning(
+                "LLM curation returned empty choices: model=%s, id=%s, body=%s",
+                getattr(response, "model", None),
+                getattr(response, "id", None),
+                getattr(raw, "text", None),
+            )
+            return {"status": "error", "error": "LLM returned empty choices"}
         content = response.choices[0].message.content or ""
     except Exception as e:  # noqa: BLE001
         logger.warning("LLM curation call failed: %s", e)

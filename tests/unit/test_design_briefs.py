@@ -379,7 +379,11 @@ class TestGenerateDesignBriefs:
         llm = MagicMock()
         choice = MagicMock()
         choice.message.content = json.dumps(response_json)
-        llm.create.return_value = MagicMock(choices=[choice])
+        parsed = MagicMock(choices=[choice])
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = parsed
+        llm.with_raw_response.create.return_value = raw
         return llm
 
     def test_no_candidates_returns_early(self) -> None:
@@ -390,7 +394,7 @@ class TestGenerateDesignBriefs:
 
         assert result["status"] == "success"
         assert result["briefs_created"] == 0
-        assert not llm.create.called
+        assert not llm.with_raw_response.create.called
 
     def test_generates_briefs_from_llm(self) -> None:
         candidates = [_briefable(42, "dad jokes shirt", source="amazon")]
@@ -445,7 +449,7 @@ class TestGenerateDesignBriefs:
         candidates = [_briefable(1, "hoodie")]
         db = self._mock_db(candidates=candidates)
         llm = MagicMock()
-        llm.create.side_effect = RuntimeError("API down")
+        llm.with_raw_response.create.side_effect = RuntimeError("API down")
 
         result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
 

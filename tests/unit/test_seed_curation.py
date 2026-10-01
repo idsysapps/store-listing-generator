@@ -195,7 +195,11 @@ class TestCurateSeeds:
         llm = MagicMock()
         choice = MagicMock()
         choice.message.content = json.dumps(response_json)
-        llm.create.return_value = MagicMock(choices=[choice])
+        parsed = MagicMock(choices=[choice])
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = parsed
+        llm.with_raw_response.create.return_value = raw
         return llm
 
     def test_no_candidates_returns_early(self) -> None:
@@ -206,7 +210,7 @@ class TestCurateSeeds:
 
         assert result["status"] == "success"
         assert result["promoted"] == 0
-        assert not llm.create.called
+        assert not llm.with_raw_response.create.called
 
     def test_promotes_candidates_from_llm(self) -> None:
         candidates = [_candidate(42, "dad jokes shirt")]
@@ -286,7 +290,7 @@ class TestCurateSeeds:
         candidates = [_candidate(1, "hoodie")]
         db = self._mock_db(candidates=candidates)
         llm = MagicMock()
-        llm.create.side_effect = RuntimeError("API down")
+        llm.with_raw_response.create.side_effect = RuntimeError("API down")
 
         result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
 
@@ -316,6 +320,34 @@ class TestCurateSeeds:
         result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
 
         assert result["pivots"] == 0
+
+    def test_empty_choices_returns_error(self) -> None:
+        candidates = [_candidate(1, "test seed")]
+        db = self._mock_db(candidates=candidates)
+        llm = MagicMock()
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = MagicMock(choices=[])
+        llm.with_raw_response.create.return_value = raw
+
+        result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["status"] == "error"
+        assert "empty choices" in result["error"]
+
+    def test_none_choices_returns_error(self) -> None:
+        candidates = [_candidate(1, "test seed")]
+        db = self._mock_db(candidates=candidates)
+        llm = MagicMock()
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = MagicMock(choices=None)
+        llm.with_raw_response.create.return_value = raw
+
+        result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["status"] == "error"
+        assert "empty choices" in result["error"]
 
 
 class TestProductTags:
@@ -432,7 +464,11 @@ class TestCurateSeedsProductTags:
         llm = MagicMock()
         choice = MagicMock()
         choice.message.content = json.dumps(response_json)
-        llm.create.return_value = MagicMock(choices=[choice])
+        parsed = MagicMock(choices=[choice])
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = parsed
+        llm.with_raw_response.create.return_value = raw
         return llm
 
     def test_promoted_seed_gets_product_tags(self) -> None:
