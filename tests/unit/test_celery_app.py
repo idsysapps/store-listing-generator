@@ -498,6 +498,53 @@ def test_health_disabled_runs_task_without_tracking(redis_url: str) -> None:
     assert result["status"] == "success"
 
 
+def test_marketplace_health_records_both_sources_on_success(redis_url: str) -> None:
+    module = _reload_with_health(redis_url)
+    tracker = FakeHealthTracker()
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="mom humor", promotion_score=0),
+    ]
+    harvester_mock = MagicMock()
+    harvester_mock.harvest_and_store.return_value = ([object()], [])
+
+    with (
+        patch("store_listing.orchestration.tasks.build_tracker", return_value=tracker),
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "AutocompleteHarvester", return_value=harvester_mock),
+    ):
+        module.fetch_marketplace_suggestions.run()
+
+    sources_recorded = {o[0] for o in tracker.outcomes}
+    assert "amazon" in sources_recorded
+    assert "etsy" in sources_recorded
+    assert all(o[1] == "success" for o in tracker.outcomes)
+
+
+def test_marketplace_health_records_failure_for_source_with_all_seeds_failed(
+    redis_url: str,
+) -> None:
+    module = _reload_with_health(redis_url)
+    tracker = FakeHealthTracker()
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="mom humor", promotion_score=0),
+    ]
+    harvester_mock = MagicMock()
+    harvester_mock.harvest_and_store.return_value = ([object()], ["amazon:mom humor"])
+
+    with (
+        patch("store_listing.orchestration.tasks.build_tracker", return_value=tracker),
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch.object(module, "AutocompleteHarvester", return_value=harvester_mock),
+    ):
+        module.fetch_marketplace_suggestions.run()
+
+    outcomes_by_source = {o[0]: o[1] for o in tracker.outcomes}
+    assert outcomes_by_source["amazon"] == "failure"
+    assert outcomes_by_source["etsy"] == "success"
+
+
 def test_beat_schedule_seasonal_injection_runs_daily_0555(redis_url: str) -> None:
     module = _reload(redis_url)
     schedule = module.celery_app.conf.beat_schedule["seasonal-seed-injection"]["schedule"]
