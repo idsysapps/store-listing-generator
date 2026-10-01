@@ -53,17 +53,26 @@ class LeonardoClient:
         width: int = 1024,
         height: int = 1024,
         quantity: int = 1,
+        *,
+        model: str | None = None,
+        quality: str | None = None,
     ) -> dict:
+        model_id = model or self._model
+        params: dict = {
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+            "quantity": quantity,
+            "prompt_enhance": "OFF",
+        }
+        if not model_id.startswith("ideogram"):
+            params["style_ids"] = ["556c1ee5-ec38-42e8-955a-1e82dad0ffa1"]
+        if quality:
+            params["quality"] = quality
         return {
-            "model": self._model,
+            "model": model_id,
             "public": False,
-            "parameters": {
-                "prompt": prompt,
-                "width": width,
-                "height": height,
-                "quantity": quantity,
-                "prompt_enhance": False,
-            },
+            "parameters": params,
         }
 
     def _headers(self) -> dict[str, str]:
@@ -78,6 +87,8 @@ class LeonardoClient:
         *,
         width: int = 1024,
         height: int = 1024,
+        model: str | None = None,
+        quality: str | None = None,
         http_client: httpx.AsyncClient | None = None,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         max_polls: int = MAX_POLL_ATTEMPTS,
@@ -91,6 +102,8 @@ class LeonardoClient:
                 prompt=prompt,
                 width=width,
                 height=height,
+                model=model,
+                quality=quality,
                 http_client=http_client,
                 poll_interval=poll_interval,
                 max_polls=max_polls,
@@ -107,8 +120,12 @@ class LeonardoClient:
         http_client: httpx.AsyncClient,
         poll_interval: float,
         max_polls: int,
+        model: str | None = None,
+        quality: str | None = None,
     ) -> LeonardoGenerationResult:
-        payload = self._build_payload(prompt=prompt, width=width, height=height)
+        payload = self._build_payload(
+            prompt=prompt, width=width, height=height, model=model, quality=quality
+        )
 
         resp = await http_client.post(
             f"{self._api_base}/v2/generations",
