@@ -73,18 +73,12 @@ SYSTEM_PROMPT = (
     "jigsaw puzzles, ornaments, wall art, pillows, blankets, socks\n"
     '- "sticker_vinyl": stickers and vinyl decals\n\n'
     "A seed can have multiple tags if the design works across methods.\n\n"
-    "You MUST classify every candidate as either promoted or rejected. "
-    "Do not skip any candidate.\n\n"
-    "Return ONLY valid JSON with this exact structure:\n"
+    "Return ONLY valid JSON — no commentary, no reasoning, no explanations. "
+    "Use this exact structure:\n"
     '{"promote": [candidate_ids], "reject": [candidate_ids], '
     '"product_tags": {"candidate_id": ["dtf_apparel", ...]}, '
-    '"pivot": [{"from": "broad seed", "to": "specific seed", "reason": "why", '
-    '"product_tags": ["dtf_apparel", ...]}], '
-    '"event_seeds": [{"seed": "keyword", "reason": "why", "event": "event_name", '
-    '"product_tags": ["dtf_apparel", ...]}], '
-    '"reasoning": {"promoted_candidate_id": "explanation"}}\n\n'
-    "IMPORTANT: Only include reasoning for PROMOTED candidates. "
-    "Do NOT include reasoning for rejected candidates — just list their IDs in the reject array."
+    '"pivot": [{"to": "specific seed", "product_tags": ["dtf_apparel", ...]}], '
+    '"event_seeds": [{"seed": "keyword", "product_tags": ["dtf_apparel", ...]}]}'
 )
 
 MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "10"))
@@ -92,18 +86,18 @@ MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "10"))
 
 @dataclass(frozen=True)
 class PivotSuggestion:
-    from_seed: str
     to_seed: str
-    reason: str
     product_tags: list[str] = field(default_factory=list)
+    from_seed: str = ""
+    reason: str = ""
 
 
 @dataclass(frozen=True)
 class EventSeed:
     seed: str
-    reason: str
-    event: str
     product_tags: list[str] = field(default_factory=list)
+    reason: str = ""
+    event: str = ""
 
 
 @dataclass
@@ -292,7 +286,7 @@ def curate_seeds(
         db_client.insert_curation_log(
             candidate_id=cid,
             action="promote",
-            reasoning=result.reasoning.get(str(cid)),
+            reasoning=None,
             event_context=None,
             llm_model=model,
         )
@@ -309,7 +303,7 @@ def curate_seeds(
         db_client.insert_curation_log(
             candidate_id=cid,
             action="reject",
-            reasoning=result.reasoning.get(str(cid)),
+            reasoning=None,
             event_context=None,
             llm_model=model,
         )
@@ -324,7 +318,7 @@ def curate_seeds(
             db_client.insert_curation_log(
                 candidate_id=None,
                 action="pivot",
-                reasoning=f"{pivot.from_seed} -> {pivot.to_seed}: {pivot.reason}",
+                reasoning=pivot.to_seed,
                 event_context=None,
                 llm_model=model,
             )
@@ -339,8 +333,8 @@ def curate_seeds(
             db_client.insert_curation_log(
                 candidate_id=None,
                 action="event_inject",
-                reasoning=es.reason,
-                event_context=es.event,
+                reasoning=None,
+                event_context=es.seed,
                 llm_model=model,
             )
             if es.product_tags:
