@@ -516,7 +516,58 @@ def test_beat_schedule_llm_curation_registered_when_enabled(redis_url: str) -> N
     )
     schedule = beat["llm-seed-curation"]["schedule"]
     assert schedule.minute == {50}
-    assert schedule.hour == {6}
+    assert schedule.hour == {2, 6, 10, 14, 18, 22}
+
+
+def test_curation_schedule_from_env(redis_url: str) -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "REDIS_URL": redis_url,
+            "LLM_SEED_CURATION_ENABLED": "true",
+            "LLM_CURATION_SCHEDULE": "0 */3 * * *",
+        },
+    ):
+        module = importlib.import_module("store_listing.orchestration.tasks")
+        importlib.reload(module)
+
+    schedule = module.celery_app.conf.beat_schedule["llm-seed-curation"]["schedule"]
+    assert schedule.minute == {0}
+    assert schedule.hour == {0, 3, 6, 9, 12, 15, 18, 21}
+
+
+def test_briefs_schedule_from_env(redis_url: str) -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "REDIS_URL": redis_url,
+            "LLM_DESIGN_BRIEFS_ENABLED": "true",
+            "LLM_BRIEFS_SCHEDULE": "30 8 * * *",
+        },
+    ):
+        module = importlib.import_module("store_listing.orchestration.tasks")
+        importlib.reload(module)
+
+    schedule = module.celery_app.conf.beat_schedule["llm-design-briefs"]["schedule"]
+    assert schedule.minute == {30}
+    assert schedule.hour == {8}
+
+
+def test_image_gen_schedule_from_env(redis_url: str) -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "REDIS_URL": redis_url,
+            "LLM_DESIGN_BRIEFS_ENABLED": "true",
+            "LLM_IMAGE_GEN_SCHEDULE": "0 9 * * *",
+        },
+    ):
+        module = importlib.import_module("store_listing.orchestration.tasks")
+        importlib.reload(module)
+
+    schedule = module.celery_app.conf.beat_schedule["design-image-generation"]["schedule"]
+    assert schedule.minute == {0}
+    assert schedule.hour == {9}
 
 
 def test_beat_schedule_llm_curation_omitted_by_default(redis_url: str) -> None:

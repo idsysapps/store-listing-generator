@@ -48,20 +48,22 @@ public class DesignBriefResolver {
         String sd = nullIfEmpty(startDate);
         String ed = nullIfEmpty(endDate);
         String ac = nullIfEmpty(audienceContains);
+        List<String> ss = nullIfEmptyList(sourceSeeds);
+        List<String> sp = nullIfEmptyList(specificProducts);
 
         LOG.debugf("Fetching design briefs: productType=%s, batchId=%s, limit=%d", pt, bi, limit);
 
         boolean hasAdvancedFilters = sd != null || ed != null
                 || minConfidence != null || maxConfidence != null
-                || (sourceSeeds != null && !sourceSeeds.isEmpty())
-                || (specificProducts != null && !specificProducts.isEmpty())
+                || (ss != null && !ss.isEmpty())
+                || (sp != null && !sp.isEmpty())
                 || ac != null;
 
         List<DesignBrief> briefs;
         if (hasAdvancedFilters || (pt != null && bi != null)) {
             briefs = designBriefRepository.findWithFilters(
                     pt, bi, sd, ed, minConfidence, maxConfidence,
-                    sourceSeeds, specificProducts, ac, limit);
+                    ss, sp, ac, limit);
         } else if (bi != null) {
             briefs = designBriefRepository.findByBatchId(bi);
         } else if (pt != null) {
@@ -77,6 +79,16 @@ public class DesignBriefResolver {
 
     private static String nullIfEmpty(String value) {
         return (value != null && !value.isEmpty()) ? value : null;
+    }
+
+    private static List<String> nullIfEmptyList(List<String> values) {
+        if (values == null) {
+            return null;
+        }
+        List<String> filtered = values.stream()
+                .filter(s -> s != null && !s.isEmpty())
+                .collect(Collectors.toList());
+        return filtered.isEmpty() ? null : filtered;
     }
 
     @Authenticated
