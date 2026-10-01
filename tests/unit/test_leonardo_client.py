@@ -76,6 +76,31 @@ class TestLeonardoClient:
         payload = client._build_payload(prompt="test", width=1024, height=1024)
         assert payload["model"] == "flux-dev"
 
+    def test_build_payload_model_override(self) -> None:
+        client = LeonardoClient(api_key="test-key")
+        payload = client._build_payload(prompt="test", model="ideogram-v3.0")
+        assert payload["model"] == "ideogram-v3.0"
+
+    def test_build_payload_quality_parameter(self) -> None:
+        client = LeonardoClient(api_key="test-key")
+        payload = client._build_payload(prompt="test", model="ideogram-v3.0", quality="QUALITY")
+        assert payload["parameters"]["quality"] == "QUALITY"
+
+    def test_build_payload_no_quality_by_default(self) -> None:
+        client = LeonardoClient(api_key="test-key")
+        payload = client._build_payload(prompt="test")
+        assert "quality" not in payload["parameters"]
+
+    def test_build_payload_no_style_ids_for_ideogram(self) -> None:
+        client = LeonardoClient(api_key="test-key")
+        payload = client._build_payload(prompt="test", model="ideogram-v3.0")
+        assert "style_ids" not in payload["parameters"]
+
+    def test_build_payload_has_style_ids_for_flux(self) -> None:
+        client = LeonardoClient(api_key="test-key")
+        payload = client._build_payload(prompt="test")
+        assert "style_ids" in payload["parameters"]
+
 
 class TestLeonardoGenerate:
     @pytest.mark.asyncio

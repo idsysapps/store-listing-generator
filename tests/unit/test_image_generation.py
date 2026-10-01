@@ -11,6 +11,7 @@ from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.image_generation import (
     REMOVE_BG_MODEL_ID,
     ImageResult,
+    build_ideogram_prompt,
     build_prompt_from_brief,
     generate_image,
     remove_background,
@@ -114,6 +115,110 @@ class TestBuildPromptFromBrief:
         brief = _make_brief(product_type="sublimation")
         prompt = build_prompt_from_brief(brief)
         assert "sublimation" in prompt.lower()
+
+
+class TestBuildIdeogramPrompt:
+    def test_includes_headline_text_in_prompt(self) -> None:
+        brief = _make_brief(
+            headline_text="STILL IN THIS MEETING",
+            scene_description="a skeleton at an office desk holding coffee",
+        )
+        prompt = build_ideogram_prompt(brief)
+        assert "STILL IN THIS MEETING" in prompt
+
+    def test_includes_tagline_text_in_prompt(self) -> None:
+        brief = _make_brief(
+            headline_text="BORN TO BE",
+            tagline_text="SPOOKY",
+            scene_description="a skeleton on a birthday cake",
+        )
+        prompt = build_ideogram_prompt(brief)
+        assert "SPOOKY" in prompt
+
+    def test_includes_font_color_instruction(self) -> None:
+        brief = _make_brief(
+            headline_text="TEST",
+            font_color="#FF8C42",
+            scene_description="a skeleton waving",
+        )
+        prompt = build_ideogram_prompt(brief)
+        assert "#FF8C42" in prompt
+
+    def test_defaults_to_black_when_no_font_color(self) -> None:
+        brief = _make_brief(
+            headline_text="TEST",
+            font_color=None,
+            scene_description="a skeleton waving",
+        )
+        prompt = build_ideogram_prompt(brief)
+        assert "#000000" in prompt
+
+    def test_includes_scene_description(self) -> None:
+        brief = _make_brief(
+            headline_text="HELLO",
+            scene_description="a skeleton riding a skateboard",
+        )
+        prompt = build_ideogram_prompt(brief)
+        assert "skeleton riding a skateboard" in prompt
+
+    def test_headline_before_scene_in_prompt(self) -> None:
+        brief = _make_brief(
+            headline_text="TOP TEXT",
+            scene_description="a skeleton dancing",
+        )
+        prompt = build_ideogram_prompt(brief)
+        headline_pos = prompt.index("TOP TEXT")
+        scene_pos = prompt.index("skeleton dancing")
+        assert headline_pos < scene_pos
+
+    def test_tagline_after_scene_in_prompt(self) -> None:
+        brief = _make_brief(
+            headline_text="TOP",
+            tagline_text="BOTTOM",
+            scene_description="a skeleton dancing",
+        )
+        prompt = build_ideogram_prompt(brief)
+        scene_pos = prompt.index("skeleton dancing")
+        tagline_pos = prompt.index("BOTTOM")
+        assert tagline_pos > scene_pos
+
+    def test_includes_product_context(self) -> None:
+        brief = _make_brief(
+            product_type="dtf_apparel",
+            headline_text="TEST",
+            scene_description="a skeleton waving",
+        )
+        prompt = build_ideogram_prompt(brief)
+        assert "DTF" in prompt
+
+    def test_ends_with_do_not_draw_anything_else(self) -> None:
+        brief = _make_brief(
+            headline_text="TEST",
+            scene_description="a skeleton waving",
+        )
+        prompt = build_ideogram_prompt(brief)
+        assert "Do not draw anything else." in prompt
+
+    def test_prompt_under_80_words(self) -> None:
+        brief = _make_brief(
+            headline_text="STILL IN THIS MEETING",
+            tagline_text="SEND AN EMAIL",
+            scene_description="a skeleton sitting at an office desk holding coffee",
+            visual_style="minimalist line-art, muted orange palette",
+            font_color="#FF8C42",
+        )
+        prompt = build_ideogram_prompt(brief)
+        word_count = len(prompt.split())
+        assert word_count < 80, f"Prompt has {word_count} words: {prompt}"
+
+    def test_regeneration_feedback_appended(self) -> None:
+        brief = _make_brief(
+            headline_text="TEST",
+            scene_description="a skeleton waving",
+            regeneration_feedback="make the skeleton more cartoonish",
+        )
+        prompt = build_ideogram_prompt(brief)
+        assert "make the skeleton more cartoonish" in prompt
 
 
 class TestGenerateImage:

@@ -91,6 +91,35 @@ def build_prompt_from_brief(brief: DesignBrief) -> str:
     return " ".join(parts)
 
 
+IDEOGRAM_MODEL: str = "ideogram-v3.0"
+IDEOGRAM_QUALITY: str = "QUALITY"
+
+
+def build_ideogram_prompt(brief: DesignBrief) -> str:
+    """Build prompt for Ideogram 3.0 — includes text rendering instructions."""
+    product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
+    scene = _scene_for_prompt(brief)
+    feedback = _feedback_section(brief)
+    font_color = brief.font_color or "#000000"
+
+    parts: list[str] = []
+
+    if brief.headline_text:
+        parts.append(f'Bold text reading "{brief.headline_text}" in {font_color} at the top.')
+
+    parts.append(f"{scene}, {brief.visual_style}, {product_context}.")
+
+    if brief.tagline_text:
+        parts.append(f'Text reading "{brief.tagline_text}" in {font_color} at the bottom.')
+
+    parts.append("Do not draw anything else.")
+
+    if feedback:
+        parts.append(feedback.strip())
+
+    return " ".join(parts)
+
+
 def generate_image(
     brief: DesignBrief,
     *,
@@ -129,22 +158,36 @@ def generate_image(
     return ImageResult(image_bytes=image_bytes, prompt=prompt, raw_bytes=raw_bytes)
 
 
+def _needs_ideogram(brief: DesignBrief) -> bool:
+    return brief.layout_type in ("text_top", "text_top_bottom") and bool(brief.headline_text)
+
+
 def generate_image_leonardo(
     brief: DesignBrief,
     *,
     leonardo_client: LeonardoClient,
     bedrock_client: Any | None = None,
 ) -> ImageResult:
-    prompt = build_prompt_from_brief(brief)
+    use_ideogram = _needs_ideogram(brief)
+    if use_ideogram:
+        prompt = build_ideogram_prompt(brief)
+        model = IDEOGRAM_MODEL
+        quality = IDEOGRAM_QUALITY
+    else:
+        prompt = build_prompt_from_brief(brief)
+        model = None
+        quality = None
 
     try:
         leo_result: LeonardoGenerationResult = asyncio.get_event_loop().run_until_complete(
-            leonardo_client.generate(prompt=prompt)
+            leonardo_client.generate(prompt=prompt, model=model, quality=quality)
         )
     except RuntimeError:
         loop = asyncio.new_event_loop()
         try:
-            leo_result = loop.run_until_complete(leonardo_client.generate(prompt=prompt))
+            leo_result = loop.run_until_complete(
+                leonardo_client.generate(prompt=prompt, model=model, quality=quality)
+            )
         finally:
             loop.close()
 

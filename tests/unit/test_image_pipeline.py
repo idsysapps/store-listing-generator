@@ -265,6 +265,54 @@ class TestGenerateImageForBrief:
         assert result["brief_id"] == 7
         db.update_brief_image_keys.assert_called_once()
 
+    def test_text_layout_uses_ideogram_model(self) -> None:
+        from unittest.mock import AsyncMock
+
+        from store_listing.orchestration.leonardo_client import LeonardoGenerationResult
+
+        brief_row = {
+            "id": 8,
+            "concept": "This Meeting Could've Been An Email",
+            "product_type": "dtf_apparel",
+            "audience": "office workers",
+            "visual_style": "minimalist line-art",
+            "layout_type": "text_top_bottom",
+            "headline_text": "STILL IN THIS MEETING",
+            "tagline_text": "SEND AN EMAIL",
+            "font_color": "#FF8C42",
+            "scene_description": "a skeleton at an office desk holding coffee",
+        }
+        db = MagicMock()
+        db.get_brief_by_id.return_value = brief_row
+
+        fake_png = _real_png()
+        fake_transparent = _real_png(color="red")
+
+        leo_client = MagicMock()
+        leo_client.generate = AsyncMock(
+            return_value=LeonardoGenerationResult(
+                image_bytes=fake_png, prompt="test", generation_id="gen-1"
+            )
+        )
+
+        bedrock = MagicMock()
+        bedrock.invoke_model.return_value = _mock_bedrock_response(fake_transparent)
+
+        s3 = MagicMock()
+
+        result = generate_image_for_brief(
+            brief_id=8,
+            db_client=db,
+            bedrock_client=bedrock,
+            s3_client=s3,
+            leonardo_client=leo_client,
+        )
+
+        assert result["status"] == "success"
+        gen_call = leo_client.generate.call_args
+        assert gen_call.kwargs.get("model") == "ideogram-v3.0"
+        assert gen_call.kwargs.get("quality") == "QUALITY"
+
     def test_passes_regeneration_feedback_to_prompt(self) -> None:
         brief_row = {
             "id": 7,
