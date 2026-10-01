@@ -124,11 +124,31 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_SEED_CURATION_ENABLED
+            - name: LLM_DESIGN_BRIEFS_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_DESIGN_BRIEFS_ENABLED
             - name: LLM_MAX_CANDIDATES
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_CANDIDATES
+            - name: LLM_CURATION_SCHEDULE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_CURATION_SCHEDULE
+            - name: LLM_BRIEFS_SCHEDULE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_BRIEFS_SCHEDULE
+            - name: LLM_IMAGE_GEN_SCHEDULE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_IMAGE_GEN_SCHEDULE
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -271,11 +291,31 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_SEED_CURATION_ENABLED
+            - name: LLM_DESIGN_BRIEFS_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_DESIGN_BRIEFS_ENABLED
             - name: LLM_MAX_CANDIDATES
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_CANDIDATES
+            - name: LLM_CURATION_SCHEDULE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_CURATION_SCHEDULE
+            - name: LLM_BRIEFS_SCHEDULE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_BRIEFS_SCHEDULE
+            - name: LLM_IMAGE_GEN_SCHEDULE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_IMAGE_GEN_SCHEDULE
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:

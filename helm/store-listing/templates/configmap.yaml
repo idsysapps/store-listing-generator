@@ -19,6 +19,9 @@ data:
   LLM_DESIGN_BRIEFS_ENABLED: {{ .Values.config.llmDesignBriefsEnabled | default "false" | quote }}
   LLM_MAX_BRIEFS: {{ .Values.config.llmMaxBriefs | default "8" | quote }}
   LLM_MAX_BRIEF_SEEDS: {{ .Values.config.llmMaxBriefSeeds | default "20" | quote }}
+  LLM_CURATION_SCHEDULE: {{ .Values.config.llmCurationSchedule | default "50 2,6,10,14,18,22 * * *" | quote }}
+  LLM_BRIEFS_SCHEDULE: {{ .Values.config.llmBriefsSchedule | default "0 7 * * *" | quote }}
+  LLM_IMAGE_GEN_SCHEDULE: {{ .Values.config.llmImageGenSchedule | default "30 7 * * *" | quote }}
 ---
 kind: ConfigMap
 apiVersion: v1

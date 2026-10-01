@@ -377,4 +377,19 @@ class DesignBriefResolverTest {
         verify(designBriefRepository, never()).findWithFilters(
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), anyInt());
     }
+
+    @Test
+    void testGetDesignBriefs_EmptyStringListsTreatedAsNull() {
+        DesignBrief brief = makeBrief(1, "Test Brief", "dtf_apparel");
+        when(designBriefRepository.findRecent(20)).thenReturn(List.of(brief));
+
+        List<DesignBriefSummary> result = designBriefResolver.getDesignBriefs(
+                "", "", "", "", null, null,
+                List.of(""), List.of(""), "", 20);
+
+        assertEquals(1, result.size());
+        verify(designBriefRepository).findRecent(20);
+        verify(designBriefRepository, never()).findWithFilters(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), anyInt());
+    }
 }

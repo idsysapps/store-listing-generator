@@ -103,20 +103,36 @@ if _instagram_enabled():
         "schedule": crontab(hour=6, minute=40, day_of_week=5),
     }
 
+
+def _parse_cron(env_var: str, default: str) -> crontab:
+    """Parse a 5-field cron expression from an env var into a Celery crontab."""
+    expr = os.environ.get(env_var, default)
+    parts = expr.split()
+    if len(parts) != 5:
+        parts = default.split()
+    return crontab(
+        minute=parts[0],
+        hour=parts[1],
+        day_of_week=parts[4],
+        day_of_month=parts[2],
+        month_of_year=parts[3],
+    )
+
+
 if _llm_curation_enabled():
     celery_app.conf.beat_schedule["llm-seed-curation"] = {
         "task": "store_listing.orchestration.tasks.curate_seeds_task",
-        "schedule": crontab(hour=6, minute=50),
+        "schedule": _parse_cron("LLM_CURATION_SCHEDULE", "50 2,6,10,14,18,22 * * *"),
     }
 
 if _llm_design_briefs_enabled():
     celery_app.conf.beat_schedule["llm-design-briefs"] = {
         "task": "store_listing.orchestration.tasks.generate_design_briefs_task",
-        "schedule": crontab(hour=7, minute=0),
+        "schedule": _parse_cron("LLM_BRIEFS_SCHEDULE", "0 7 * * *"),
     }
     celery_app.conf.beat_schedule["design-image-generation"] = {
         "task": "store_listing.orchestration.tasks.generate_design_images_task",
-        "schedule": crontab(hour=7, minute=30),
+        "schedule": _parse_cron("LLM_IMAGE_GEN_SCHEDULE", "30 7 * * *"),
     }
 
 
