@@ -277,8 +277,12 @@ def curate_seeds(
             return {"status": "error", "error": "LLM returned empty choices"}
         content = response.choices[0].message.content or ""
     except Exception as e:  # noqa: BLE001
+        error_str = str(e)
+        if "429" in error_str:
+            logger.warning("LLM curation rate-limited: %s", e)
+            return {"status": "rate_limited", "error": error_str}
         logger.warning("LLM curation call failed: %s", e)
-        return {"status": "error", "error": str(e)}
+        return {"status": "error", "error": error_str}
 
     result = parse_curation_response(content)
     by_id = {c.id: c for c in candidates}
