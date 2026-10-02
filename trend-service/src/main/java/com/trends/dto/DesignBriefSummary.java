@@ -20,6 +20,12 @@ public class DesignBriefSummary {
     private String imageKeyTransparent;
     private String imageUrl;
     private String imageTransparentUrl;
+    private String layoutType;
+    private String headlineText;
+    private String taglineText;
+    private String fontColor;
+    private String sceneDescription;
+    private Boolean personalUse;
 
     public DesignBriefSummary() {}
 
@@ -91,4 +97,22 @@ public class DesignBriefSummary {
 
     public String getImageTransparentUrl() { return imageTransparentUrl; }
     public void setImageTransparentUrl(String imageTransparentUrl) { this.imageTransparentUrl = imageTransparentUrl; }
+
+    public String getLayoutType() { return layoutType; }
+    public void setLayoutType(String layoutType) { this.layoutType = layoutType; }
+
+    public String getHeadlineText() { return headlineText; }
+    public void setHeadlineText(String headlineText) { this.headlineText = headlineText; }
+
+    public String getTaglineText() { return taglineText; }
+    public void setTaglineText(String taglineText) { this.taglineText = taglineText; }
+
+    public String getFontColor() { return fontColor; }
+    public void setFontColor(String fontColor) { this.fontColor = fontColor; }
+
+    public String getSceneDescription() { return sceneDescription; }
+    public void setSceneDescription(String sceneDescription) { this.sceneDescription = sceneDescription; }
+
+    public Boolean getPersonalUse() { return personalUse; }
+    public void setPersonalUse(Boolean personalUse) { this.personalUse = personalUse; }
 }

@@ -434,6 +434,7 @@ class DatabaseClient:
         tagline_text: str | None = None,
         font_color: str | None = None,
         scene_description: str | None = None,
+        personal_use: bool = False,
     ) -> int:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
@@ -442,8 +443,8 @@ class DatabaseClient:
                     (concept, product_type, specific_products, audience,
                      visual_style, confidence, reasoning, llm_model, batch_id,
                      layout_type, headline_text, tagline_text, font_color,
-                     scene_description)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     scene_description, personal_use)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -461,6 +462,7 @@ class DatabaseClient:
                     tagline_text,
                     font_color,
                     scene_description,
+                    personal_use,
                 ),
             )
             result = cur.fetchone()

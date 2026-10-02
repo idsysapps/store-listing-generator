@@ -93,9 +93,9 @@ public class DesignBriefResolver {
 
     @Authenticated
     @Mutation("createCustomBrief")
-    public String createCustomBrief(String description, String productType) {
-        LOG.infof("Creating custom brief: description=%s, productType=%s", description, productType);
-        return celeryTaskDispatcher.dispatchCreateCustomBrief(description, productType)
+    public String createCustomBrief(String description, String productType, boolean personalUse) {
+        LOG.infof("Creating custom brief: description=%s, productType=%s, personalUse=%s", description, productType, personalUse);
+        return celeryTaskDispatcher.dispatchCreateCustomBrief(description, productType, personalUse)
                 .await().indefinitely();
     }
 
@@ -141,6 +141,12 @@ public class DesignBriefResolver {
                 brief.imageKeyRaw, brief.imageKeyTransparent);
         summary.setImageUrl(imageStorageConfig.buildUrl(brief.imageKeyRaw));
         summary.setImageTransparentUrl(imageStorageConfig.buildUrl(brief.imageKeyTransparent));
+        summary.setLayoutType(brief.layoutType);
+        summary.setHeadlineText(brief.headlineText);
+        summary.setTaglineText(brief.taglineText);
+        summary.setFontColor(brief.fontColor);
+        summary.setSceneDescription(brief.sceneDescription);
+        summary.setPersonalUse(brief.personalUse);
         return summary;
     }
 }

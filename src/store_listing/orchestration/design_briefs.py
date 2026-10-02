@@ -123,6 +123,7 @@ class DesignBriefDBClient(Protocol):
         tagline_text: str | None = None,
         font_color: str | None = None,
         scene_description: str | None = None,
+        personal_use: bool = False,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...

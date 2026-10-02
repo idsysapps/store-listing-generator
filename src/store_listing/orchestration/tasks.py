@@ -371,7 +371,9 @@ def curate_seeds_task(chain_depth: int = 0) -> dict:
 
 
 @celery_app.task
-def create_custom_brief_task(description: str, product_type: str) -> dict:
+def create_custom_brief_task(
+    description: str, product_type: str, personal_use: bool = False
+) -> dict:
     """Create a design brief from a user's free-text description, then generate its image."""
     from store_listing.orchestration.custom_brief import create_custom_brief
     from store_listing.orchestration.llm_client import configured, get_llm_client, get_llm_model
@@ -381,7 +383,12 @@ def create_custom_brief_task(description: str, product_type: str) -> dict:
 
     client = get_llm_client()
     result = create_custom_brief(
-        DatabaseClient(), client.chat.completions, get_llm_model(), description, product_type
+        DatabaseClient(),
+        client.chat.completions,
+        get_llm_model(),
+        description,
+        product_type,
+        personal_use=personal_use,
     )
 
     if result.get("status") == "success" and result.get("brief_id"):
