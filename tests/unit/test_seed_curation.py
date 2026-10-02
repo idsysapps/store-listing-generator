@@ -488,6 +488,19 @@ class TestCurateSeeds:
         call_kwargs = llm.with_raw_response.create.call_args.kwargs
         assert call_kwargs["temperature"] == 0
 
+    def test_429_returns_rate_limited_status(self) -> None:
+        candidates = [_candidate(1, "test")]
+        db = self._mock_db(candidates=candidates)
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = RuntimeError(
+            "Error code: 429 - Rate limit exceeded"
+        )
+
+        result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["status"] == "rate_limited"
+        assert "429" in result["error"]
+
 
 class TestProductTags:
     def test_product_tags_contains_three_categories(self) -> None:
