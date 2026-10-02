@@ -25,3 +25,7 @@ def get_llm_client() -> OpenAI:
 
 def get_llm_model() -> str:
     return os.environ.get("LLM_MODEL", DEFAULT_MODEL)
+
+
+def get_llm_curation_model() -> str:
+    return os.environ.get("LLM_CURATION_MODEL", get_llm_model())

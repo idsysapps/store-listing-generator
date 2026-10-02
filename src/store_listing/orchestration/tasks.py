@@ -342,14 +342,18 @@ def _daily_curation_capacity() -> int:
 @celery_app.task
 def curate_seeds_task(chain_depth: int = 0) -> dict:
     """LLM-driven seed curation with automatic catch-up chaining."""
-    from store_listing.orchestration.llm_client import configured, get_llm_client, get_llm_model
+    from store_listing.orchestration.llm_client import (
+        configured,
+        get_llm_client,
+        get_llm_curation_model,
+    )
     from store_listing.orchestration.seed_curation import curate_seeds
 
     if not configured():
         return {"status": "skipped", "reason": "LLM_API_KEY not set"}
 
     client = get_llm_client()
-    result = curate_seeds(DatabaseClient(), client.chat.completions, get_llm_model())
+    result = curate_seeds(DatabaseClient(), client.chat.completions, get_llm_curation_model())
 
     remaining = result.get("remaining", 0)
     daily_capacity = _daily_curation_capacity()
