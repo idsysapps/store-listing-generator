@@ -119,6 +119,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MODEL
+            - name: LLM_CURATION_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_CURATION_MODEL
             - name: LLM_SEED_CURATION_ENABLED
               valueFrom:
                 configMapKeyRef:
@@ -139,6 +144,16 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_CURATION_SCHEDULE
+            - name: LLM_CURATION_MAX_CHAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_CURATION_MAX_CHAIN
+            - name: LLM_CURATION_CHAIN_DELAY
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_CURATION_CHAIN_DELAY
             - name: LLM_BRIEFS_SCHEDULE
               valueFrom:
                 configMapKeyRef:
@@ -286,6 +301,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MODEL
+            - name: LLM_CURATION_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_CURATION_MODEL
             - name: LLM_SEED_CURATION_ENABLED
               valueFrom:
                 configMapKeyRef:
@@ -306,6 +326,16 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_CURATION_SCHEDULE
+            - name: LLM_CURATION_MAX_CHAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_CURATION_MAX_CHAIN
+            - name: LLM_CURATION_CHAIN_DELAY
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_CURATION_CHAIN_DELAY
             - name: LLM_BRIEFS_SCHEDULE
               valueFrom:
                 configMapKeyRef:
