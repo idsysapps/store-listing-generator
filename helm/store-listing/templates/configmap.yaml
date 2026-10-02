@@ -17,6 +17,7 @@ data:
   LLM_CURATION_MODEL: {{ .Values.config.llmCurationModel | default "" | quote }}
   LLM_SEED_CURATION_ENABLED: {{ .Values.config.llmSeedCurationEnabled | default "false" | quote }}
   LLM_MAX_CANDIDATES: {{ .Values.config.llmMaxCandidates | default "10" | quote }}
+  LLM_MAX_TOKENS: {{ .Values.config.llmMaxTokens | default "8192" | quote }}
   LLM_DESIGN_BRIEFS_ENABLED: {{ .Values.config.llmDesignBriefsEnabled | default "false" | quote }}
   LLM_MAX_BRIEFS: {{ .Values.config.llmMaxBriefs | default "8" | quote }}
   LLM_MAX_BRIEF_SEEDS: {{ .Values.config.llmMaxBriefSeeds | default "20" | quote }}

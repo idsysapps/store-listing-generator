@@ -139,6 +139,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_CANDIDATES
+            - name: LLM_MAX_TOKENS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_MAX_TOKENS
             - name: LLM_CURATION_SCHEDULE
               valueFrom:
                 configMapKeyRef:
@@ -326,6 +331,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_CANDIDATES
+            - name: LLM_MAX_TOKENS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_MAX_TOKENS
             - name: LLM_CURATION_SCHEDULE
               valueFrom:
                 configMapKeyRef:

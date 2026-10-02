@@ -63,15 +63,15 @@ SYSTEM_PROMPT = (
     "- Stickers and vinyl decals\n\n"
     'Valid product_tags: "dtf_apparel", "sublimation", "sticker_vinyl"\n\n'
     "RULES:\n"
-    "1. Provide brief reasoning BEFORE selecting the action for each candidate.\n"
+    "1. Keep reasoning to ONE short sentence per candidate (under 20 words).\n"
     "2. For PROMOTE, assign product_tags and suggest a design style.\n"
     "3. For PIVOT, provide a specific pivot seed and product_tags.\n"
     "4. Flag trademark/copyright risks.\n"
-    "5. Respond ONLY with a valid JSON object. No markdown or commentary outside "
-    "the JSON."
+    "5. Respond ONLY with a valid JSON object. No text before or after the JSON."
 )
 
 MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "10"))
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
 
 
 @dataclass(frozen=True)
@@ -267,7 +267,7 @@ def curate_seeds(
             model=model,
             messages=messages,
             temperature=0,
-            max_tokens=4096,
+            max_tokens=LLM_MAX_TOKENS,
         )
         headers = raw.headers
         response = raw.parse()
