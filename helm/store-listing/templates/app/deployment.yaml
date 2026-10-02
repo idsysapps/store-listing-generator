@@ -164,6 +164,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_IMAGE_GEN_SCHEDULE
+            - name: LLM_RERANK_SCHEDULE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_RERANK_SCHEDULE
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -346,6 +351,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_IMAGE_GEN_SCHEDULE
+            - name: LLM_RERANK_SCHEDULE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: LLM_RERANK_SCHEDULE
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
