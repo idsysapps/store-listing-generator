@@ -1,7 +1,8 @@
 """LLM-driven seed curation: evaluate candidates for design readiness.
 
-Replaces pure algorithmic promotion with semantic judgment from an
-OpenAI-compatible LLM (Groq free tier now, local vLLM later).
+Per-candidate evaluation with structured reasoning. Each candidate gets
+a PROMOTE / PIVOT / REJECT decision with brief reasoning, product tags,
+and design style suggestions.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate, enf
 logger = logging.getLogger(__name__)
 
 PRODUCT_TAGS: Final[set[str]] = {"dtf_apparel", "sublimation", "sticker_vinyl"}
+VALID_ACTIONS: Final[set[str]] = {"PROMOTE", "PIVOT", "REJECT"}
 
 
 def _log_llm_response(response: Any, headers: Any, label: str) -> None:
@@ -42,72 +44,57 @@ def _log_llm_response(response: Any, headers: Any, label: str) -> None:
 
 
 SYSTEM_PROMPT = (
-    "You are a print-on-demand product strategist. Your job is to curate seed "
-    "keywords that will drive the next harvest cycle toward specific, design-ready "
-    "product concepts.\n\n"
+    "You are an expert e-commerce product strategist and apparel graphic designer "
+    "evaluating trending search terms.\n\n"
+    "Your task is to analyze incoming trend candidates and classify each into a "
+    "merchandise decision:\n"
+    '- "PROMOTE": Strong visual hook, clear target audience, unique phrase or meme, '
+    "low copyright risk. A designer could immediately create artwork for this.\n"
+    '- "PIVOT": The underlying trend is good, but the raw text needs a creative '
+    "angle or rephrasing to work visually or avoid copyright. Suggest a specific "
+    "pivot seed.\n"
+    '- "REJECT": Visually untranslatable, generic category, noise, tutorial/how-to, '
+    "or direct trademark/IP infringement.\n\n"
     "We produce designs for these products ONLY:\n"
-    "- DTF printing: t-shirts, hoodies, sweatshirts, tank tops, hats/caps, "
-    "tote bags, baby onesies\n"
-    "- Sublimation: mugs, tumblers, phone cases, mouse pads, coasters, "
-    "jigsaw puzzles, ornaments, canvas/metal/poster wall art, polyester "
-    "pillows, blankets, socks\n"
+    "- DTF apparel: t-shirts, hoodies, sweatshirts, tank tops, hats, tote bags, "
+    "baby onesies\n"
+    "- Sublimation: mugs, tumblers, phone cases, mouse pads, coasters, puzzles, "
+    "ornaments, wall art, pillows, blankets, socks\n"
     "- Stickers and vinyl decals\n\n"
-    "Promote seeds that a designer could immediately create artwork for one of "
-    "these products. Reject seeds that target products we cannot make (furniture, "
-    "jewelry, serving trays, shadow boxes, wooden items, clothing beyond the list "
-    "above). Also reject generic categories, noise, and tutorial/how-to content.\n\n"
-    "Suggest pivots that narrow broad seeds into specific niches tied to a product "
-    "we can actually print.\n\n"
-    "Also suggest event_seeds — new seeds inspired by the current context "
-    "(holidays, weather, sports, trending events) that no harvester would discover "
-    "on its own. These should be specific, design-ready concepts for products in "
-    "our catalog.\n\n"
-    "IMPORTANT: Do not suggest seeds that would require licensed IP (movie characters, "
-    "team logos, brand names). Suggest concepts inspired by the cultural moment, "
-    "not the IP itself.\n\n"
-    "For every promoted candidate, pivot, and event_seed, also specify which "
-    "production methods the design fits. Valid product_tags:\n"
-    '- "dtf_apparel": t-shirts, hoodies, sweatshirts, tank tops, hats/caps, '
-    "tote bags, baby onesies\n"
-    '- "sublimation": mugs, tumblers, phone cases, mouse pads, coasters, '
-    "jigsaw puzzles, ornaments, wall art, pillows, blankets, socks\n"
-    '- "sticker_vinyl": stickers and vinyl decals\n\n'
-    "A seed can have multiple tags if the design works across methods.\n\n"
-    "Return ONLY valid JSON — no commentary, no reasoning, no explanations. "
-    "Use this exact structure:\n"
-    '{"promote": [candidate_ids], "reject": [candidate_ids], '
-    '"product_tags": {"candidate_id": ["dtf_apparel", ...]}, '
-    '"pivot": [{"to": "specific seed", "product_tags": ["dtf_apparel", ...]}], '
-    '"event_seeds": [{"seed": "keyword", "product_tags": ["dtf_apparel", ...]}]}'
+    'Valid product_tags: "dtf_apparel", "sublimation", "sticker_vinyl"\n\n'
+    "RULES:\n"
+    "1. Provide brief reasoning BEFORE selecting the action for each candidate.\n"
+    "2. For PROMOTE, assign product_tags and suggest a design style.\n"
+    "3. For PIVOT, provide a specific pivot seed and product_tags.\n"
+    "4. Flag trademark/copyright risks.\n"
+    "5. Respond ONLY with a valid JSON object. No markdown or commentary outside "
+    "the JSON."
 )
 
 MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "10"))
 
 
 @dataclass(frozen=True)
-class PivotSuggestion:
-    to_seed: str
+class CurationEvaluation:
+    id: int
+    action: str
+    reasoning: str = ""
     product_tags: list[str] = field(default_factory=list)
-    from_seed: str = ""
-    reason: str = ""
+    design_style: str | None = None
+    pivot_to: str | None = None
 
 
 @dataclass(frozen=True)
 class EventSeed:
     seed: str
     product_tags: list[str] = field(default_factory=list)
-    reason: str = ""
-    event: str = ""
+    design_style: str | None = None
 
 
 @dataclass
 class CurationResult:
-    promote: list[int] = field(default_factory=list)
-    reject: list[int] = field(default_factory=list)
-    pivot: list[PivotSuggestion] = field(default_factory=list)
+    evaluations: list[CurationEvaluation] = field(default_factory=list)
     event_seeds: list[EventSeed] = field(default_factory=list)
-    reasoning: dict[str, str] = field(default_factory=dict)
-    product_tags: dict[str, list[str]] = field(default_factory=dict)
 
 
 class CurationDBClient(Protocol):
@@ -146,28 +133,45 @@ def build_curation_prompt(
     context: list[dict[str, Any]],
     today: date,
 ) -> list[dict[str, str]]:
-    candidate_data = [
+    trends = [
         {
             "id": c.id,
-            "query": c.query,
+            "term": c.query,
             "source": c.source,
-            "query_type": c.query_type,
             "score": c.score,
             "delta": c.delta,
-            "promotion_score": c.promotion_score,
-            "cross_source_count": cross_seed_counts.get(c.query, 0),
         }
         for c in candidates[:MAX_CANDIDATES]
     ]
 
-    user_content = json.dumps(
-        {
-            "date": today.isoformat(),
-            "upcoming_events": context,
-            "current_seeds": [s.query for s in active_seeds],
-            "candidates": candidate_data,
-        },
-        indent=2,
+    events_str = ", ".join(f"{e['name']} ({e['days_until']}d)" for e in context) or "none"
+
+    seeds_str = ", ".join(s.query for s in active_seeds[:30]) or "none"
+
+    user_content = (
+        "Analyze the following trend batch and output your response in JSON format.\n\n"
+        f"[CONTEXT]\nDate: {today.isoformat()}\n"
+        f"Upcoming events: {events_str}\n"
+        f"Current active seeds: {seeds_str}\n\n"
+        "[INPUT DATA]\n" + json.dumps({"trends": trends}, indent=2) + "\n\n"
+        "[OUTPUT FORMAT]\n"
+        "Return a JSON object structured exactly as follows:\n"
+        "{\n"
+        '  "evaluations": [\n'
+        "    {\n"
+        '      "id": 123,\n'
+        '      "reasoning": "brief evaluation",\n'
+        '      "action": "PROMOTE | PIVOT | REJECT",\n'
+        '      "product_tags": ["dtf_apparel"],\n'
+        '      "design_style": "string or null",\n'
+        '      "pivot_to": "string or null"\n'
+        "    }\n"
+        "  ],\n"
+        '  "event_seeds": [\n'
+        '    {"seed": "keyword", "product_tags": ["dtf_apparel"], '
+        '"design_style": "style"}\n'
+        "  ]\n"
+        "}"
     )
 
     return [
@@ -194,43 +198,36 @@ def parse_curation_response(text: str) -> CurationResult:
         logger.warning("Failed to parse LLM curation response: %s", e)
         return CurationResult()
 
-    pivots = [
-        PivotSuggestion(
-            from_seed=p.get("from", ""),
-            to_seed=p.get("to", ""),
-            reason=p.get("reason", ""),
-            product_tags=_filter_tags(p.get("product_tags", [])),
+    evaluations = []
+    for ev in data.get("evaluations", []):
+        if not isinstance(ev, dict):
+            continue
+        cid = ev.get("id")
+        action = ev.get("action", "").upper()
+        if not isinstance(cid, int) or action not in VALID_ACTIONS:
+            continue
+        evaluations.append(
+            CurationEvaluation(
+                id=cid,
+                action=action,
+                reasoning=str(ev.get("reasoning", "")),
+                product_tags=_filter_tags(ev.get("product_tags", [])),
+                design_style=ev.get("design_style"),
+                pivot_to=ev.get("pivot_to"),
+            )
         )
-        for p in data.get("pivot", [])
-        if isinstance(p, dict) and p.get("to")
-    ]
+
     event_seeds = [
         EventSeed(
             seed=e.get("seed", ""),
-            reason=e.get("reason", ""),
-            event=e.get("event", ""),
             product_tags=_filter_tags(e.get("product_tags", [])),
+            design_style=e.get("design_style"),
         )
         for e in data.get("event_seeds", [])
         if isinstance(e, dict) and e.get("seed")
     ]
-    reasoning = data.get("reasoning", {})
-    if not isinstance(reasoning, dict):
-        reasoning = {}
 
-    raw_tags = data.get("product_tags", {})
-    if not isinstance(raw_tags, dict):
-        raw_tags = {}
-    product_tags = {str(k): _filter_tags(v) for k, v in raw_tags.items() if isinstance(v, list)}
-
-    return CurationResult(
-        promote=[i for i in data.get("promote", []) if isinstance(i, int)],
-        reject=[i for i in data.get("reject", []) if isinstance(i, int)],
-        pivot=pivots,
-        event_seeds=event_seeds,
-        reasoning={str(k): str(v) for k, v in reasoning.items()},
-        product_tags=product_tags,
-    )
+    return CurationResult(evaluations=evaluations, event_seeds=event_seeds)
 
 
 def curate_seeds(
@@ -241,9 +238,19 @@ def curate_seeds(
 ) -> dict[str, Any]:
     today = today or datetime.now(tz=UTC).date()
 
-    candidates = db_client.list_pending_candidates()
-    if not candidates:
-        return {"status": "success", "promoted": 0, "rejected": 0, "pivots": 0, "event_seeds": 0}
+    all_candidates = db_client.list_pending_candidates()
+    if not all_candidates:
+        return {
+            "status": "success",
+            "promoted": 0,
+            "rejected": 0,
+            "pivots": 0,
+            "event_seeds": 0,
+            "remaining": 0,
+        }
+
+    candidates = all_candidates[:MAX_CANDIDATES]
+    remaining = max(0, len(all_candidates) - len(candidates))
 
     active_seeds = db_client.list_active_seeds()
     cross_counts = db_client.cross_seed_counts()
@@ -252,7 +259,11 @@ def curate_seeds(
     messages = build_curation_prompt(candidates, active_seeds, cross_counts, context, today)
 
     try:
-        raw = llm_completions.with_raw_response.create(model=model, messages=messages)
+        raw = llm_completions.with_raw_response.create(
+            model=model,
+            messages=messages,
+            temperature=0,
+        )
         headers = raw.headers
         response = raw.parse()
         _log_llm_response(response, headers, "curation")
@@ -273,58 +284,59 @@ def curate_seeds(
     by_id = {c.id: c for c in candidates}
 
     promoted = 0
-    for cid in result.promote:
-        if cid not in by_id:
-            continue
-        candidate = by_id[cid]
-        seed_id = db_client.insert_active_seed(
-            query=candidate.query,
-            promotion_score=candidate.promotion_score,
-            candidate_id=cid,
-        )
-        db_client.promote_candidate(cid)
-        db_client.insert_curation_log(
-            candidate_id=cid,
-            action="promote",
-            reasoning=None,
-            event_context=None,
-            llm_model=model,
-        )
-        tags = result.product_tags.get(str(cid), [])
-        if seed_id is not None and tags:
-            db_client.insert_product_tags(active_seed_id=seed_id, tags=tags)
-        promoted += 1
-
     rejected = 0
-    for cid in result.reject:
-        if cid not in by_id:
-            continue
-        db_client.reject_candidate(cid)
-        db_client.insert_curation_log(
-            candidate_id=cid,
-            action="reject",
-            reasoning=None,
-            event_context=None,
-            llm_model=model,
-        )
-        rejected += 1
-
     pivot_count = 0
-    for pivot in result.pivot:
-        inserted = db_client.insert_active_seed(
-            query=pivot.to_seed, promotion_score=0, candidate_id=None
-        )
-        if inserted is not None:
+
+    for ev in result.evaluations:
+        if ev.id not in by_id:
+            continue
+        candidate = by_id[ev.id]
+
+        if ev.action == "PROMOTE":
+            seed_id = db_client.insert_active_seed(
+                query=candidate.query,
+                promotion_score=candidate.promotion_score,
+                candidate_id=ev.id,
+            )
+            db_client.promote_candidate(ev.id)
             db_client.insert_curation_log(
-                candidate_id=None,
-                action="pivot",
-                reasoning=pivot.to_seed,
+                candidate_id=ev.id,
+                action="promote",
+                reasoning=ev.reasoning,
                 event_context=None,
                 llm_model=model,
             )
-            if pivot.product_tags:
-                db_client.insert_product_tags(active_seed_id=inserted, tags=pivot.product_tags)
+            if seed_id is not None and ev.product_tags:
+                db_client.insert_product_tags(active_seed_id=seed_id, tags=ev.product_tags)
+            promoted += 1
+
+        elif ev.action == "PIVOT":
+            pivot_seed = ev.pivot_to or candidate.query
+            db_client.reject_candidate(ev.id)
+            inserted = db_client.insert_active_seed(
+                query=pivot_seed, promotion_score=0, candidate_id=None
+            )
+            db_client.insert_curation_log(
+                candidate_id=ev.id,
+                action="pivot",
+                reasoning=ev.reasoning,
+                event_context=None,
+                llm_model=model,
+            )
+            if inserted is not None and ev.product_tags:
+                db_client.insert_product_tags(active_seed_id=inserted, tags=ev.product_tags)
             pivot_count += 1
+
+        elif ev.action == "REJECT":
+            db_client.reject_candidate(ev.id)
+            db_client.insert_curation_log(
+                candidate_id=ev.id,
+                action="reject",
+                reasoning=ev.reasoning,
+                event_context=None,
+                llm_model=model,
+            )
+            rejected += 1
 
     event_count = 0
     for es in result.event_seeds:
@@ -349,11 +361,12 @@ def curate_seeds(
             db_client.archive_active_seed(query)
 
     logger.info(
-        "LLM curation: promoted=%d rejected=%d pivots=%d events=%d",
+        "LLM curation: promoted=%d rejected=%d pivots=%d events=%d remaining=%d",
         promoted,
         rejected,
         pivot_count,
         event_count,
+        remaining,
     )
 
     return {
@@ -362,4 +375,5 @@ def curate_seeds(
         "rejected": rejected,
         "pivots": pivot_count,
         "event_seeds": event_count,
+        "remaining": remaining,
     }
