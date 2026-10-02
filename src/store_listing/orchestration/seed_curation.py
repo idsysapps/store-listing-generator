@@ -195,7 +195,7 @@ def parse_curation_response(text: str) -> CurationResult:
             return CurationResult()
         data = json.loads(text[start:end])
     except json.JSONDecodeError as e:
-        logger.warning("Failed to parse LLM curation response: %s", e)
+        logger.warning("Failed to parse LLM curation response: %s\n---RAW---\n%s", e, text[:2000])
         return CurationResult()
 
     evaluations = []

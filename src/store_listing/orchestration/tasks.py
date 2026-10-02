@@ -371,6 +371,29 @@ def curate_seeds_task(chain_depth: int = 0) -> dict:
 
 
 @celery_app.task
+def create_custom_brief_task(description: str, product_type: str) -> dict:
+    """Create a design brief from a user's free-text description, then generate its image."""
+    from store_listing.orchestration.custom_brief import create_custom_brief
+    from store_listing.orchestration.llm_client import configured, get_llm_client, get_llm_model
+
+    if not configured():
+        return {"status": "skipped", "reason": "LLM_API_KEY not set"}
+
+    client = get_llm_client()
+    result = create_custom_brief(
+        DatabaseClient(), client.chat.completions, get_llm_model(), description, product_type
+    )
+
+    if result.get("status") == "success" and result.get("brief_id"):
+        generate_single_brief_image_task.apply_async(  # type: ignore[attr-defined]
+            args=[result["brief_id"]], countdown=5
+        )
+        result["image_generation"] = "queued"
+
+    return result
+
+
+@celery_app.task
 def generate_design_briefs_task() -> dict:
     """LLM-driven design brief generation from curated trend signals."""
     from store_listing.orchestration.design_briefs import generate_design_briefs

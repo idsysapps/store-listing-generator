@@ -92,6 +92,14 @@ public class DesignBriefResolver {
     }
 
     @Authenticated
+    @Mutation("createCustomBrief")
+    public String createCustomBrief(String description, String productType) {
+        LOG.infof("Creating custom brief: description=%s, productType=%s", description, productType);
+        return celeryTaskDispatcher.dispatchCreateCustomBrief(description, productType)
+                .await().indefinitely();
+    }
+
+    @Authenticated
     @Mutation("requestRegeneration")
     @Transactional
     public DesignBriefSummary requestRegeneration(int briefId, String feedback) {
