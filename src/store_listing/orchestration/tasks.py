@@ -1,4 +1,5 @@
 import os
+from collections.abc import Sequence
 
 from celery import Celery
 from celery.schedules import crontab
@@ -20,7 +21,7 @@ from store_listing.orchestration.promotion import (
     STARTER_SEEDS,
     compute_promotion_score,
 )
-from store_listing.orchestration.source_health import with_source_health
+from store_listing.orchestration.source_health import build_tracker, with_source_health
 
 celery_app = Celery(
     "store_listing",
@@ -212,13 +213,33 @@ def fetch_pinterest_trends() -> dict:
 
 
 @celery_app.task
-@with_source_health("marketplace")
 def fetch_marketplace_suggestions() -> dict:
     """Collect Amazon + Etsy search autocomplete queries for the active seed set."""
     db_client = DatabaseClient()
     request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
     results, failed_sources = AutocompleteHarvester(db_client=db_client).harvest_and_store(request)
+    _record_marketplace_health(results, failed_sources, request.seed_keywords)
     return _bulk_status(len(results), failed_sources, request.seed_keywords)
+
+
+def _record_marketplace_health(
+    results: Sequence[object], failed_sources: list[str], seeds: list[str]
+) -> None:
+    tracker = build_tracker()
+    if tracker is None:
+        return
+    failed_by_source: dict[str, list[str]] = {}
+    for entry in failed_sources:
+        source, _, seed = entry.partition(":")
+        failed_by_source.setdefault(source, []).append(seed)
+    for source in ("amazon", "etsy"):
+        source_failures = failed_by_source.get(source, [])
+        if source_failures and len(source_failures) >= len(seeds):
+            tracker.record(source, "failure", error=f"all seeds failed for {source}")
+        elif source_failures:
+            tracker.record(source, "success")
+        else:
+            tracker.record(source, "success")
 
 
 @celery_app.task
