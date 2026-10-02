@@ -25,6 +25,7 @@ data:
   LLM_CURATION_CHAIN_DELAY: {{ .Values.config.llmCurationChainDelay | default "10" | quote }}
   LLM_BRIEFS_SCHEDULE: {{ .Values.config.llmBriefsSchedule | default "0 7 * * *" | quote }}
   LLM_IMAGE_GEN_SCHEDULE: {{ .Values.config.llmImageGenSchedule | default "30 7 * * *" | quote }}
+  LLM_RERANK_SCHEDULE: {{ .Values.config.llmRerankSchedule | default "0 8 * * *" | quote }}
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -353,6 +354,8 @@ data:
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS regeneration_feedback TEXT;
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS scene_description TEXT;
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS personal_use BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS original_confidence INTEGER;
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS last_reranked_at TIMESTAMP WITH TIME ZONE;
 
     -- Migration: split 'marketplace' source_health into 'amazon' and 'etsy'
     DELETE FROM source_health WHERE source = 'marketplace';

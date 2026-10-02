@@ -135,6 +135,10 @@ if _llm_design_briefs_enabled():
         "task": "store_listing.orchestration.tasks.generate_design_images_task",
         "schedule": _parse_cron("LLM_IMAGE_GEN_SCHEDULE", "30 7 * * *"),
     }
+    celery_app.conf.beat_schedule["design-brief-reranking"] = {
+        "task": "store_listing.orchestration.tasks.rerank_design_briefs_task",
+        "schedule": _parse_cron("LLM_RERANK_SCHEDULE", "0 8 * * *"),
+    }
 
 
 def _active_seed_keywords(db_client: DatabaseClient) -> list[str]:
@@ -411,6 +415,23 @@ def generate_design_briefs_task() -> dict:
 
     client = get_llm_client()
     return generate_design_briefs(DatabaseClient(), client.chat.completions, get_llm_model())
+
+
+@celery_app.task
+def rerank_design_briefs_task() -> dict:
+    """Re-evaluate design brief confidence against current trend signals."""
+    from store_listing.orchestration.brief_reranking import rerank_briefs
+    from store_listing.orchestration.llm_client import (
+        configured,
+        get_llm_client,
+        get_llm_curation_model,
+    )
+
+    if not configured():
+        return {"status": "skipped", "reason": "LLM_API_KEY not set"}
+
+    client = get_llm_client()
+    return rerank_briefs(DatabaseClient(), client.chat.completions, get_llm_curation_model())
 
 
 @celery_app.task

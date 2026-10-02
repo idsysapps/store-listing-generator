@@ -12,6 +12,7 @@ import requests
 from pytrends.exceptions import ResponseError
 from pytrends.request import TrendReq
 
+from store_listing.orchestration.brief_reranking import RerankableBrief
 from store_listing.orchestration.design_briefs import BriefableCandidate
 from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate, compute_promotion_score
 
@@ -544,6 +545,68 @@ class DatabaseClient:
                 "regeneration_feedback": row[9],
                 "scene_description": row[10],
             }
+
+    def list_briefs_for_reranking(self) -> list[RerankableBrief]:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, concept, product_type, audience, confidence,
+                       COALESCE(original_confidence, confidence) AS original_confidence,
+                       reasoning, batch_id
+                FROM design_briefs
+                WHERE created_at > NOW() - INTERVAL '30 days'
+                  AND personal_use = FALSE
+                  AND (last_reranked_at IS NULL
+                       OR last_reranked_at < NOW() - INTERVAL '24 hours')
+                ORDER BY created_at DESC
+                """
+            )
+            return [
+                RerankableBrief(
+                    id=row[0],
+                    concept=row[1],
+                    product_type=row[2],
+                    audience=row[3],
+                    confidence=row[4],
+                    original_confidence=row[5],
+                    reasoning=row[6] or "",
+                    batch_id=row[7] or "",
+                )
+                for row in cur.fetchall()
+            ]
+
+    def list_top_active_seed_signals(self) -> list[dict[str, Any]]:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT a.query, ts.score, ts.delta, ts.source
+                FROM active_seeds a
+                JOIN trend_queries tq ON tq.seed_keyword = a.query
+                JOIN trend_scores ts ON ts.query_id = tq.id
+                WHERE a.archived_at IS NULL
+                  AND ts.fetched_at > NOW() - INTERVAL '7 days'
+                ORDER BY ts.score DESC
+                LIMIT 50
+                """
+            )
+            return [
+                {"query": row[0], "score": row[1], "delta": row[2], "source": row[3]}
+                for row in cur.fetchall()
+            ]
+
+    def update_brief_confidence(self, *, brief_id: int, confidence: int, reasoning: str) -> None:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE design_briefs
+                SET confidence = %s,
+                    reasoning = %s,
+                    original_confidence = COALESCE(original_confidence, confidence),
+                    last_reranked_at = NOW()
+                WHERE id = %s
+                """,
+                (confidence, reasoning, brief_id),
+            )
 
     def update_brief_image_keys(
         self,
