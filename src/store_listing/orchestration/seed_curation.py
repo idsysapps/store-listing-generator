@@ -193,7 +193,11 @@ def parse_curation_response(text: str) -> CurationResult:
         if start < 0 or end <= start:
             logger.warning("No JSON object found in LLM response")
             return CurationResult()
-        data = json.loads(text[start:end])
+        fragment = text[start:end]
+        try:
+            data = json.loads(fragment)
+        except json.JSONDecodeError:
+            data = json.loads(fragment.replace("'", '"'))
     except json.JSONDecodeError as e:
         logger.warning("Failed to parse LLM curation response: %s\n---RAW---\n%s", e, text[:2000])
         return CurationResult()
@@ -263,6 +267,7 @@ def curate_seeds(
             model=model,
             messages=messages,
             temperature=0,
+            max_tokens=4096,
         )
         headers = raw.headers
         response = raw.parse()
