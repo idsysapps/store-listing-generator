@@ -46,15 +46,51 @@ SYSTEM_PROMPT: Final[str] = (
     "Create original concepts. Respond ONLY with valid JSON."
 )
 
+PERSONAL_USE_SYSTEM_PROMPT: Final[str] = (
+    "You are a print-on-demand design strategist. A customer has described a design "
+    "idea for PERSONAL USE ONLY (not for resale). Turn it into one actionable design "
+    "brief that a graphic designer can immediately execute.\n\n"
+    "Since this is for personal use only, you MAY reference specific franchises, "
+    "characters, brands, team logos, or other IP in the design concept. The customer "
+    "wants a design inspired by or featuring these elements for their own private use.\n\n"
+    "Products we offer:\n"
+    "- DTF printing (product_type='dtf_apparel'): t-shirts, hoodies, sweatshirts, "
+    "tank tops, hats/caps, tote bags, baby onesies\n"
+    "- Sublimation (product_type='sublimation'): mugs, tumblers, phone cases, "
+    "mouse pads, coasters, jigsaw puzzles, ornaments, wall art, pillows, blankets, "
+    "socks\n"
+    "- Stickers and vinyl decals (product_type='sticker_vinyl')\n\n"
+    "Return a single JSON object with this structure:\n"
+    '{"brief": {\n'
+    '  "concept": "design-ready phrase or visual idea",\n'
+    '  "product_type": "dtf_apparel | sublimation | sticker_vinyl",\n'
+    '  "specific_products": ["t-shirts"],\n'
+    '  "audience": "who would buy this",\n'
+    '  "visual_style": "art direction (colors, style, typography). No text/slogans here.",\n'
+    '  "confidence": 0-100,\n'
+    '  "reasoning": "why this design works",\n'
+    '  "layout_type": "full_bleed | text_top | text_top_bottom",\n'
+    '  "headline_text": "short punchy text (1-6 words) or null if full_bleed",\n'
+    '  "tagline_text": "secondary text or null",\n'
+    '  "font_color": "#FFFFFF",\n'
+    '  "scene_description": "concise visual description of the illustration only, '
+    'no text. Under 20 words."\n'
+    "}}\n\n"
+    "Respond ONLY with valid JSON."
+)
 
-def build_custom_brief_prompt(description: str, product_type: str) -> list[dict[str, str]]:
+
+def build_custom_brief_prompt(
+    description: str, product_type: str, *, personal_use: bool = False
+) -> list[dict[str, str]]:
+    prompt = PERSONAL_USE_SYSTEM_PROMPT if personal_use else SYSTEM_PROMPT
     user_content = (
         f"Design idea: {description}\n"
         f"Requested product type: {product_type}\n\n"
         "Create one design brief for this idea."
     )
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": prompt},
         {"role": "user", "content": user_content},
     ]
 
@@ -134,8 +170,10 @@ def create_custom_brief(
     model: str,
     description: str,
     product_type: str,
+    *,
+    personal_use: bool = False,
 ) -> dict[str, Any]:
-    messages = build_custom_brief_prompt(description, product_type)
+    messages = build_custom_brief_prompt(description, product_type, personal_use=personal_use)
 
     try:
         raw = llm_completions.with_raw_response.create(
@@ -172,6 +210,7 @@ def create_custom_brief(
         tagline_text=brief.tagline_text,
         font_color=brief.font_color,
         scene_description=brief.scene_description,
+        personal_use=personal_use,
     )
 
-    return {"status": "success", "brief_id": brief_id}
+    return {"status": "success", "brief_id": brief_id, "personal_use": personal_use}

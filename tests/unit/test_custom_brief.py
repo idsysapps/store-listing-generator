@@ -221,3 +221,53 @@ class TestCreateCustomBrief:
         create_custom_brief(db, llm, "model-x", "test", "dtf_apparel")
         call_kwargs = llm.with_raw_response.create.call_args.kwargs
         assert call_kwargs.get("temperature") == 0
+
+    def test_personal_use_false_by_default(self) -> None:
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response())
+        result = create_custom_brief(db, llm, "model-x", "test", "dtf_apparel")
+        assert result["personal_use"] is False
+        call_kwargs = db.insert_design_brief.call_args.kwargs
+        assert call_kwargs["personal_use"] is False
+
+    def test_personal_use_passed_to_db(self) -> None:
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response())
+        result = create_custom_brief(
+            db, llm, "model-x", "disney themed shirt", "dtf_apparel", personal_use=True
+        )
+        assert result["status"] == "success"
+        assert result["personal_use"] is True
+        call_kwargs = db.insert_design_brief.call_args.kwargs
+        assert call_kwargs["personal_use"] is True
+
+
+class TestPersonalUsePrompt:
+    def test_standard_prompt_forbids_ip(self) -> None:
+        messages = build_custom_brief_prompt("test idea", "dtf_apparel", personal_use=False)
+        system_msg = messages[0]["content"]
+        assert "licensed IP" in system_msg or "Do not use licensed" in system_msg
+
+    def test_personal_use_prompt_allows_ip(self) -> None:
+        messages = build_custom_brief_prompt(
+            "disney princess shirt", "dtf_apparel", personal_use=True
+        )
+        system_msg = messages[0]["content"]
+        assert "PERSONAL USE ONLY" in system_msg
+        assert "MAY reference" in system_msg
+
+    def test_personal_use_prompt_does_not_forbid_ip(self) -> None:
+        messages = build_custom_brief_prompt(
+            "disney princess shirt", "dtf_apparel", personal_use=True
+        )
+        system_msg = messages[0]["content"]
+        assert "Do not use licensed IP" not in system_msg
+
+    def test_personal_use_still_returns_valid_structure(self) -> None:
+        messages = build_custom_brief_prompt(
+            "disney shirt for family trip", "dtf_apparel", personal_use=True
+        )
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert "disney shirt for family trip" in messages[1]["content"]

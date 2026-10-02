@@ -69,14 +69,15 @@ public class CeleryTaskDispatcher {
                 .onFailure().invoke(e -> LOG.errorf(e, "Failed to dispatch Celery task %s", taskName));
     }
 
-    public Uni<String> dispatchCreateCustomBrief(String description, String productType) {
+    public Uni<String> dispatchCreateCustomBrief(String description, String productType, boolean personalUse) {
         String taskName = "store_listing.orchestration.tasks.create_custom_brief_task";
         String taskId = UUID.randomUUID().toString();
         String correlationId = UUID.randomUUID().toString();
 
         String descEscaped = description.replace("\\", "\\\\").replace("\"", "\\\"");
         String ptEscaped = productType.replace("\\", "\\\\").replace("\"", "\\\"");
-        String bodyJson = "[[\"" + descEscaped + "\", \"" + ptEscaped + "\"], {}, {\"callbacks\": null, \"errbacks\": null, \"chain\": null, \"chord\": null}]";
+        String personalUseStr = personalUse ? "true" : "false";
+        String bodyJson = "[[\"" + descEscaped + "\", \"" + ptEscaped + "\", " + personalUseStr + "], {}, {\"callbacks\": null, \"errbacks\": null, \"chain\": null, \"chord\": null}]";
         String bodyEncoded = Base64.getEncoder().encodeToString(bodyJson.getBytes());
 
         String message = """
@@ -97,7 +98,7 @@ public class CeleryTaskDispatcher {
                 "timelimit": [null, null],
                 "root_id": "%s",
                 "parent_id": null,
-                "argsrepr": "('%s', '%s')",
+                "argsrepr": "('%s', '%s', %s)",
                 "kwargsrepr": "{}",
                 "origin": "trend-service"
               },
@@ -114,9 +115,9 @@ public class CeleryTaskDispatcher {
                 "delivery_tag": "%s"
               }
             }
-            """.formatted(bodyEncoded, taskName, taskId, taskId, descEscaped, ptEscaped, correlationId, taskId);
+            """.formatted(bodyEncoded, taskName, taskId, taskId, descEscaped, ptEscaped, personalUseStr, correlationId, taskId);
 
-        LOG.infof("Dispatching Celery task %s (taskId=%s)", taskName, taskId);
+        LOG.infof("Dispatching Celery task %s (taskId=%s, personalUse=%s)", taskName, taskId, personalUse);
 
         return redis.execute("LPUSH", CELERY_QUEUE, message)
                 .replaceWith(taskId)
