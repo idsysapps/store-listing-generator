@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any, Final
 
 from store_listing.orchestration.design_briefs import (
@@ -84,7 +85,9 @@ def build_custom_brief_prompt(
     description: str, product_type: str, *, personal_use: bool = False
 ) -> list[dict[str, str]]:
     prompt = PERSONAL_USE_SYSTEM_PROMPT if personal_use else SYSTEM_PROMPT
+    today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
     user_content = (
+        f"Today's date: {today}\n"
         f"Design idea: {description}\n"
         f"Requested product type: {product_type}\n\n"
         "Create one design brief for this idea."
