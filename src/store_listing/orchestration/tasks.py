@@ -317,9 +317,31 @@ def inject_seasonal_seeds_task() -> dict:
     return inject_seasonal_seeds(DatabaseClient())
 
 
+_CURATION_MAX_CHAIN = int(os.environ.get("LLM_CURATION_MAX_CHAIN", "10"))
+_CURATION_CHAIN_DELAY = int(os.environ.get("LLM_CURATION_CHAIN_DELAY", "10"))
+
+
+def _daily_curation_capacity() -> int:
+    """Compute how many candidates the normal schedule can process in 24h."""
+    from store_listing.orchestration.seed_curation import MAX_CANDIDATES
+
+    cron_expr = os.environ.get("LLM_CURATION_SCHEDULE", "50 2,6,10,14,18,22 * * *")
+    hour_field = cron_expr.split()[1] if len(cron_expr.split()) >= 2 else "*"
+
+    if hour_field == "*":
+        runs_per_day = 24
+    elif "/" in hour_field:
+        step = int(hour_field.split("/")[1])
+        runs_per_day = 24 // step
+    else:
+        runs_per_day = len(hour_field.split(","))
+
+    return runs_per_day * MAX_CANDIDATES
+
+
 @celery_app.task
-def curate_seeds_task() -> dict:
-    """LLM-driven seed curation: promote, reject, pivot, and inject event seeds."""
+def curate_seeds_task(chain_depth: int = 0) -> dict:
+    """LLM-driven seed curation with automatic catch-up chaining."""
     from store_listing.orchestration.llm_client import configured, get_llm_client, get_llm_model
     from store_listing.orchestration.seed_curation import curate_seeds
 
@@ -327,7 +349,21 @@ def curate_seeds_task() -> dict:
         return {"status": "skipped", "reason": "LLM_API_KEY not set"}
 
     client = get_llm_client()
-    return curate_seeds(DatabaseClient(), client.chat.completions, get_llm_model())
+    result = curate_seeds(DatabaseClient(), client.chat.completions, get_llm_model())
+
+    remaining = result.get("remaining", 0)
+    daily_capacity = _daily_curation_capacity()
+    should_chain = (
+        remaining > daily_capacity
+        and chain_depth < _CURATION_MAX_CHAIN
+        and result.get("status") == "success"
+    )
+    if should_chain:
+        curate_seeds_task.apply_async(args=[chain_depth + 1], countdown=_CURATION_CHAIN_DELAY)  # type: ignore[attr-defined]
+        result["chained"] = True
+        result["chain_depth"] = chain_depth
+
+    return result
 
 
 @celery_app.task
