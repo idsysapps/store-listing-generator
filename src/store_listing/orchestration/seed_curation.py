@@ -197,9 +197,17 @@ def parse_curation_response(text: str) -> CurationResult:
         try:
             data = json.loads(fragment)
         except json.JSONDecodeError:
-            data = json.loads(fragment.replace("'", '"'))
+            if '"' not in fragment:
+                data = json.loads(fragment.replace("'", '"'))
+            else:
+                raise
     except json.JSONDecodeError as e:
-        logger.warning("Failed to parse LLM curation response: %s\n---RAW---\n%s", e, text[:2000])
+        logger.warning(
+            "Failed to parse LLM curation response: %s\n---RAW (last 500)---\n%s\n---RAW (first 2000)---\n%s",
+            e,
+            text[-500:],
+            text[:2000],
+        )
         return CurationResult()
 
     evaluations = []
