@@ -3,7 +3,9 @@ package com.trends.resolver;
 import com.trends.config.ImageStorageConfig;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
+import com.trends.dto.DesignBriefConnection;
 import com.trends.dto.DesignBriefSummary;
+import com.trends.dto.PageInfo;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
 import io.quarkus.security.Authenticated;
@@ -34,14 +36,19 @@ public class DesignBriefResolver {
     @Inject
     CeleryTaskDispatcher celeryTaskDispatcher;
 
+    private static final int MAX_LIMIT = 100;
+
     @Authenticated
     @Query("designBriefs")
-    public List<DesignBriefSummary> getDesignBriefs(
+    public DesignBriefConnection getDesignBriefs(
             String productType, String batchId,
             String startDate, String endDate,
             Integer minConfidence, Integer maxConfidence,
             List<String> sourceSeeds, List<String> specificProducts,
-            String audienceContains, int limit) {
+            String audienceContains, int limit, int offset) {
+
+        int effectiveLimit = Math.max(0, Math.min(limit, MAX_LIMIT));
+        int effectiveOffset = Math.max(0, offset);
 
         String pt = nullIfEmpty(productType);
         String bi = nullIfEmpty(batchId);
@@ -51,7 +58,16 @@ public class DesignBriefResolver {
         List<String> ss = nullIfEmptyList(sourceSeeds);
         List<String> sp = nullIfEmptyList(specificProducts);
 
-        LOG.debugf("Fetching design briefs: productType=%s, batchId=%s, limit=%d", pt, bi, limit);
+        LOG.debugf("Fetching design briefs: productType=%s, batchId=%s, limit=%d, offset=%d", pt, bi, effectiveLimit, effectiveOffset);
+
+        if (effectiveLimit == 0) {
+            long totalCount = designBriefRepository.countWithFilters(pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac);
+            PageInfo pageInfo = new PageInfo(totalCount > 0, false, (int) totalCount);
+            return new DesignBriefConnection(List.of(), pageInfo);
+        }
+
+        List<DesignBrief> briefs;
+        long totalCount;
 
         boolean hasAdvancedFilters = sd != null || ed != null
                 || minConfidence != null || maxConfidence != null
@@ -59,22 +75,28 @@ public class DesignBriefResolver {
                 || (sp != null && !sp.isEmpty())
                 || ac != null;
 
-        List<DesignBrief> briefs;
-        if (hasAdvancedFilters || (pt != null && bi != null)) {
+        if (hasAdvancedFilters || (pt != null && bi != null) || pt != null || bi != null) {
             briefs = designBriefRepository.findWithFilters(
                     pt, bi, sd, ed, minConfidence, maxConfidence,
-                    ss, sp, ac, limit);
-        } else if (bi != null) {
-            briefs = designBriefRepository.findByBatchId(bi);
-        } else if (pt != null) {
-            briefs = designBriefRepository.findByProductType(pt, limit);
+                    ss, sp, ac, effectiveLimit, effectiveOffset);
+            totalCount = designBriefRepository.countWithFilters(
+                    pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac);
         } else {
-            briefs = designBriefRepository.findRecent(limit);
+            briefs = designBriefRepository.findRecentPaginated(effectiveLimit, effectiveOffset);
+            totalCount = designBriefRepository.countAll();
         }
 
-        return briefs.stream()
+        List<DesignBriefSummary> items = briefs.stream()
                 .map(this::toSummary)
                 .collect(Collectors.toList());
+
+        PageInfo pageInfo = new PageInfo(
+                effectiveOffset + effectiveLimit < totalCount,
+                effectiveOffset > 0,
+                (int) totalCount
+        );
+
+        return new DesignBriefConnection(items, pageInfo);
     }
 
     private static String nullIfEmpty(String value) {
