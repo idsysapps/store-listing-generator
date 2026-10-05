@@ -78,8 +78,8 @@ class DesignBriefResolverTest {
         assertEquals(85, result.getItems().get(0).getConfidence());
         assertEquals(List.of("t-shirt", "hoodie"), result.getItems().get(0).getSpecificProducts());
         assertEquals(1, result.getPageInfo().getTotalCount());
-        assertFalse(result.getPageInfo().isHasNextPage());
-        assertFalse(result.getPageInfo().isHasPreviousPage());
+        assertFalse(result.getPageInfo().getHasNextPage());
+        assertFalse(result.getPageInfo().getHasPreviousPage());
     }
 
     @Test
@@ -216,8 +216,8 @@ class DesignBriefResolverTest {
         DesignBriefConnection result = queryBriefs(null, null, 10);
 
         assertEquals(1, result.getItems().size());
-        assertTrue(result.getPageInfo().isHasNextPage());
-        assertFalse(result.getPageInfo().isHasPreviousPage());
+        assertTrue(result.getPageInfo().getHasNextPage());
+        assertFalse(result.getPageInfo().getHasPreviousPage());
         assertEquals(25, result.getPageInfo().getTotalCount());
     }
 
@@ -231,8 +231,8 @@ class DesignBriefResolverTest {
                 null, null, null, null, null, null, null, null, null, 10, 10);
 
         assertEquals(1, result.getItems().size());
-        assertTrue(result.getPageInfo().isHasNextPage());
-        assertTrue(result.getPageInfo().isHasPreviousPage());
+        assertTrue(result.getPageInfo().getHasNextPage());
+        assertTrue(result.getPageInfo().getHasPreviousPage());
         assertEquals(25, result.getPageInfo().getTotalCount());
     }
 
