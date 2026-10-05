@@ -70,6 +70,9 @@ public class DesignBrief extends PanacheEntityBase {
     @Column(name = "personal_use", nullable = false)
     public Boolean personalUse = false;
 
+    @Column(name = "recommended_materials", columnDefinition = "JSONB")
+    public String recommendedMaterials;
+
     @OneToMany(mappedBy = "designBrief", fetch = FetchType.LAZY)
     public List<DesignBriefSource> sources;
 

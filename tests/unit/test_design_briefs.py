@@ -2,6 +2,7 @@
 
 import json
 from datetime import date
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -371,6 +372,7 @@ class TestGenerateDesignBriefs:
     def _mock_db(self, candidates: list[BriefableCandidate] | None = None) -> MagicMock:
         db = MagicMock()
         db.list_briefable_seeds.return_value = candidates or []
+        db.list_active_materials.return_value = []
         db.insert_design_brief.return_value = 1
         db.insert_brief_source.return_value = 1
         return db
@@ -544,3 +546,186 @@ class TestGenerateDesignBriefs:
 
         call_kwargs = db.insert_design_brief.call_args.kwargs
         assert call_kwargs["llm_model"] == "test-model"
+
+    def test_queries_materials_and_passes_to_prompt(self) -> None:
+        candidates = [_briefable(1, "hoodie")]
+        db = self._mock_db(candidates=candidates)
+        db.list_active_materials.return_value = [
+            {
+                "external_id": "bc3001-white",
+                "name": "Bella Canvas 3001",
+                "brand": "Bella Canvas",
+                "substrate_type": "t-shirt",
+                "color": "White",
+                "product_type": "dtf_apparel",
+                "sku": "BC3001-WHT",
+                "unit_cost": 4.50,
+            }
+        ]
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Hoodie Season",
+                        "product_type": "dtf_apparel",
+                        "confidence": 75,
+                        "source_seed_ids": [1],
+                        "recommended_materials": [
+                            {
+                                "external_id": "bc3001-white",
+                                "name": "Bella Canvas 3001",
+                                "color": "White",
+                                "substrate_type": "t-shirt",
+                                "unit_cost": 4.50,
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+        result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["briefs_created"] == 1
+        db.list_active_materials.assert_called_once()
+        call_kwargs = db.insert_design_brief.call_args.kwargs
+        assert call_kwargs["recommended_materials"] is not None
+
+
+class TestBuildBriefPromptWithMaterials:
+    def _sample_materials(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "external_id": "bc3001-white",
+                "name": "Bella Canvas 3001",
+                "brand": "Bella Canvas",
+                "substrate_type": "t-shirt",
+                "color": "White",
+                "product_type": "dtf_apparel",
+                "sku": "BC3001-WHT",
+                "unit_cost": 4.50,
+            },
+            {
+                "external_id": "mug-11oz-white",
+                "name": "11oz Ceramic Mug",
+                "brand": "Generic",
+                "substrate_type": "mug",
+                "color": "White",
+                "product_type": "sublimation",
+                "sku": "MUG-11OZ-WHT",
+                "unit_cost": 2.75,
+            },
+        ]
+
+    def test_includes_available_materials_in_user_message(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+            materials=self._sample_materials(),
+        )
+
+        user_data = json.loads(messages[1]["content"])
+        assert "available_materials" in user_data
+        assert len(user_data["available_materials"]) == 2
+        assert user_data["available_materials"][0]["external_id"] == "bc3001-white"
+
+    def test_omits_available_materials_when_none(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        user_data = json.loads(messages[1]["content"])
+        assert "available_materials" not in user_data
+
+    def test_omits_available_materials_when_empty(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+            materials=[],
+        )
+
+        user_data = json.loads(messages[1]["content"])
+        assert "available_materials" not in user_data
+
+    def test_system_prompt_mentions_materials(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+            materials=self._sample_materials(),
+        )
+
+        system_content = messages[0]["content"]
+        assert "recommended_materials" in system_content
+
+
+class TestParseBriefResponseWithMaterials:
+    def test_parses_recommended_materials(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Dad Jokes Shirt",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "recommended_materials": [
+                            {
+                                "external_id": "bc3001-white",
+                                "name": "Bella Canvas 3001",
+                                "color": "White",
+                                "substrate_type": "t-shirt",
+                                "unit_cost": 4.50,
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].recommended_materials is not None
+        assert len(result[0].recommended_materials) == 1
+        assert result[0].recommended_materials[0]["external_id"] == "bc3001-white"
+
+    def test_handles_missing_recommended_materials(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "No Materials Brief",
+                        "product_type": "dtf_apparel",
+                        "confidence": 70,
+                        "source_seed_ids": [1],
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].recommended_materials is None
+
+    def test_handles_non_list_recommended_materials(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Bad Materials",
+                        "product_type": "dtf_apparel",
+                        "confidence": 70,
+                        "source_seed_ids": [1],
+                        "recommended_materials": "not a list",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].recommended_materials is None
