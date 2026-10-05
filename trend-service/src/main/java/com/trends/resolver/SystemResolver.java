@@ -5,11 +5,12 @@ import com.trends.dto.SourceHealthSummary;
 import com.trends.dto.SystemStatus;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.SourceHealthRepository;
-import io.quarkus.security.Authenticated;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import org.eclipse.microprofile.graphql.GraphQLApi;
+import org.eclipse.microprofile.graphql.GraphQLException;
 import org.eclipse.microprofile.graphql.Mutation;
 import org.eclipse.microprofile.graphql.Query;
 import org.jboss.logging.Logger;
@@ -32,9 +33,12 @@ public class SystemResolver {
     @Inject
     CeleryTaskDispatcher celeryTaskDispatcher;
 
-    @Authenticated
+    @Inject
+    SecurityIdentity securityIdentity;
+
     @Query("systemStatus")
-    public SystemStatus getSystemStatus() {
+    public SystemStatus getSystemStatus() throws GraphQLException {
+        requireAuthentication();
         int pending = countQuery("SELECT COUNT(*) FROM seed_candidates WHERE status = 'pending'");
         int promoted = countQuery("SELECT COUNT(*) FROM seed_candidates WHERE status = 'promoted'");
         int archived = countQuery("SELECT COUNT(*) FROM seed_candidates WHERE status = 'archived'");
@@ -48,17 +52,17 @@ public class SystemResolver {
                 briefsTotal, briefsWithImages, briefsPendingImages, briefsPendingRegen);
     }
 
-    @Authenticated
     @Query("sourceHealth")
-    public List<SourceHealthSummary> getSourceHealth() {
+    public List<SourceHealthSummary> getSourceHealth() throws GraphQLException {
+        requireAuthentication();
         return sourceHealthRepository.listAll().stream()
                 .map(this::toSummary)
                 .collect(Collectors.toList());
     }
 
-    @Authenticated
     @Mutation("triggerCuration")
-    public String triggerCuration() {
+    public String triggerCuration() throws GraphQLException {
+        requireAuthentication();
         String taskId = celeryTaskDispatcher
                 .dispatchTask("store_listing.orchestration.tasks.curate_seeds_task")
                 .await().indefinitely();
@@ -66,9 +70,9 @@ public class SystemResolver {
         return taskId;
     }
 
-    @Authenticated
     @Mutation("triggerDesignBriefs")
-    public String triggerDesignBriefs() {
+    public String triggerDesignBriefs() throws GraphQLException {
+        requireAuthentication();
         String taskId = celeryTaskDispatcher
                 .dispatchTask("store_listing.orchestration.tasks.generate_design_briefs_task")
                 .await().indefinitely();
@@ -76,14 +80,20 @@ public class SystemResolver {
         return taskId;
     }
 
-    @Authenticated
     @Mutation("triggerImageGeneration")
-    public String triggerImageGeneration() {
+    public String triggerImageGeneration() throws GraphQLException {
+        requireAuthentication();
         String taskId = celeryTaskDispatcher
                 .dispatchTask("store_listing.orchestration.tasks.generate_design_images_task")
                 .await().indefinitely();
         LOG.infof("Triggered image generation task: %s", taskId);
         return taskId;
+    }
+
+    private void requireAuthentication() throws GraphQLException {
+        if (securityIdentity == null || securityIdentity.isAnonymous()) {
+            throw new GraphQLException("Authentication required");
+        }
     }
 
     private int countQuery(String sql) {

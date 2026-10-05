@@ -5,9 +5,11 @@ import com.trends.dto.SourceHealthSummary;
 import com.trends.dto.SystemStatus;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.SourceHealthRepository;
+import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.mutiny.Uni;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
+import org.eclipse.microprofile.graphql.GraphQLException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -32,12 +34,16 @@ class SystemResolverTest {
     @Mock
     CeleryTaskDispatcher celeryTaskDispatcher;
 
+    @Mock
+    SecurityIdentity securityIdentity;
+
     @InjectMocks
     SystemResolver systemResolver;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        when(securityIdentity.isAnonymous()).thenReturn(false);
     }
 
     private Query mockNativeQuery(long result) {
@@ -47,7 +53,7 @@ class SystemResolverTest {
     }
 
     @Test
-    void testSystemStatus_ReturnsCorrectCounts() {
+    void testSystemStatus_ReturnsCorrectCounts() throws GraphQLException {
         Query pendingQ = mockNativeQuery(23760L);
         Query promotedQ = mockNativeQuery(1786L);
         Query archivedQ = mockNativeQuery(0L);
@@ -87,7 +93,7 @@ class SystemResolverTest {
     }
 
     @Test
-    void testSourceHealth_ReturnsSummaries() {
+    void testSourceHealth_ReturnsSummaries() throws GraphQLException {
         SourceHealth sh = new SourceHealth();
         sh.source = "google";
         sh.consecutiveFailures = 0;
@@ -110,7 +116,7 @@ class SystemResolverTest {
     }
 
     @Test
-    void testSourceHealth_EmptyList() {
+    void testSourceHealth_EmptyList() throws GraphQLException {
         when(sourceHealthRepository.listAll()).thenReturn(List.of());
 
         List<SourceHealthSummary> result = systemResolver.getSourceHealth();
@@ -119,7 +125,7 @@ class SystemResolverTest {
     }
 
     @Test
-    void testTriggerCuration_DispatchesTaskAndReturnsId() {
+    void testTriggerCuration_DispatchesTaskAndReturnsId() throws GraphQLException {
         when(celeryTaskDispatcher.dispatchTask(anyString()))
                 .thenReturn(Uni.createFrom().item("test-task-id-123"));
 
@@ -131,7 +137,7 @@ class SystemResolverTest {
     }
 
     @Test
-    void testTriggerDesignBriefs_DispatchesCorrectTask() {
+    void testTriggerDesignBriefs_DispatchesCorrectTask() throws GraphQLException {
         when(celeryTaskDispatcher.dispatchTask(anyString()))
                 .thenReturn(Uni.createFrom().item("test-task-id-456"));
 
@@ -143,7 +149,7 @@ class SystemResolverTest {
     }
 
     @Test
-    void testTriggerImageGeneration_DispatchesCorrectTask() {
+    void testTriggerImageGeneration_DispatchesCorrectTask() throws GraphQLException {
         when(celeryTaskDispatcher.dispatchTask(anyString()))
                 .thenReturn(Uni.createFrom().item("test-task-id-789"));
 
@@ -152,5 +158,14 @@ class SystemResolverTest {
         assertNotNull(taskId);
         verify(celeryTaskDispatcher).dispatchTask(
                 "store_listing.orchestration.tasks.generate_design_images_task");
+    }
+
+    @Test
+    void testSystemStatus_ThrowsAuthenticationRequired_WhenAnonymous() {
+        when(securityIdentity.isAnonymous()).thenReturn(true);
+
+        GraphQLException ex = assertThrows(GraphQLException.class,
+                () -> systemResolver.getSystemStatus());
+        assertEquals("Authentication required", ex.getMessage());
     }
 }

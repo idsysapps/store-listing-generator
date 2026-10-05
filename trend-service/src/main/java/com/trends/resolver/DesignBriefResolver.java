@@ -8,11 +8,13 @@ import com.trends.dto.DesignBriefSummary;
 import com.trends.dto.PageInfo;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
-import io.quarkus.security.Authenticated;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
+import org.eclipse.microprofile.graphql.DefaultValue;
 import org.eclipse.microprofile.graphql.GraphQLApi;
+import org.eclipse.microprofile.graphql.GraphQLException;
 import org.eclipse.microprofile.graphql.Mutation;
 import org.eclipse.microprofile.graphql.Query;
 import org.jboss.logging.Logger;
@@ -36,16 +38,19 @@ public class DesignBriefResolver {
     @Inject
     CeleryTaskDispatcher celeryTaskDispatcher;
 
+    @Inject
+    SecurityIdentity securityIdentity;
+
     private static final int MAX_LIMIT = 100;
 
-    @Authenticated
     @Query("designBriefs")
     public DesignBriefConnection getDesignBriefs(
             String productType, String batchId,
             String startDate, String endDate,
             Integer minConfidence, Integer maxConfidence,
             List<String> sourceSeeds, List<String> specificProducts,
-            String audienceContains, int limit, int offset) {
+            String audienceContains, int limit, @DefaultValue("0") int offset) throws GraphQLException {
+        requireAuthentication();
 
         int effectiveLimit = Math.max(0, Math.min(limit, MAX_LIMIT));
         int effectiveOffset = Math.max(0, offset);
@@ -113,18 +118,18 @@ public class DesignBriefResolver {
         return filtered.isEmpty() ? null : filtered;
     }
 
-    @Authenticated
     @Mutation("createCustomBrief")
-    public String createCustomBrief(String description, String productType, boolean personalUse) {
+    public String createCustomBrief(String description, String productType, boolean personalUse) throws GraphQLException {
+        requireAuthentication();
         LOG.infof("Creating custom brief: description=%s, productType=%s, personalUse=%s", description, productType, personalUse);
         return celeryTaskDispatcher.dispatchCreateCustomBrief(description, productType, personalUse)
                 .await().indefinitely();
     }
 
-    @Authenticated
     @Mutation("requestRegeneration")
     @Transactional
-    public DesignBriefSummary requestRegeneration(int briefId, String feedback) {
+    public DesignBriefSummary requestRegeneration(int briefId, String feedback) throws GraphQLException {
+        requireAuthentication();
         DesignBrief brief = designBriefRepository.findById((long) briefId);
         if (brief == null) {
             return null;
@@ -142,6 +147,12 @@ public class DesignBriefResolver {
                 );
 
         return toSummary(brief);
+    }
+
+    private void requireAuthentication() throws GraphQLException {
+        if (securityIdentity == null || securityIdentity.isAnonymous()) {
+            throw new GraphQLException("Authentication required");
+        }
     }
 
     private DesignBriefSummary toSummary(DesignBrief brief) {

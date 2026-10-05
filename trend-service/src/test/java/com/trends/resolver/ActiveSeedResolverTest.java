@@ -4,6 +4,8 @@ import com.trends.domain.ActiveSeed;
 import com.trends.domain.SeedProductTag;
 import com.trends.dto.ActiveSeedSummary;
 import com.trends.repository.ActiveSeedRepository;
+import io.quarkus.security.identity.SecurityIdentity;
+import org.eclipse.microprofile.graphql.GraphQLException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -20,16 +22,20 @@ class ActiveSeedResolverTest {
     @Mock
     ActiveSeedRepository activeSeedRepository;
 
+    @Mock
+    SecurityIdentity securityIdentity;
+
     @InjectMocks
     ActiveSeedResolver activeSeedResolver;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        when(securityIdentity.isAnonymous()).thenReturn(false);
     }
 
     @Test
-    void testGetActiveSeeds_ReturnsAllActive() {
+    void testGetActiveSeeds_ReturnsAllActive() throws GraphQLException {
         ActiveSeed seed1 = new ActiveSeed();
         seed1.id = 1;
         seed1.query = "dad jokes shirt";
@@ -50,7 +56,7 @@ class ActiveSeedResolverTest {
     }
 
     @Test
-    void testGetActiveSeeds_FiltersByTag() {
+    void testGetActiveSeeds_FiltersByTag() throws GraphQLException {
         ActiveSeed seed1 = new ActiveSeed();
         seed1.id = 1;
         seed1.query = "dad jokes shirt";
@@ -67,7 +73,7 @@ class ActiveSeedResolverTest {
     }
 
     @Test
-    void testGetActiveSeeds_IncludesProductTags() {
+    void testGetActiveSeeds_IncludesProductTags() throws GraphQLException {
         ActiveSeed seed = new ActiveSeed();
         seed.id = 1;
         seed.query = "dad jokes shirt";
@@ -86,7 +92,7 @@ class ActiveSeedResolverTest {
     }
 
     @Test
-    void testGetActiveSeeds_EmptyTagsWhenNone() {
+    void testGetActiveSeeds_EmptyTagsWhenNone() throws GraphQLException {
         ActiveSeed seed = new ActiveSeed();
         seed.id = 1;
         seed.query = "hoodie season";
@@ -102,7 +108,7 @@ class ActiveSeedResolverTest {
     }
 
     @Test
-    void testGetProductTags_ReturnsDistinctTags() {
+    void testGetProductTags_ReturnsDistinctTags() throws GraphQLException {
         when(activeSeedRepository.findDistinctTags()).thenReturn(List.of("dtf_apparel", "sublimation", "sticker_vinyl"));
 
         List<String> result = activeSeedResolver.getProductTags();
@@ -111,5 +117,14 @@ class ActiveSeedResolverTest {
         assertTrue(result.contains("dtf_apparel"));
         assertTrue(result.contains("sublimation"));
         assertTrue(result.contains("sticker_vinyl"));
+    }
+
+    @Test
+    void testGetActiveSeeds_ThrowsAuthenticationRequired_WhenAnonymous() {
+        when(securityIdentity.isAnonymous()).thenReturn(true);
+
+        GraphQLException ex = assertThrows(GraphQLException.class,
+                () -> activeSeedResolver.getActiveSeeds(null, 10));
+        assertEquals("Authentication required", ex.getMessage());
     }
 }
