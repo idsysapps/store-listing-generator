@@ -31,6 +31,16 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
                 .list();
     }
 
+    public List<DesignBrief> findRecentPaginated(int limit, int offset) {
+        return find("ORDER BY createdAt DESC")
+                .range(offset, offset + limit - 1)
+                .list();
+    }
+
+    public long countAll() {
+        return count();
+    }
+
     public List<DesignBrief> findBySeedKeyword(String seedKeyword) {
         return getEntityManager()
                 .createQuery(
@@ -51,6 +61,17 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             Integer minConfidence, Integer maxConfidence,
             List<String> sourceSeeds, List<String> specificProducts,
             String audienceContains, int limit) {
+        return findWithFilters(productType, batchId, startDate, endDate,
+                minConfidence, maxConfidence, sourceSeeds, specificProducts,
+                audienceContains, limit, 0);
+    }
+
+    public List<DesignBrief> findWithFilters(
+            String productType, String batchId,
+            String startDate, String endDate,
+            Integer minConfidence, Integer maxConfidence,
+            List<String> sourceSeeds, List<String> specificProducts,
+            String audienceContains, int limit, int offset) {
 
         boolean needsSourceJoin = sourceSeeds != null && !sourceSeeds.isEmpty();
 
@@ -110,6 +131,7 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
         for (var entry : params.entrySet()) {
             query.setParameter(entry.getKey(), entry.getValue());
         }
+        query.setFirstResult(offset);
         query.setMaxResults(limit);
 
         List<DesignBrief> results = query.getResultList();
@@ -121,6 +143,72 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
         }
 
         return results;
+    }
+
+    public long countWithFilters(
+            String productType, String batchId,
+            String startDate, String endDate,
+            Integer minConfidence, Integer maxConfidence,
+            List<String> sourceSeeds,
+            String audienceContains) {
+
+        boolean needsSourceJoin = sourceSeeds != null && !sourceSeeds.isEmpty();
+
+        StringBuilder jpql = new StringBuilder();
+        if (needsSourceJoin) {
+            jpql.append("SELECT COUNT(DISTINCT db) FROM DesignBrief db JOIN db.sources dbs JOIN dbs.activeSeed a");
+        } else {
+            jpql.append("SELECT COUNT(db) FROM DesignBrief db");
+        }
+
+        List<String> conditions = new ArrayList<>();
+        Map<String, Object> params = new HashMap<>();
+
+        if (productType != null) {
+            conditions.add("db.productType = :productType");
+            params.put("productType", productType);
+        }
+        if (batchId != null) {
+            conditions.add("db.batchId = :batchId");
+            params.put("batchId", batchId);
+        }
+        if (startDate != null) {
+            OffsetDateTime start = LocalDate.parse(startDate).atStartOfDay().atOffset(ZoneOffset.UTC);
+            conditions.add("db.createdAt >= :startDate");
+            params.put("startDate", start);
+        }
+        if (endDate != null) {
+            OffsetDateTime end = LocalDate.parse(endDate).plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+            conditions.add("db.createdAt < :endDate");
+            params.put("endDate", end);
+        }
+        if (minConfidence != null) {
+            conditions.add("db.confidence >= :minConfidence");
+            params.put("minConfidence", minConfidence);
+        }
+        if (maxConfidence != null) {
+            conditions.add("db.confidence <= :maxConfidence");
+            params.put("maxConfidence", maxConfidence);
+        }
+        if (needsSourceJoin) {
+            conditions.add("a.query IN :sourceSeeds");
+            params.put("sourceSeeds", sourceSeeds);
+        }
+        if (audienceContains != null) {
+            conditions.add("LOWER(db.audience) LIKE :audienceContains");
+            params.put("audienceContains", "%" + audienceContains.toLowerCase() + "%");
+        }
+
+        if (!conditions.isEmpty()) {
+            jpql.append(" WHERE ");
+            jpql.append(String.join(" AND ", conditions));
+        }
+
+        var query = getEntityManager().createQuery(jpql.toString(), Long.class);
+        for (var entry : params.entrySet()) {
+            query.setParameter(entry.getKey(), entry.getValue());
+        }
+        return query.getSingleResult();
     }
 
     private boolean hasOverlap(String[] array, List<String> filter) {
