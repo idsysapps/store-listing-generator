@@ -1,6 +1,7 @@
 package com.trends.repository;
 
 import com.trends.domain.DesignBrief;
+import com.trends.dto.DesignBriefOrderBy;
 import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -32,7 +33,11 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
     }
 
     public List<DesignBrief> findRecentPaginated(int limit, int offset) {
-        return find("ORDER BY createdAt DESC")
+        return findRecentPaginated(limit, offset, DesignBriefOrderBy.CREATED_AT_DESC);
+    }
+
+    public List<DesignBrief> findRecentPaginated(int limit, int offset, DesignBriefOrderBy orderBy) {
+        return find("ORDER BY " + orderBy.toPanacheOrderBy())
                 .range(offset, offset + limit - 1)
                 .list();
     }
@@ -63,7 +68,7 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             String audienceContains, int limit) {
         return findWithFilters(productType, batchId, startDate, endDate,
                 minConfidence, maxConfidence, sourceSeeds, specificProducts,
-                audienceContains, limit, 0);
+                audienceContains, limit, 0, DesignBriefOrderBy.CREATED_AT_DESC);
     }
 
     public List<DesignBrief> findWithFilters(
@@ -72,6 +77,18 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             Integer minConfidence, Integer maxConfidence,
             List<String> sourceSeeds, List<String> specificProducts,
             String audienceContains, int limit, int offset) {
+        return findWithFilters(productType, batchId, startDate, endDate,
+                minConfidence, maxConfidence, sourceSeeds, specificProducts,
+                audienceContains, limit, offset, DesignBriefOrderBy.CREATED_AT_DESC);
+    }
+
+    public List<DesignBrief> findWithFilters(
+            String productType, String batchId,
+            String startDate, String endDate,
+            Integer minConfidence, Integer maxConfidence,
+            List<String> sourceSeeds, List<String> specificProducts,
+            String audienceContains, int limit, int offset,
+            DesignBriefOrderBy orderBy) {
 
         boolean needsSourceJoin = sourceSeeds != null && !sourceSeeds.isEmpty();
 
@@ -125,7 +142,7 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             jpql.append(String.join(" AND ", conditions));
         }
 
-        jpql.append(" ORDER BY db.createdAt DESC");
+        jpql.append(" ORDER BY ").append(orderBy.toJpql());
 
         var query = getEntityManager().createQuery(jpql.toString(), DesignBrief.class);
         for (var entry : params.entrySet()) {

@@ -5,6 +5,7 @@ import com.trends.domain.ActiveSeed;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefConnection;
+import com.trends.dto.DesignBriefOrderBy;
 import com.trends.dto.DesignBriefSummary;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
@@ -67,13 +68,14 @@ class DesignBriefResolverTest {
 
     private DesignBriefConnection queryBriefs(String productType, String batchId, int limit) throws GraphQLException {
         return designBriefResolver.getDesignBriefs(
-                productType, batchId, null, null, null, null, null, null, null, limit, 0);
+                productType, batchId, null, null, null, null, null, null, null, limit, 0,
+                DesignBriefOrderBy.CREATED_AT_DESC);
     }
 
     @Test
     void testGetDesignBriefs_ReturnsRecent() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
-        when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
 
         DesignBriefConnection result = queryBriefs(null, null, 10);
@@ -92,7 +94,7 @@ class DesignBriefResolverTest {
     void testGetDesignBriefs_FiltersByProductType() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Coffee Mug Design", "sublimation");
         when(designBriefRepository.findWithFilters(
-                "sublimation", null, null, null, null, null, null, null, null, 10, 0))
+                "sublimation", null, null, null, null, null, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
                 .thenReturn(List.of(brief));
         when(designBriefRepository.countWithFilters(
                 "sublimation", null, null, null, null, null, null, null))
@@ -108,7 +110,7 @@ class DesignBriefResolverTest {
     void testGetDesignBriefs_FiltersByBatchId() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Test Brief", "dtf_apparel");
         when(designBriefRepository.findWithFilters(
-                null, "2026-10-01", null, null, null, null, null, null, null, 10, 0))
+                null, "2026-10-01", null, null, null, null, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
                 .thenReturn(List.of(brief));
         when(designBriefRepository.countWithFilters(
                 null, "2026-10-01", null, null, null, null, null, null))
@@ -138,7 +140,7 @@ class DesignBriefResolverTest {
 
         brief.sources = List.of(src1, src2);
 
-        when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
 
         DesignBriefConnection result = queryBriefs(null, null, 10);
@@ -152,7 +154,7 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Solo Brief", "sticker_vinyl");
         brief.sources = List.of();
 
-        when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
 
         DesignBriefConnection result = queryBriefs(null, null, 10);
@@ -166,7 +168,7 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Null Products", "dtf_apparel");
         brief.specificProducts = null;
 
-        when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
 
         DesignBriefConnection result = queryBriefs(null, null, 10);
@@ -181,7 +183,7 @@ class DesignBriefResolverTest {
         brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
         brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
 
-        when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
         when(imageStorageConfig.buildUrl("designs/2026/09/dtf_apparel/1_raw.png"))
                 .thenReturn("https://minio.local:9000/designs/designs/2026/09/dtf_apparel/1_raw.png");
@@ -203,7 +205,7 @@ class DesignBriefResolverTest {
         brief.imageKeyRaw = null;
         brief.imageKeyTransparent = null;
 
-        when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
 
         DesignBriefConnection result = queryBriefs(null, null, 10);
@@ -216,7 +218,7 @@ class DesignBriefResolverTest {
     @Test
     void testGetDesignBriefs_PaginationHasNextPage() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Page 1 Brief", "dtf_apparel");
-        when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(25L);
 
         DesignBriefConnection result = queryBriefs(null, null, 10);
@@ -230,11 +232,11 @@ class DesignBriefResolverTest {
     @Test
     void testGetDesignBriefs_PaginationWithOffset() throws GraphQLException {
         DesignBrief brief = makeBrief(2, "Page 2 Brief", "dtf_apparel");
-        when(designBriefRepository.findRecentPaginated(10, 10)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(10, 10, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(25L);
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
-                null, null, null, null, null, null, null, null, null, 10, 10);
+                null, null, null, null, null, null, null, null, null, 10, 10, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
         assertTrue(result.getPageInfo().getHasNextPage());
@@ -249,22 +251,22 @@ class DesignBriefResolverTest {
                 .thenReturn(42L);
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
-                null, null, null, null, null, null, null, null, null, 0, 0);
+                null, null, null, null, null, null, null, null, null, 0, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertTrue(result.getItems().isEmpty());
         assertEquals(42, result.getPageInfo().getTotalCount());
-        verify(designBriefRepository, never()).findRecentPaginated(anyInt(), anyInt());
+        verify(designBriefRepository, never()).findRecentPaginated(anyInt(), anyInt(), any(DesignBriefOrderBy.class));
     }
 
     @Test
     void testGetDesignBriefs_LimitCappedAt100() throws GraphQLException {
-        when(designBriefRepository.findRecentPaginated(100, 0)).thenReturn(List.of());
+        when(designBriefRepository.findRecentPaginated(100, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of());
         when(designBriefRepository.countAll()).thenReturn(0L);
 
         designBriefResolver.getDesignBriefs(
-                null, null, null, null, null, null, null, null, null, 500, 0);
+                null, null, null, null, null, null, null, null, null, 500, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
-        verify(designBriefRepository).findRecentPaginated(100, 0);
+        verify(designBriefRepository).findRecentPaginated(100, 0, DesignBriefOrderBy.CREATED_AT_DESC);
     }
 
     @Test
@@ -339,7 +341,7 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Holiday Shirt", "dtf_apparel");
         when(designBriefRepository.findWithFilters(
                 null, null, "2026-09-01", "2026-09-30",
-                null, null, null, null, null, 10, 0))
+                null, null, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
                 .thenReturn(List.of(brief));
         when(designBriefRepository.countWithFilters(
                 null, null, "2026-09-01", "2026-09-30",
@@ -348,7 +350,7 @@ class DesignBriefResolverTest {
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
                 null, null, "2026-09-01", "2026-09-30",
-                null, null, null, null, null, 10, 0);
+                null, null, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
     }
@@ -358,14 +360,14 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "High Confidence", "dtf_apparel");
         brief.confidence = 90;
         when(designBriefRepository.findWithFilters(
-                null, null, null, null, 80, null, null, null, null, 10, 0))
+                null, null, null, null, 80, null, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
                 .thenReturn(List.of(brief));
         when(designBriefRepository.countWithFilters(
                 null, null, null, null, 80, null, null, null))
                 .thenReturn(1L);
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
-                null, null, null, null, 80, null, null, null, null, 10, 0);
+                null, null, null, null, 80, null, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
         assertEquals(90, result.getItems().get(0).getConfidence());
@@ -376,14 +378,14 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Mid Confidence", "dtf_apparel");
         brief.confidence = 75;
         when(designBriefRepository.findWithFilters(
-                null, null, null, null, 70, 80, null, null, null, 10, 0))
+                null, null, null, null, 70, 80, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
                 .thenReturn(List.of(brief));
         when(designBriefRepository.countWithFilters(
                 null, null, null, null, 70, 80, null, null))
                 .thenReturn(1L);
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
-                null, null, null, null, 70, 80, null, null, null, 10, 0);
+                null, null, null, null, 70, 80, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
     }
@@ -393,7 +395,7 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
         when(designBriefRepository.findWithFilters(
                 null, null, null, null, null, null,
-                List.of("dad jokes", "funny shirts"), null, null, 10, 0))
+                List.of("dad jokes", "funny shirts"), null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
                 .thenReturn(List.of(brief));
         when(designBriefRepository.countWithFilters(
                 null, null, null, null, null, null,
@@ -402,7 +404,7 @@ class DesignBriefResolverTest {
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
                 null, null, null, null, null, null,
-                List.of("dad jokes", "funny shirts"), null, null, 10, 0);
+                List.of("dad jokes", "funny shirts"), null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
     }
@@ -412,7 +414,7 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Mug Design", "sublimation");
         when(designBriefRepository.findWithFilters(
                 null, null, null, null, null, null, null,
-                List.of("mug", "tumbler"), null, 10, 0))
+                List.of("mug", "tumbler"), null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
                 .thenReturn(List.of(brief));
         when(designBriefRepository.countWithFilters(
                 null, null, null, null, null, null, null, null))
@@ -420,7 +422,7 @@ class DesignBriefResolverTest {
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
                 null, null, null, null, null, null, null,
-                List.of("mug", "tumbler"), null, 10, 0);
+                List.of("mug", "tumbler"), null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
     }
@@ -430,14 +432,14 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Yoga Design", "dtf_apparel");
         brief.audience = "yoga enthusiasts who love dark humor";
         when(designBriefRepository.findWithFilters(
-                null, null, null, null, null, null, null, null, "yoga", 10, 0))
+                null, null, null, null, null, null, null, null, "yoga", 10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
                 .thenReturn(List.of(brief));
         when(designBriefRepository.countWithFilters(
                 null, null, null, null, null, null, null, "yoga"))
                 .thenReturn(1L);
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
-                null, null, null, null, null, null, null, null, "yoga", 10, 0);
+                null, null, null, null, null, null, null, null, "yoga", 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
     }
@@ -447,14 +449,14 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Premium DTF", "dtf_apparel");
         brief.confidence = 90;
         when(designBriefRepository.findWithFilters(
-                "dtf_apparel", null, "2026-09-01", null, 80, null, null, null, null, 10, 0))
+                "dtf_apparel", null, "2026-09-01", null, 80, null, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
                 .thenReturn(List.of(brief));
         when(designBriefRepository.countWithFilters(
                 "dtf_apparel", null, "2026-09-01", null, 80, null, null, null))
                 .thenReturn(1L);
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
-                "dtf_apparel", null, "2026-09-01", null, 80, null, null, null, null, 10, 0);
+                "dtf_apparel", null, "2026-09-01", null, 80, null, null, null, null, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
         assertEquals("dtf_apparel", result.getItems().get(0).getProductType());
@@ -463,28 +465,110 @@ class DesignBriefResolverTest {
     @Test
     void testGetDesignBriefs_EmptyStringsTreatedAsNull() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Test Brief", "dtf_apparel");
-        when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
-                "", "", "", "", null, null, null, null, "", 10, 0);
+                "", "", "", "", null, null, null, null, "", 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
-        verify(designBriefRepository).findRecentPaginated(10, 0);
+        verify(designBriefRepository).findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
     }
 
     @Test
     void testGetDesignBriefs_EmptyStringListsTreatedAsNull() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Test Brief", "dtf_apparel");
-        when(designBriefRepository.findRecentPaginated(20, 0)).thenReturn(List.of(brief));
+        when(designBriefRepository.findRecentPaginated(20, 0, DesignBriefOrderBy.CREATED_AT_DESC)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
 
         DesignBriefConnection result = designBriefResolver.getDesignBriefs(
                 "", "", "", "", null, null,
-                List.of(""), List.of(""), "", 20, 0);
+                List.of(""), List.of(""), "", 20, 0, DesignBriefOrderBy.CREATED_AT_DESC);
 
         assertEquals(1, result.getItems().size());
-        verify(designBriefRepository).findRecentPaginated(20, 0);
+        verify(designBriefRepository).findRecentPaginated(20, 0, DesignBriefOrderBy.CREATED_AT_DESC);
+    }
+
+    // --- OrderBy tests ---
+
+    @Test
+    void testGetDesignBriefs_OrderByConfidenceDesc() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "High Confidence", "dtf_apparel");
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CONFIDENCE_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null, null, null, null, 10, 0,
+                DesignBriefOrderBy.CONFIDENCE_DESC);
+
+        assertEquals(1, result.getItems().size());
+        verify(designBriefRepository).findRecentPaginated(10, 0, DesignBriefOrderBy.CONFIDENCE_DESC);
+    }
+
+    @Test
+    void testGetDesignBriefs_OrderByConfidenceDescWithFilters() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "High Confidence DTF", "dtf_apparel");
+        when(designBriefRepository.findWithFilters(
+                "dtf_apparel", null, null, null, null, null, null, null, null, 10, 0,
+                DesignBriefOrderBy.CONFIDENCE_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countWithFilters(
+                "dtf_apparel", null, null, null, null, null, null, null))
+                .thenReturn(1L);
+
+        DesignBriefConnection result = designBriefResolver.getDesignBriefs(
+                "dtf_apparel", null, null, null, null, null, null, null, null, 10, 0,
+                DesignBriefOrderBy.CONFIDENCE_DESC);
+
+        assertEquals(1, result.getItems().size());
+        verify(designBriefRepository).findWithFilters(
+                "dtf_apparel", null, null, null, null, null, null, null, null, 10, 0,
+                DesignBriefOrderBy.CONFIDENCE_DESC);
+    }
+
+    @Test
+    void testGetDesignBriefs_OrderByConfidenceAsc() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Low Confidence", "dtf_apparel");
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CONFIDENCE_ASC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null, null, null, null, 10, 0,
+                DesignBriefOrderBy.CONFIDENCE_ASC);
+
+        assertEquals(1, result.getItems().size());
+        verify(designBriefRepository).findRecentPaginated(10, 0, DesignBriefOrderBy.CONFIDENCE_ASC);
+    }
+
+    @Test
+    void testGetDesignBriefs_OrderByCreatedAtAsc() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Oldest First", "dtf_apparel");
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_ASC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null, null, null, null, 10, 0,
+                DesignBriefOrderBy.CREATED_AT_ASC);
+
+        assertEquals(1, result.getItems().size());
+        verify(designBriefRepository).findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_ASC);
+    }
+
+    @Test
+    void testGetDesignBriefs_NullOrderByDefaultsToCreatedAtDesc() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Default Order", "dtf_apparel");
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null, null, null, null, 10, 0, null);
+
+        assertEquals(1, result.getItems().size());
+        verify(designBriefRepository).findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
     }
 
     @Test
