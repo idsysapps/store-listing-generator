@@ -59,6 +59,12 @@ SYSTEM_PROMPT: Final[str] = (
     "(no text, no slogans, no words — just the visual scene). Under 20 words. "
     "Example: 'a skeleton sitting at an office desk holding a coffee mug, looking exasperated'. "
     "This is what the image generator sees, so describe the artwork, not the product concept.\n\n"
+    "MATERIALS — picking the right substrate:\n"
+    "- recommended_materials: array of objects from the available_materials list, each with "
+    "{external_id, name, color, substrate_type, unit_cost}. Pick 1-3 materials that best "
+    "match this design's aesthetic and target audience. Consider color contrast with the "
+    "design, substrate suitability, and unit cost for margin.\n"
+    "- If no materials are available for the product_type, omit recommended_materials.\n\n"
     "IMPORTANT: Do not suggest designs requiring licensed IP (movie characters, "
     "team logos, brand names). Create original concepts inspired by cultural moments.\n\n"
     "Return ONLY valid JSON with this exact structure:\n"
@@ -67,7 +73,9 @@ SYSTEM_PROMPT: Final[str] = (
     '"reasoning": "...", "source_seed_ids": [id1, id2], '
     '"layout_type": "text_top", "headline_text": "...", '
     '"tagline_text": "...", "font_color": "#000000", '
-    '"scene_description": "..."}]}'
+    '"scene_description": "...", '
+    '"recommended_materials": [{"external_id": "...", "name": "...", '
+    '"color": "...", "substrate_type": "...", "unit_cost": 0.00}]}]}'
 )
 
 
@@ -102,10 +110,16 @@ class DesignBrief:
     font_color: str | None = None
     regeneration_feedback: str | None = None
     scene_description: str | None = None
+    recommended_materials: list[dict[str, Any]] | None = None
 
 
 class DesignBriefDBClient(Protocol):
     def list_briefable_seeds(self) -> list[BriefableCandidate]: ...
+
+    def list_active_materials(
+        self,
+        product_type: str | None = None,
+    ) -> list[dict[str, Any]]: ...
 
     def insert_design_brief(
         self,
@@ -124,6 +138,7 @@ class DesignBriefDBClient(Protocol):
         font_color: str | None = None,
         scene_description: str | None = None,
         personal_use: bool = False,
+        recommended_materials: list[dict[str, Any]] | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -133,6 +148,7 @@ def build_brief_prompt(
     candidates: list[BriefableCandidate],
     context: list[dict[str, Any]],
     today: date,
+    materials: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     truncated = candidates[:MAX_SEEDS_PER_BRIEF]
 
@@ -150,15 +166,17 @@ def build_brief_prompt(
             }
         )
 
-    user_content = json.dumps(
-        {
-            "date": today.isoformat(),
-            "upcoming_events": context,
-            "max_briefs": MAX_BRIEFS,
-            "signals_by_source": dict(by_source),
-        },
-        indent=2,
-    )
+    payload: dict[str, Any] = {
+        "date": today.isoformat(),
+        "upcoming_events": context,
+        "max_briefs": MAX_BRIEFS,
+        "signals_by_source": dict(by_source),
+    }
+
+    if materials:
+        payload["available_materials"] = materials
+
+    user_content = json.dumps(payload, indent=2)
 
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -229,6 +247,10 @@ def parse_brief_response(text: str) -> list[DesignBrief]:
         if scene_description is not None and not isinstance(scene_description, str):
             scene_description = None
 
+        recommended_materials = b.get("recommended_materials")
+        if recommended_materials is not None and not isinstance(recommended_materials, list):
+            recommended_materials = None
+
         result.append(
             DesignBrief(
                 concept=concept,
@@ -244,6 +266,7 @@ def parse_brief_response(text: str) -> list[DesignBrief]:
                 tagline_text=tagline_text,
                 font_color=font_color,
                 scene_description=scene_description,
+                recommended_materials=recommended_materials,
             )
         )
 
@@ -262,8 +285,9 @@ def generate_design_briefs(
     if not candidates:
         return {"status": "success", "briefs_created": 0}
 
+    materials = db_client.list_active_materials()
     context = get_upcoming_events(today)
-    messages = build_brief_prompt(candidates, context, today)
+    messages = build_brief_prompt(candidates, context, today, materials=materials)
 
     try:
         raw = llm_completions.with_raw_response.create(model=model, messages=messages)
@@ -304,6 +328,7 @@ def generate_design_briefs(
             tagline_text=brief.tagline_text,
             font_color=brief.font_color,
             scene_description=brief.scene_description,
+            recommended_materials=brief.recommended_materials,
         )
         for seed_id in brief.source_seed_ids:
             if seed_id in valid_ids:

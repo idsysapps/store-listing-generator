@@ -436,7 +436,11 @@ class DatabaseClient:
         font_color: str | None = None,
         scene_description: str | None = None,
         personal_use: bool = False,
+        recommended_materials: list[dict[str, Any]] | None = None,
     ) -> int:
+        import json as _json
+
+        materials_json = _json.dumps(recommended_materials) if recommended_materials else None
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -444,8 +448,8 @@ class DatabaseClient:
                     (concept, product_type, specific_products, audience,
                      visual_style, confidence, reasoning, llm_model, batch_id,
                      layout_type, headline_text, tagline_text, font_color,
-                     scene_description, personal_use)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     scene_description, personal_use, recommended_materials)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -464,6 +468,7 @@ class DatabaseClient:
                     font_color,
                     scene_description,
                     personal_use,
+                    materials_json,
                 ),
             )
             result = cur.fetchone()
@@ -487,12 +492,14 @@ class DatabaseClient:
             return None if row is None else row[0]
 
     def list_briefs_without_images(self, limit: int = 20) -> list[dict[str, Any]]:
+        import json as _json
+
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT id, concept, product_type, audience, visual_style,
                        layout_type, headline_text, tagline_text, font_color,
-                       regeneration_feedback, scene_description
+                       regeneration_feedback, scene_description, recommended_materials
                 FROM design_briefs
                 WHERE image_key_raw IS NULL
                 ORDER BY created_at DESC
@@ -513,17 +520,22 @@ class DatabaseClient:
                     "font_color": row[8],
                     "regeneration_feedback": row[9],
                     "scene_description": row[10],
+                    "recommended_materials": (
+                        _json.loads(row[11]) if isinstance(row[11], str) else row[11]
+                    ),
                 }
                 for row in cur.fetchall()
             ]
 
     def get_brief_by_id(self, brief_id: int) -> dict[str, Any] | None:
+        import json as _json
+
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT id, concept, product_type, audience, visual_style,
                        layout_type, headline_text, tagline_text, font_color,
-                       regeneration_feedback, scene_description
+                       regeneration_feedback, scene_description, recommended_materials
                 FROM design_briefs
                 WHERE id = %s
                 """,
@@ -544,7 +556,52 @@ class DatabaseClient:
                 "font_color": row[8],
                 "regeneration_feedback": row[9],
                 "scene_description": row[10],
+                "recommended_materials": (
+                    _json.loads(row[11]) if isinstance(row[11], str) else row[11]
+                ),
             }
+
+    def list_active_materials(
+        self,
+        product_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self.connect() as conn, conn.cursor() as cur:
+            if product_type:
+                cur.execute(
+                    """
+                    SELECT external_id, name, brand, substrate_type, color,
+                           sizes, material_composition, product_type, sku, unit_cost
+                    FROM fabrication_materials
+                    WHERE active = TRUE AND product_type = %s
+                    ORDER BY name, color
+                    """,
+                    (product_type,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT external_id, name, brand, substrate_type, color,
+                           sizes, material_composition, product_type, sku, unit_cost
+                    FROM fabrication_materials
+                    WHERE active = TRUE
+                    ORDER BY product_type, name, color
+                    """
+                )
+            return [
+                {
+                    "external_id": row[0],
+                    "name": row[1],
+                    "brand": row[2],
+                    "substrate_type": row[3],
+                    "color": row[4],
+                    "sizes": row[5],
+                    "material_composition": row[6],
+                    "product_type": row[7],
+                    "sku": row[8],
+                    "unit_cost": float(row[9]) if row[9] is not None else None,
+                }
+                for row in cur.fetchall()
+            ]
 
     def list_briefs_for_reranking(self) -> list[RerankableBrief]:
         with self.connect() as conn, conn.cursor() as cur:

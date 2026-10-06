@@ -197,6 +197,30 @@ data:
 
     CREATE INDEX IF NOT EXISTS idx_design_brief_sources_brief ON design_brief_sources(brief_id);
     CREATE INDEX IF NOT EXISTS idx_design_brief_sources_seed ON design_brief_sources(active_seed_id);
+
+    -- Table: fabrication_materials
+    -- Local cache of material availability from cost-book, populated via Redis Streams.
+    CREATE TABLE IF NOT EXISTS fabrication_materials (
+        id SERIAL PRIMARY KEY,
+        external_id VARCHAR(100) NOT NULL UNIQUE,
+        name VARCHAR(255) NOT NULL,
+        brand VARCHAR(100),
+        substrate_type VARCHAR(50) NOT NULL,
+        color VARCHAR(100),
+        sizes TEXT[],
+        material_composition VARCHAR(255),
+        product_type VARCHAR(50) NOT NULL,
+        sku VARCHAR(100),
+        unit_cost DECIMAL(10,2),
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        attributes JSONB,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_fab_materials_product_type ON fabrication_materials(product_type);
+    CREATE INDEX IF NOT EXISTS idx_fab_materials_active ON fabrication_materials(active);
+    CREATE INDEX IF NOT EXISTS idx_fab_materials_external_id ON fabrication_materials(external_id);
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -357,6 +381,32 @@ data:
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS personal_use BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS original_confidence INTEGER;
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS last_reranked_at TIMESTAMP WITH TIME ZONE;
+
+    -- Table: fabrication_materials (local cache of cost-book material availability)
+    CREATE TABLE IF NOT EXISTS fabrication_materials (
+        id SERIAL PRIMARY KEY,
+        external_id VARCHAR(100) NOT NULL UNIQUE,
+        name VARCHAR(255) NOT NULL,
+        brand VARCHAR(100),
+        substrate_type VARCHAR(50) NOT NULL,
+        color VARCHAR(100),
+        sizes TEXT[],
+        material_composition VARCHAR(255),
+        product_type VARCHAR(50) NOT NULL,
+        sku VARCHAR(100),
+        unit_cost DECIMAL(10,2),
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        attributes JSONB,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_fab_materials_product_type ON fabrication_materials(product_type);
+    CREATE INDEX IF NOT EXISTS idx_fab_materials_active ON fabrication_materials(active);
+    CREATE INDEX IF NOT EXISTS idx_fab_materials_external_id ON fabrication_materials(external_id);
+
+    -- Add recommended_materials to design_briefs
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS recommended_materials JSONB;
 
     -- Migration: split 'marketplace' source_health into 'amazon' and 'etsy'
     DELETE FROM source_health WHERE source = 'marketplace';
