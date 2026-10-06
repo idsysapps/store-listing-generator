@@ -8,7 +8,9 @@ import com.trends.dto.DesignBriefConnection;
 import com.trends.dto.DesignBriefSummary;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
+import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.mutiny.Uni;
+import org.eclipse.microprofile.graphql.GraphQLException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -32,6 +34,9 @@ class DesignBriefResolverTest {
     @Mock
     CeleryTaskDispatcher celeryTaskDispatcher;
 
+    @Mock
+    SecurityIdentity securityIdentity;
+
     @InjectMocks
     DesignBriefResolver designBriefResolver;
 
@@ -40,6 +45,7 @@ class DesignBriefResolverTest {
         MockitoAnnotations.openMocks(this);
         when(celeryTaskDispatcher.dispatchGenerateSingleBriefImage(anyInt()))
                 .thenReturn(Uni.createFrom().voidItem());
+        when(securityIdentity.isAnonymous()).thenReturn(false);
     }
 
     private DesignBrief makeBrief(int id, String concept, String productType) {
@@ -59,13 +65,13 @@ class DesignBriefResolverTest {
         return brief;
     }
 
-    private DesignBriefConnection queryBriefs(String productType, String batchId, int limit) {
+    private DesignBriefConnection queryBriefs(String productType, String batchId, int limit) throws GraphQLException {
         return designBriefResolver.getDesignBriefs(
                 productType, batchId, null, null, null, null, null, null, null, limit, 0);
     }
 
     @Test
-    void testGetDesignBriefs_ReturnsRecent() {
+    void testGetDesignBriefs_ReturnsRecent() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
         when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
@@ -83,7 +89,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_FiltersByProductType() {
+    void testGetDesignBriefs_FiltersByProductType() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Coffee Mug Design", "sublimation");
         when(designBriefRepository.findWithFilters(
                 "sublimation", null, null, null, null, null, null, null, null, 10, 0))
@@ -99,7 +105,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_FiltersByBatchId() {
+    void testGetDesignBriefs_FiltersByBatchId() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Test Brief", "dtf_apparel");
         when(designBriefRepository.findWithFilters(
                 null, "2026-10-01", null, null, null, null, null, null, null, 10, 0))
@@ -114,7 +120,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_IncludesSourceSeeds() {
+    void testGetDesignBriefs_IncludesSourceSeeds() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
 
         ActiveSeed seed1 = new ActiveSeed();
@@ -142,7 +148,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_EmptySourcesWhenNone() {
+    void testGetDesignBriefs_EmptySourcesWhenNone() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Solo Brief", "sticker_vinyl");
         brief.sources = List.of();
 
@@ -156,7 +162,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_NullSpecificProducts() {
+    void testGetDesignBriefs_NullSpecificProducts() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Null Products", "dtf_apparel");
         brief.specificProducts = null;
 
@@ -170,7 +176,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_IncludesImageKeysAndUrls() {
+    void testGetDesignBriefs_IncludesImageKeysAndUrls() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
         brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
         brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
@@ -192,7 +198,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_NullImageKeysWhenNotGenerated() {
+    void testGetDesignBriefs_NullImageKeysWhenNotGenerated() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "No Image Brief", "sublimation");
         brief.imageKeyRaw = null;
         brief.imageKeyTransparent = null;
@@ -208,7 +214,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_PaginationHasNextPage() {
+    void testGetDesignBriefs_PaginationHasNextPage() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Page 1 Brief", "dtf_apparel");
         when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(25L);
@@ -222,7 +228,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_PaginationWithOffset() {
+    void testGetDesignBriefs_PaginationWithOffset() throws GraphQLException {
         DesignBrief brief = makeBrief(2, "Page 2 Brief", "dtf_apparel");
         when(designBriefRepository.findRecentPaginated(10, 10)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(25L);
@@ -237,7 +243,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_LimitZeroReturnsCountOnly() {
+    void testGetDesignBriefs_LimitZeroReturnsCountOnly() throws GraphQLException {
         when(designBriefRepository.countWithFilters(
                 null, null, null, null, null, null, null, null))
                 .thenReturn(42L);
@@ -251,7 +257,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_LimitCappedAt100() {
+    void testGetDesignBriefs_LimitCappedAt100() throws GraphQLException {
         when(designBriefRepository.findRecentPaginated(100, 0)).thenReturn(List.of());
         when(designBriefRepository.countAll()).thenReturn(0L);
 
@@ -262,7 +268,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testRequestRegeneration_ClearsImageKeysAndStoresFeedback() {
+    void testRequestRegeneration_ClearsImageKeysAndStoresFeedback() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
         brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
         brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
@@ -281,7 +287,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testRequestRegeneration_ReturnsNullForMissingBrief() {
+    void testRequestRegeneration_ReturnsNullForMissingBrief() throws GraphQLException {
         when(designBriefRepository.findById(999L)).thenReturn(null);
 
         DesignBriefSummary result = designBriefResolver.requestRegeneration(
@@ -291,7 +297,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testRequestRegeneration_DispatchesCeleryTask() {
+    void testRequestRegeneration_DispatchesCeleryTask() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
         brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
         brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
@@ -304,7 +310,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testRequestRegeneration_DoesNotDispatchForMissingBrief() {
+    void testRequestRegeneration_DoesNotDispatchForMissingBrief() throws GraphQLException {
         when(designBriefRepository.findById(999L)).thenReturn(null);
 
         designBriefResolver.requestRegeneration(999, "some feedback");
@@ -313,7 +319,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testRequestRegeneration_WorksWithNullFeedback() {
+    void testRequestRegeneration_WorksWithNullFeedback() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
         brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
 
@@ -329,7 +335,7 @@ class DesignBriefResolverTest {
     // --- Advanced filter tests ---
 
     @Test
-    void testGetDesignBriefs_FiltersByDateRange() {
+    void testGetDesignBriefs_FiltersByDateRange() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Holiday Shirt", "dtf_apparel");
         when(designBriefRepository.findWithFilters(
                 null, null, "2026-09-01", "2026-09-30",
@@ -348,7 +354,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_FiltersByMinConfidence() {
+    void testGetDesignBriefs_FiltersByMinConfidence() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "High Confidence", "dtf_apparel");
         brief.confidence = 90;
         when(designBriefRepository.findWithFilters(
@@ -366,7 +372,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_FiltersByConfidenceRange() {
+    void testGetDesignBriefs_FiltersByConfidenceRange() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Mid Confidence", "dtf_apparel");
         brief.confidence = 75;
         when(designBriefRepository.findWithFilters(
@@ -383,7 +389,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_FiltersBySourceSeeds() {
+    void testGetDesignBriefs_FiltersBySourceSeeds() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
         when(designBriefRepository.findWithFilters(
                 null, null, null, null, null, null,
@@ -402,7 +408,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_FiltersBySpecificProducts() {
+    void testGetDesignBriefs_FiltersBySpecificProducts() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Mug Design", "sublimation");
         when(designBriefRepository.findWithFilters(
                 null, null, null, null, null, null, null,
@@ -420,7 +426,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_FiltersByAudienceContains() {
+    void testGetDesignBriefs_FiltersByAudienceContains() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Yoga Design", "dtf_apparel");
         brief.audience = "yoga enthusiasts who love dark humor";
         when(designBriefRepository.findWithFilters(
@@ -437,7 +443,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_CombinedFilters() {
+    void testGetDesignBriefs_CombinedFilters() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Premium DTF", "dtf_apparel");
         brief.confidence = 90;
         when(designBriefRepository.findWithFilters(
@@ -455,7 +461,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_EmptyStringsTreatedAsNull() {
+    void testGetDesignBriefs_EmptyStringsTreatedAsNull() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Test Brief", "dtf_apparel");
         when(designBriefRepository.findRecentPaginated(10, 0)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
@@ -468,7 +474,7 @@ class DesignBriefResolverTest {
     }
 
     @Test
-    void testGetDesignBriefs_EmptyStringListsTreatedAsNull() {
+    void testGetDesignBriefs_EmptyStringListsTreatedAsNull() throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Test Brief", "dtf_apparel");
         when(designBriefRepository.findRecentPaginated(20, 0)).thenReturn(List.of(brief));
         when(designBriefRepository.countAll()).thenReturn(1L);
@@ -479,5 +485,23 @@ class DesignBriefResolverTest {
 
         assertEquals(1, result.getItems().size());
         verify(designBriefRepository).findRecentPaginated(20, 0);
+    }
+
+    @Test
+    void testGetDesignBriefs_ThrowsAuthenticationRequired_WhenAnonymous() {
+        when(securityIdentity.isAnonymous()).thenReturn(true);
+
+        GraphQLException ex = assertThrows(GraphQLException.class,
+                () -> queryBriefs(null, null, 10));
+        assertEquals("Authentication required", ex.getMessage());
+    }
+
+    @Test
+    void testRequestRegeneration_ThrowsAuthenticationRequired_WhenAnonymous() {
+        when(securityIdentity.isAnonymous()).thenReturn(true);
+
+        GraphQLException ex = assertThrows(GraphQLException.class,
+                () -> designBriefResolver.requestRegeneration(1, "feedback"));
+        assertEquals("Authentication required", ex.getMessage());
     }
 }

@@ -4,10 +4,11 @@ import com.trends.domain.ActiveSeed;
 import com.trends.domain.SeedProductTag;
 import com.trends.dto.ActiveSeedSummary;
 import com.trends.repository.ActiveSeedRepository;
-import io.quarkus.security.Authenticated;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.graphql.GraphQLApi;
+import org.eclipse.microprofile.graphql.GraphQLException;
 import org.eclipse.microprofile.graphql.Query;
 import org.jboss.logging.Logger;
 
@@ -23,9 +24,12 @@ public class ActiveSeedResolver {
     @Inject
     ActiveSeedRepository activeSeedRepository;
 
-    @Authenticated
+    @Inject
+    SecurityIdentity securityIdentity;
+
     @Query("activeSeeds")
-    public List<ActiveSeedSummary> getActiveSeeds(String tag, int limit) {
+    public List<ActiveSeedSummary> getActiveSeeds(String tag, int limit) throws GraphQLException {
+        requireAuthentication();
         LOG.debugf("Fetching active seeds: tag=%s, limit=%d", tag, limit);
 
         List<ActiveSeed> seeds;
@@ -40,11 +44,17 @@ public class ActiveSeedResolver {
                 .collect(Collectors.toList());
     }
 
-    @Authenticated
     @Query("productTags")
-    public List<String> getProductTags() {
+    public List<String> getProductTags() throws GraphQLException {
+        requireAuthentication();
         LOG.debug("Fetching distinct product tags");
         return activeSeedRepository.findDistinctTags();
+    }
+
+    private void requireAuthentication() throws GraphQLException {
+        if (securityIdentity == null || securityIdentity.isAnonymous()) {
+            throw new GraphQLException("Authentication required");
+        }
     }
 
     private ActiveSeedSummary toSummary(ActiveSeed seed) {

@@ -7,6 +7,8 @@ import com.trends.domain.TrendScore;
 import com.trends.dto.TrendSummary;
 import com.trends.repository.DesignBriefRepository;
 import com.trends.repository.TrendQueryRepository;
+import io.quarkus.security.identity.SecurityIdentity;
+import org.eclipse.microprofile.graphql.GraphQLException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -32,6 +34,9 @@ class TrendQueryResolverTest {
     @Mock
     ImageStorageConfig imageStorageConfig;
 
+    @Mock
+    SecurityIdentity securityIdentity;
+
     @InjectMocks
     TrendQueryResolver trendQueryResolver;
 
@@ -39,10 +44,11 @@ class TrendQueryResolverTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         when(designBriefRepository.findBySeedKeyword(anyString())).thenReturn(List.of());
+        when(securityIdentity.isAnonymous()).thenReturn(false);
     }
 
     @Test
-    void testGetTrendSummary_WhenQueryNotFound_ReturnsNull() {
+    void testGetTrendSummary_WhenQueryNotFound_ReturnsNull() throws GraphQLException {
         when(trendQueryRepository.findByQuery("nonexistent")).thenReturn(null);
 
         TrendSummary result = trendQueryResolver.getTrendSummary("nonexistent");
@@ -52,7 +58,7 @@ class TrendQueryResolverTest {
     }
 
     @Test
-    void testGetTrendSummary_WhenQueryExists_ReturnsSummary() {
+    void testGetTrendSummary_WhenQueryExists_ReturnsSummary() throws GraphQLException {
         TrendQuery trendQuery = new TrendQuery("hoodie", "funny hoodie");
         trendQuery.id = 1;
 
@@ -72,7 +78,7 @@ class TrendQueryResolverTest {
     }
 
     @Test
-    void testGetTopTrends_ReturnsSortedByScoreAndVelocity() {
+    void testGetTopTrends_ReturnsSortedByScoreAndVelocity() throws GraphQLException {
         TrendQuery tq1 = new TrendQuery("hoodie", "cool hoodie");
         tq1.id = 1;
 
@@ -98,7 +104,7 @@ class TrendQueryResolverTest {
     }
 
     @Test
-    void testGetTopTrends_NormalizesScoresWithinSource() {
+    void testGetTopTrends_NormalizesScoresWithinSource() throws GraphQLException {
         TrendQuery tq1 = new TrendQuery("hoodie", "cool hoodie");
         tq1.id = 1;
 
@@ -117,7 +123,7 @@ class TrendQueryResolverTest {
     }
 
     @Test
-    void testGetTrendSummary_ExposesSourceFromLatestScore() {
+    void testGetTrendSummary_ExposesSourceFromLatestScore() throws GraphQLException {
         TrendQuery trendQuery = new TrendQuery("hoodie", "funny hoodie");
         trendQuery.id = 1;
 
@@ -133,7 +139,7 @@ class TrendQueryResolverTest {
     }
 
     @Test
-    void testGetTrendSummary_IncludesSeedKeyword() {
+    void testGetTrendSummary_IncludesSeedKeyword() throws GraphQLException {
         TrendQuery trendQuery = new TrendQuery("hoodie", "funny hoodie");
         trendQuery.id = 1;
 
@@ -149,7 +155,7 @@ class TrendQueryResolverTest {
     }
 
     @Test
-    void testGetTopTrends_HasDesignBriefsTrue_FiltersOnlyWithBriefs() {
+    void testGetTopTrends_HasDesignBriefsTrue_FiltersOnlyWithBriefs() throws GraphQLException {
         TrendQuery tq1 = new TrendQuery("hoodie", "cool hoodie");
         tq1.id = 1;
 
@@ -167,7 +173,6 @@ class TrendQueryResolverTest {
         when(trendQueryRepository.findByQuery("funny tshirt")).thenReturn(tq2);
         when(trendQueryRepository.findLatestScoresByQueryId(2, 10)).thenReturn(List.of(tshirtScore));
 
-        // Only tq1 has design briefs
         DesignBrief brief = new DesignBrief();
         brief.id = 1;
         brief.concept = "Cool Hoodie Design";
@@ -184,7 +189,7 @@ class TrendQueryResolverTest {
     }
 
     @Test
-    void testGetTopTrends_HasDesignBriefsFalse_ReturnsAll() {
+    void testGetTopTrends_HasDesignBriefsFalse_ReturnsAll() throws GraphQLException {
         TrendQuery tq1 = new TrendQuery("hoodie", "cool hoodie");
         tq1.id = 1;
 
@@ -204,5 +209,14 @@ class TrendQueryResolverTest {
     void testGetScores_WithNullTrendQuery_ReturnsEmptyList() {
         List<com.trends.domain.TrendScore> result = trendQueryResolver.getScores(null, 10, 0);
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void testGetTrendQueries_ThrowsAuthenticationRequired_WhenAnonymous() {
+        when(securityIdentity.isAnonymous()).thenReturn(true);
+
+        GraphQLException ex = assertThrows(GraphQLException.class,
+                () -> trendQueryResolver.getTrendQueries(10, 0));
+        assertEquals("Authentication required", ex.getMessage());
     }
 }
