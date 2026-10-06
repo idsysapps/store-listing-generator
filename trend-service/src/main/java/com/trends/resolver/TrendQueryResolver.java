@@ -7,10 +7,12 @@ import com.trends.domain.TrendScore;
 import com.trends.dto.*;
 import com.trends.repository.DesignBriefRepository;
 import com.trends.repository.TrendQueryRepository;
-import io.quarkus.security.Authenticated;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.graphql.DefaultValue;
 import org.eclipse.microprofile.graphql.GraphQLApi;
+import org.eclipse.microprofile.graphql.GraphQLException;
 import org.eclipse.microprofile.graphql.Query;
 import org.jboss.logging.Logger;
 
@@ -36,9 +38,12 @@ public class TrendQueryResolver {
     @Inject
     ImageStorageConfig imageStorageConfig;
 
-    @Authenticated
+    @Inject
+    SecurityIdentity securityIdentity;
+
     @Query("trendQueries")
-    public TrendQueryConnection getTrendQueries(int limit, int offset) {
+    public TrendQueryConnection getTrendQueries(int limit, @DefaultValue("0") int offset) throws GraphQLException {
+        requireAuthentication();
         LOG.debugf("Fetching trend queries: limit=%d, offset=%d", limit, offset);
 
         List<TrendQuery> queries = trendQueryRepository.findPaginated(limit, offset);
@@ -57,9 +62,9 @@ public class TrendQueryResolver {
         return new TrendQueryConnection(edges, pageInfo);
     }
 
-    @Authenticated
     @Query("trendSummary")
-    public TrendSummary getTrendSummary(String query) {
+    public TrendSummary getTrendSummary(String query) throws GraphQLException {
+        requireAuthentication();
         LOG.debugf("Fetching trend summary for query: %s", query);
 
         TrendQuery trendQuery = trendQueryRepository.findByQuery(query);
@@ -102,9 +107,9 @@ public class TrendQueryResolver {
         return new TrendSummary(query, seedKeyword, latest.score, velocity, topRegions, source, null, briefs);
     }
 
-    @Authenticated
     @Query("topTrends")
-    public List<TrendSummary> getTopTrends(int limit, boolean hasDesignBriefs) {
+    public List<TrendSummary> getTopTrends(int limit, boolean hasDesignBriefs) throws GraphQLException {
+        requireAuthentication();
         LOG.debugf("Fetching top trends: limit=%d, hasDesignBriefs=%s", (Object) limit, hasDesignBriefs);
 
         Map<String, Long> maxScoresBySource = trendQueryRepository.findMaxScoreBySource();
@@ -135,9 +140,9 @@ public class TrendQueryResolver {
         return summaries;
     }
 
-    @Authenticated
     @Query("trendHistory")
-    public List<TrendScore> getTrendHistory(String query, int days) {
+    public List<TrendScore> getTrendHistory(String query, int days) throws GraphQLException {
+        requireAuthentication();
         LOG.debugf("Fetching trend history: query=%s, days=%d", query, days);
         return trendQueryRepository.findScoresByQuery(query, days);
     }
@@ -147,6 +152,12 @@ public class TrendQueryResolver {
             return List.of();
         }
         return trendQueryRepository.findScoresByQueryId(trendQuery.id, limit, offset);
+    }
+
+    private void requireAuthentication() throws GraphQLException {
+        if (securityIdentity == null || securityIdentity.isAnonymous()) {
+            throw new GraphQLException("Authentication required");
+        }
     }
 
     private DesignBriefSummary toDesignBriefSummary(DesignBrief brief) {
