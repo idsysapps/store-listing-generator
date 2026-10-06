@@ -4,6 +4,7 @@ import com.trends.config.ImageStorageConfig;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefConnection;
+import com.trends.dto.DesignBriefOrderBy;
 import com.trends.dto.DesignBriefSummary;
 import com.trends.dto.PageInfo;
 import com.trends.event.CeleryTaskDispatcher;
@@ -49,7 +50,8 @@ public class DesignBriefResolver {
             String startDate, String endDate,
             Integer minConfidence, Integer maxConfidence,
             List<String> sourceSeeds, List<String> specificProducts,
-            String audienceContains, int limit, @DefaultValue("0") int offset) throws GraphQLException {
+            String audienceContains, int limit, @DefaultValue("0") int offset,
+            @DefaultValue("CREATED_AT_DESC") DesignBriefOrderBy orderBy) throws GraphQLException {
         requireAuthentication();
 
         int effectiveLimit = Math.max(0, Math.min(limit, MAX_LIMIT));
@@ -80,14 +82,16 @@ public class DesignBriefResolver {
                 || (sp != null && !sp.isEmpty())
                 || ac != null;
 
+        DesignBriefOrderBy effectiveOrderBy = orderBy != null ? orderBy : DesignBriefOrderBy.CREATED_AT_DESC;
+
         if (hasAdvancedFilters || (pt != null && bi != null) || pt != null || bi != null) {
             briefs = designBriefRepository.findWithFilters(
                     pt, bi, sd, ed, minConfidence, maxConfidence,
-                    ss, sp, ac, effectiveLimit, effectiveOffset);
+                    ss, sp, ac, effectiveLimit, effectiveOffset, effectiveOrderBy);
             totalCount = designBriefRepository.countWithFilters(
                     pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac);
         } else {
-            briefs = designBriefRepository.findRecentPaginated(effectiveLimit, effectiveOffset);
+            briefs = designBriefRepository.findRecentPaginated(effectiveLimit, effectiveOffset, effectiveOrderBy);
             totalCount = designBriefRepository.countAll();
         }
 
