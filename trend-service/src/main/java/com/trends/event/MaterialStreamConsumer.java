@@ -64,20 +64,20 @@ public class MaterialStreamConsumer {
             return;
         }
 
-        for (int s = 0; s < response.size(); s++) {
-            Response streamData = response.get(s);
-            Response entries = streamData.get(1);
+        Response entries = response.get(STREAM_KEY);
+        if (entries == null) {
+            return;
+        }
 
-            for (int e = 0; e < entries.size(); e++) {
-                Response entry = entries.get(e);
-                String messageId = entry.get(0).toString();
-                Response fields = entry.get(1);
+        for (int e = 0; e < entries.size(); e++) {
+            Response entry = entries.get(e);
+            String messageId = entry.get(0).toString();
+            Response fields = entry.get(1);
 
-                try {
-                    processMessage(messageId, fields);
-                } catch (Exception ex) {
-                    LOG.errorf(ex, "Failed to process message %s", messageId);
-                }
+            try {
+                processMessage(messageId, fields);
+            } catch (Exception ex) {
+                LOG.errorf(ex, "Failed to process message %s", messageId);
             }
         }
     }
@@ -168,12 +168,8 @@ public class MaterialStreamConsumer {
     }
 
     private String getField(Response fields, String fieldName) {
-        for (int i = 0; i < fields.size() - 1; i += 2) {
-            if (fieldName.equals(fields.get(i).toString())) {
-                return fields.get(i + 1).toString();
-            }
-        }
-        return null;
+        Response value = fields.get(fieldName);
+        return value != null ? value.toString() : null;
     }
 
     private void ackMessage(String messageId) {
