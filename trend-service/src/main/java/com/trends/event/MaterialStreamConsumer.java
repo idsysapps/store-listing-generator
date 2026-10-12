@@ -74,11 +74,16 @@ public class MaterialStreamConsumer {
             String messageId = entry.get(0).toString();
             Response fields = entry.get(1);
 
-            try {
-                processMessage(messageId, fields);
-            } catch (Exception ex) {
-                LOG.errorf(ex, "Failed to process message %s", messageId);
-            }
+            vertx.executeBlocking(() -> {
+                try {
+                    processMessage(messageId, fields);
+                } catch (Exception ex) {
+                    LOG.errorf(ex, "Failed to process message %s", messageId);
+                }
+                return null;
+            }).subscribe().with(
+                    v -> {},
+                    ex -> LOG.errorf(ex, "Failed to execute blocking for message %s", messageId));
         }
     }
 
