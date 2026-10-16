@@ -16,3 +16,10 @@ helm/values-local.yaml
 
 # OS
 .DS_Store
+
+# Claude Code / agent tooling
+# Keep personal settings and local worktrees out of the repo.
+# NOTE: a shared .claude/settings.json (team permissions/hooks) is meant to be
+# committed, so we ignore only the local/ ephemeral paths, not all of .claude/.
+.claude/settings.local.json
+.claude/worktrees/
