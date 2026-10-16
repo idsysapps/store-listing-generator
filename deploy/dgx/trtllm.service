@@ -1,0 +1,17 @@
+[Unit]
+Description=Triton TensorRT-LLM Inference Server
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/trtllm
+EnvironmentFile=/opt/trtllm/.env
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+ExecStopPost=-/usr/bin/docker stop triton-llm
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

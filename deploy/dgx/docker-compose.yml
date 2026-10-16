@@ -1,0 +1,142 @@
+services:
+  vllm-coder:
+    image: ghcr.io/timothystewart6/vllm-gb10:latest
+    container_name: vllm-coder
+    restart: unless-stopped
+    ipc: host
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - SAFETENSORS_FAST_GPU=1
+      - OMP_NUM_THREADS=10
+    command:
+      - "vllm"
+      - "serve"
+      - "nvidia/Qwen3-30B-A3B-NVFP4"
+      - "--host=0.0.0.0"
+      - "--port=8001"
+      - "--gpu-memory-utilization=0.30"
+      - "--max-model-len=16384"
+      - "--max-num-seqs=4"
+      - "--tensor-parallel-size=1"
+      - "--dtype=bfloat16"
+      - "--enforce-eager"
+      - "--trust-remote-code"
+      - "--enable-prefix-caching"
+      - "--served-model-name=qwen3_coder"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+
+  vllm-briefs:
+    image: ghcr.io/timothystewart6/vllm-gb10:latest
+    container_name: vllm-briefs
+    restart: unless-stopped
+    ipc: host
+    network_mode: host
+    depends_on:
+      vllm-coder:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - SAFETENSORS_FAST_GPU=1
+      - OMP_NUM_THREADS=10
+    command:
+      - "vllm"
+      - "serve"
+      - "nvidia/Qwen3-14B-NVFP4"
+      - "--host=0.0.0.0"
+      - "--port=8002"
+      - "--gpu-memory-utilization=0.30"
+      - "--max-model-len=16384"
+      - "--max-num-seqs=4"
+      - "--tensor-parallel-size=1"
+      - "--dtype=bfloat16"
+      - "--enforce-eager"
+      - "--trust-remote-code"
+      - "--enable-prefix-caching"
+      - "--served-model-name=qwen38_briefs"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+
+  comfyui:
+    image: comfyui-spark:latest
+    container_name: comfyui
+    restart: unless-stopped
+    init: true
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+    ipc: host
+    network_mode: host
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    depends_on:
+      vllm-briefs:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ${COMFYUI_DATA_PATH:-/opt/comfyui-data}:/data
+    environment:
+      - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+      - COMFYUI_ARGS=--disable-pinned-memory --use-pytorch-cross-attention --bf16-unet --bf16-vae --bf16-text-enc
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu130
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8188/system_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 300s
+
+  openai-proxy:
+    image: python:3.12-slim
+    container_name: vllm-proxy
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      vllm-coder:
+        condition: service_healthy
+      vllm-briefs:
+        condition: service_healthy
+    volumes:
+      - ./openai-proxy.py:/app/proxy.py:ro
+    command: ["python3", "/app/proxy.py"]
+
+volumes:
+  hf-cache:
