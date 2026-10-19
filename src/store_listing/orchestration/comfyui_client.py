@@ -22,7 +22,7 @@ from typing import Any, Self
 import httpx
 from PIL import Image, ImageFilter
 
-from store_listing.orchestration.chroma_key import punch_out_key_colour
+from store_listing.orchestration.chroma_key import despill_key_spill, punch_out_key_colour
 from store_listing.orchestration.comfyui_workflows import (
     build_birefnet_background_graph,
     build_flux_txt2img_graph,
@@ -238,6 +238,9 @@ class ComfyUIClient:
         # The model treats the enclosed counter of a letter as part of the
         # subject, so those pixels keep the background colour. Punch them out.
         result.image_bytes = punch_out_key_colour(result.image_bytes, image_bytes)
+        # ...and take the key colour back out of the soft edges, so they do not
+        # print with a coloured fringe.
+        result.image_bytes = despill_key_spill(result.image_bytes, image_bytes)
         return result
 
     def health(self) -> bool:

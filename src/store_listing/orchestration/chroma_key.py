@@ -20,7 +20,7 @@ from __future__ import annotations
 import io
 import logging
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,15 @@ logger = logging.getLogger(__name__)
 # above TOLERANCE_OUT it is fully opaque artwork.
 DEFAULT_TOLERANCE_IN = 25
 DEFAULT_TOLERANCE_OUT = 55
+
+# How close to the key colour a pixel has to be to count as the background.
+# Tight, so that a darker shade of the key in the artwork is not mistaken for
+# it.
+KEY_TOLERANCE = 20
+
+# How far the background may reach into the artwork's anti-aliased edge. Only
+# used to take the rim off the inside of a hole.
+GROW_TOLERANCE = 95
 
 # How many border pixels to sample when estimating the key colour.
 BORDER_SAMPLE_STEP = 4
@@ -164,20 +173,74 @@ def background_fraction(
     return close / len(pixels)
 
 
+def despill_key_spill(
+    rgba_bytes: bytes,
+    source_bytes: bytes,
+    *,
+    key_colour: tuple[int, int, int] | None = None,
+    strength: float = 1.0,
+) -> bytes:
+    """Remove the key colour's contribution from the partially transparent pixels.
+
+    A pixel on the edge of the artwork is a blend of the artwork and the key.
+    Subtracting the key's share of it stops the edges carrying a tint of the
+    background colour, which on a shirt shows up as a coloured fringe.
+
+    The correction is deliberately *not* divided back by the alpha. The alpha
+    comes from a segmentation matte, not from an exact mix fraction, so
+    dividing by it amplifies the error into nonsense colours. Subtracting only
+    the key's share is conservative: it can never over-correct.
+    """
+    with Image.open(io.BytesIO(source_bytes)) as opened:
+        source = opened.convert("RGB")
+    with Image.open(io.BytesIO(rgba_bytes)) as opened:
+        result = opened.convert("RGBA")
+
+    key = key_colour or estimate_key_colour(source)
+    width, height = result.size
+    rgb_values = result.convert("RGB").tobytes()
+    alpha_values = result.getchannel("A").tobytes()
+    out = bytearray(width * height * 4)
+    for index, value in enumerate(alpha_values):
+        source_base = index * 3
+        target_base = index * 4
+        out[target_base + 3] = value
+        if value == 0 or value == 255:
+            out[target_base] = rgb_values[source_base]
+            out[target_base + 1] = rgb_values[source_base + 1]
+            out[target_base + 2] = rgb_values[source_base + 2]
+            continue
+        share = (1 - value / 255) * strength
+        for channel in range(3):
+            corrected = rgb_values[source_base + channel] - share * key[channel]
+            out[target_base + channel] = max(0, min(255, int(corrected)))
+    despilled = Image.frombytes("RGBA", (width, height), bytes(out))
+    buffer = io.BytesIO()
+    despilled.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def punch_out_key_colour(
     rgba_bytes: bytes,
     source_bytes: bytes,
     *,
     key_colour: tuple[int, int, int] | None = None,
-    tolerance: int = DEFAULT_TOLERANCE_IN,
+    tolerance: int = KEY_TOLERANCE,
+    grow_tolerance: int = GROW_TOLERANCE,
+    grow_rounds: int = 2,
 ) -> bytes:
-    """Clear the alpha wherever the source pixel *is* the flat background colour.
+    """Clear the background out of the mask, holes included.
 
     A segmentation model treats the enclosed counter of a letter as part of the
-    subject, so those pixels keep the background colour and come out as dark
-    blobs. They are exactly the key colour, so they can be punched out - but
-    only exactly: the anti-aliased edge pixels are blends of the artwork and
-    the key, and punching them out would harden the edge.
+    subject, so those pixels keep the background colour. They are exactly the
+    key colour, so they can be punched out.
+
+    The counters are then found as *enclosed* regions of the key colour: the
+    background reachable from the edge of the image is the outer background,
+    and anything key-coloured that the edge cannot reach is a hole in the
+    artwork - a letter's counter. That distinction is what lets the
+    anti-aliased rim of a counter be removed without touching the outer edge
+    of the artwork, which looks identical pixel for pixel.
     """
     with Image.open(io.BytesIO(source_bytes)) as opened:
         source = opened.convert("RGB")
@@ -188,14 +251,55 @@ def punch_out_key_colour(
     distance = _distance_image(source, key)
 
     def is_key(value: int) -> int:
-        return 255 if value <= tolerance else 0
+        return 0 if value <= tolerance else 255
 
-    is_key_mask = distance.point(is_key)
+    # 0 = key coloured, 255 = artwork.
+    region = distance.point(is_key)
+    seed = _find_key_pixel_on_border(region)
+    if seed is not None:
+        # 128 = the key colour reachable from the edge, i.e. the outer background.
+        ImageDraw.floodfill(region, seed, 128, thresh=0)
 
+    def is_hole(value: int) -> int:
+        return 255 if value == 0 else 0
+
+    def is_outer(value: int) -> int:
+        return 255 if value == 128 else 0
+
+    hole = region.point(is_hole)
+    outer = region.point(is_outer)
+
+    def is_growable(value: int) -> int:
+        return 255 if value <= grow_tolerance else 0
+
+    growable = distance.point(is_growable)
+    for _ in range(max(0, grow_rounds)):
+        adjacent = hole.filter(ImageFilter.MaxFilter(3))
+        grown = ImageChops.multiply(adjacent, growable)
+        if grown.getbbox() is None:
+            break
+        hole = ImageChops.lighter(hole, grown)
+        growable = ImageChops.subtract(growable, grown)
+
+    background = ImageChops.lighter(hole, outer)
     alpha = result.getchannel("A")
-    combined = ImageChops.multiply(alpha, ImageChops.invert(is_key_mask))
-    result.putalpha(combined)
+    result.putalpha(ImageChops.multiply(alpha, ImageChops.invert(background)))
 
     buffer = io.BytesIO()
     result.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _find_key_pixel_on_border(region: Image.Image) -> tuple[int, int] | None:
+    """A key-coloured pixel on the edge of the image, to flood the background from."""
+    width, height = region.size
+    values = region.tobytes()
+    for x in range(width):
+        for y in (0, height - 1):
+            if values[y * width + x] == 0:
+                return (x, y)
+    for y in range(height):
+        for x in (0, width - 1):
+            if values[y * width + x] == 0:
+                return (x, y)
+    return None
