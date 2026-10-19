@@ -10,7 +10,10 @@ echo "==> Setting up DGX vLLM + ComfyUI stack"
 echo "==> Creating directories"
 sudo mkdir -p "$INSTALL_DIR"
 sudo mkdir -p "$COMFYUI_DATA"/{models,custom_nodes,output,input}
-sudo mkdir -p "$COMFYUI_DATA"/models/{checkpoints,clip,vae,unet,loras}
+sudo mkdir -p "$COMFYUI_DATA"/models/{checkpoints,diffusion_models,text_encoders,vae,background_removal,loras}
+# Legacy folder names - the ComfyUI build scans these as aliases for
+# diffusion_models (unet) and text_encoders (clip).
+sudo mkdir -p "$COMFYUI_DATA"/models/{unet,clip}
 
 echo "==> Copying config files"
 sudo cp docker-compose.yml "$INSTALL_DIR/"
