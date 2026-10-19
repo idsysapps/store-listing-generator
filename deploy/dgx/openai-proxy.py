@@ -24,31 +24,19 @@ from typing import Any
 PORT = 9000
 
 MODEL_ROUTES: dict[str, str] = {
-    "granite_coder": "http://localhost:8001",
     "qwen38_briefs": "http://localhost:8002",
     # Vision model used to verify the text rendered into a generated image.
     "qwen_vl_ocr": "http://localhost:8003",
 }
 
-DEFAULT_MODEL = "granite_coder"
+DEFAULT_MODEL = "qwen38_briefs"
 MAX_COMPLETION_TOKENS = 16384
-
-
-GRANITE_DEFAULTS: dict[str, float] = {
-    "temperature": 1.0,
-    "top_p": 0.95,
-}
 
 
 def _clamp_tokens(body: dict) -> dict:
     for key in ("max_completion_tokens", "max_tokens"):
         if isinstance(body.get(key), int) and body[key] > MAX_COMPLETION_TOKENS:
             body[key] = MAX_COMPLETION_TOKENS
-    model = body.get("model", DEFAULT_MODEL)
-    if "granite" in model:
-        for key, val in GRANITE_DEFAULTS.items():
-            if key not in body:
-                body[key] = val
     return body
 
 

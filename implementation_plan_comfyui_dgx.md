@@ -19,6 +19,7 @@ to have run in production.
 | `ImageResult` keeps four fields | A fifth field, `background_removed`, was added so the pipeline can tell a real transparent PNG from a background-removal fallback. |
 | ComfyUI needs a restart to pick up models | It does not — 0.37.1 resolves the model enums per request. A restart is not required. |
 | Vision model on `sm_121` is a risk | `Qwen2.5-VL-7B-Instruct` in `bfloat16` is configured in `deploy/dgx/docker-compose.yml`; fp8 is deliberately not used. |
+| Three vLLM services (coder, briefs, vision) | The **coder** service (`granite-4.2-8b`, `:8001`) was removed — it was not used by the application and its 30 % GPU reservation is better spent on ComfyUI. The proxy now routes `qwen38_briefs` and `qwen_vl_ocr` only, and `qwen38_briefs` is the default model. |
 
 
 ---

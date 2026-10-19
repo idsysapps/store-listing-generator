@@ -48,7 +48,7 @@ fi
 echo "==> Stopping old services"
 sudo systemctl stop ollama.service 2>/dev/null || true
 sudo systemctl disable ollama.service 2>/dev/null || true
-sudo docker stop vllm-coder vllm-briefs comfyui vllm-proxy 2>/dev/null || true
+sudo docker stop vllm-briefs vllm-vision comfyui vllm-proxy 2>/dev/null || true
 
 echo "==> Starting vLLM + ComfyUI stack"
 cd "$INSTALL_DIR"
@@ -60,9 +60,9 @@ echo "==> Stack starting. First run may take several minutes for model downloads
 echo "    Monitor: sudo docker compose -f $INSTALL_DIR/docker-compose.yml logs -f"
 echo ""
 echo "    Services:"
-echo "      vllm-coder   (port 8001) - Qwen3-30B-A3B NVFP4"
-echo "      vllm-briefs  (port 8002) - Qwen3-14B NVFP4"
-echo "      comfyui      (port 8188) - Flux Schnell"
+echo "      vllm-briefs  (port 8002) - Qwen3-14B (design briefs)"
+echo "      vllm-vision  (port 8003) - Qwen2.5-VL-7B (image text validation)"
+echo "      comfyui      (port 8188) - Flux Schnell + BiRefNet"
 echo "      openai-proxy (port 9000) - Unified routing"
 echo ""
 echo "    Test:"

@@ -16,7 +16,7 @@ must be built natively on the DGX before first use.
 1. Clones [slangevi/comfyui-spark](https://github.com/slangevi/comfyui-spark) to `/opt/comfyui-build/`
 2. Builds `comfyui-spark:latest` Docker image (~15GB, takes ~10 min)
 3. Copies docker-compose.yml and openai-proxy.py to `/opt/trtllm/`
-4. Starts all services (vLLM coder, vLLM briefs, vLLM vision, ComfyUI, proxy)
+4. Starts all services (vLLM briefs, vLLM vision, ComfyUI, proxy)
 
 ## Model Directory
 
@@ -84,13 +84,12 @@ reliably supported in fp8.
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| vllm-coder | 8001 | `granite-4.2-8b` — code and tool-calling model |
 | vllm-briefs | 8002 | `Qwen3-14B` — design brief generation |
 | vllm-vision | 8003 | `Qwen2.5-VL-7B-Instruct` — reads the text back out of a generated image |
 | comfyui | 8188 | Flux Schnell + BiRefNet image generation |
-| openai-proxy | 9000 | Unified LLM routing (`granite_coder`, `qwen38_briefs`, `qwen_vl_ocr`) |
+| openai-proxy | 9000 | Unified LLM routing (`qwen38_briefs`, `qwen_vl_ocr`) |
 
-The openai-proxy exposes all three models over one OpenAI-compatible endpoint at
+The openai-proxy exposes both models over one OpenAI-compatible endpoint at
 `:9000`, so the application only needs a single base URL.
 
 ## GPU Memory Budget
@@ -99,13 +98,14 @@ GB10 has 128 GB of unified memory shared by every service:
 
 | Service | `--gpu-memory-utilization` |
 |---------|---------------------------|
-| vllm-coder | 0.30 |
 | vllm-briefs | 0.20 |
 | vllm-vision | 0.15 |
 | ComfyUI | takes the remainder (~23 GB for Flux + BiRefNet) |
 
-If ComfyUI runs out of memory, lower `vllm-vision` to `0.10` or unload the
-briefs model while images are being generated.
+The coder service was removed, so roughly 30 % of the unified memory is now
+available to ComfyUI. If ComfyUI still runs out of memory, raise
+`vllm-briefs` to `0.30` and `vllm-vision` to `0.20` and re-check
+`nvidia-smi` on the host.
 
 ## Alternative Images
 
