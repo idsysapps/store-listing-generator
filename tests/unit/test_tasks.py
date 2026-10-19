@@ -23,6 +23,7 @@ def _run_task(
     task_name: str,
     env: dict[str, str],
     args: tuple[object, ...] = (),
+    unset: tuple[str, ...] = (),
 ) -> tuple[MagicMock, MagicMock]:
     """Run an image task with the pipeline and boto3 patched out."""
     pipeline = MagicMock()
@@ -33,6 +34,8 @@ def _run_task(
         patch("store_listing.orchestration.image_pipeline.generate_image_for_brief", pipeline),
         patch("boto3.client", boto_client),
     ):
+        for key in unset:
+            os.environ.pop(key, None)
         getattr(tasks, task_name).run(*args)
     return pipeline, boto_client
 
@@ -49,8 +52,9 @@ class TestGenerateDesignImagesTask:
         assert client.base_url == "http://dgx.local:8188"
 
     def test_defaults_to_localhost(self, tasks) -> None:
-        env = {key: value for key, value in os.environ.items() if key != "COMFYUI_BASE_URL"}
-        pipeline, _ = _run_task(tasks, "generate_design_images_task", env)
+        pipeline, _ = _run_task(
+            tasks, "generate_design_images_task", {}, unset=("COMFYUI_BASE_URL",)
+        )
 
         client = pipeline.call_args.kwargs["comfyui_client"]
         assert client.base_url == "http://localhost:8188"
