@@ -190,6 +190,12 @@ spec:
               value: {{ .Values.config.comfyuiBaseUrl | default "http://comfyui:8188" | quote }}
             - name: COMFYUI_TIMEOUT_SECONDS
               value: {{ .Values.config.comfyuiTimeoutSeconds | default "300" | quote }}
+            - name: COMFYUI_BG_ALPHA_BLACK
+              value: {{ .Values.config.comfyuiBgAlphaBlack | default "24" | quote }}
+            - name: COMFYUI_BG_ALPHA_WHITE
+              value: {{ .Values.config.comfyuiBgAlphaWhite | default "240" | quote }}
+            - name: COMFYUI_BG_ERODE_PIXELS
+              value: {{ .Values.config.comfyuiBgErodePixels | default "1" | quote }}
             - name: VISION_LLM_BASE_URL
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL
@@ -384,6 +390,12 @@ spec:
               value: {{ .Values.config.comfyuiBaseUrl | default "http://comfyui:8188" | quote }}
             - name: COMFYUI_TIMEOUT_SECONDS
               value: {{ .Values.config.comfyuiTimeoutSeconds | default "300" | quote }}
+            - name: COMFYUI_BG_ALPHA_BLACK
+              value: {{ .Values.config.comfyuiBgAlphaBlack | default "24" | quote }}
+            - name: COMFYUI_BG_ALPHA_WHITE
+              value: {{ .Values.config.comfyuiBgAlphaWhite | default "240" | quote }}
+            - name: COMFYUI_BG_ERODE_PIXELS
+              value: {{ .Values.config.comfyuiBgErodePixels | default "1" | quote }}
             - name: VISION_LLM_BASE_URL
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL

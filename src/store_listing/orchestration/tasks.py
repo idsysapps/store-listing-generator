@@ -459,6 +459,9 @@ def generate_design_images_task() -> dict:
         clip_name2=os.environ.get("COMFYUI_CLIP_NAME2", "clip_l.safetensors"),
         vae_name=os.environ.get("COMFYUI_VAE_NAME", "ae.safetensors"),
         bg_model_name=os.environ.get("COMFYUI_BG_MODEL_NAME") or None,
+        alpha_black_point=int(os.environ.get("COMFYUI_BG_ALPHA_BLACK", "24")),
+        alpha_white_point=int(os.environ.get("COMFYUI_BG_ALPHA_WHITE", "240")),
+        alpha_erode_pixels=int(os.environ.get("COMFYUI_BG_ERODE_PIXELS", "1")),
     )
     text_validator = TextValidator(
         client=get_vision_client(),
@@ -501,6 +504,9 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         clip_name2=os.environ.get("COMFYUI_CLIP_NAME2", "clip_l.safetensors"),
         vae_name=os.environ.get("COMFYUI_VAE_NAME", "ae.safetensors"),
         bg_model_name=os.environ.get("COMFYUI_BG_MODEL_NAME") or None,
+        alpha_black_point=int(os.environ.get("COMFYUI_BG_ALPHA_BLACK", "24")),
+        alpha_white_point=int(os.environ.get("COMFYUI_BG_ALPHA_WHITE", "240")),
+        alpha_erode_pixels=int(os.environ.get("COMFYUI_BG_ERODE_PIXELS", "1")),
     )
     text_validator = TextValidator(
         client=get_vision_client(),

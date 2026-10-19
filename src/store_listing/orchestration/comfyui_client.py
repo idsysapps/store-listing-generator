@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Self
 
 import httpx
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from store_listing.orchestration.comfyui_workflows import (
     build_birefnet_background_graph,
@@ -40,6 +40,11 @@ DEFAULT_VAE_NAME = "ae.safetensors"
 
 CALIBRATION_SIZE = 256
 CALIBRATION_SUBJECT_FRACTION = 0.5
+
+# Alpha cleanup applied to the background removal result.
+ALPHA_BLACK_POINT = 24
+ALPHA_WHITE_POINT = 240
+ALPHA_ERODE_PIXELS = 1
 
 
 def _build_calibration_image() -> bytes:
@@ -91,6 +96,36 @@ def _invert_alpha(rgba_bytes: bytes) -> bytes:
     return buffer.getvalue()
 
 
+def _clean_alpha(
+    rgba_bytes: bytes,
+    *,
+    black: int = ALPHA_BLACK_POINT,
+    white: int = ALPHA_WHITE_POINT,
+    erode: int = ALPHA_ERODE_PIXELS,
+) -> bytes:
+    """Strip the residual background haze and the dark halo around the subject.
+
+    The mask the background removal model returns is soft in two ways: a faint
+    haze over the whole background, and a one or two pixel band at the
+    silhouette whose colour is still blended with the original background.
+    Printed onto a shirt, that band shows up as a dark outline around the
+    design. Stretching the alpha channel drops the haze, and eroding it by a
+    pixel pulls the cut inside the subject so the edge pixels carry the
+    subject's own colour rather than the background's.
+    """
+    with Image.open(io.BytesIO(rgba_bytes)) as opened:
+        image = opened.convert("RGBA")
+        alpha = image.getchannel("A")
+        table = [min(255, max(0, (value - black) * 255 // (white - black))) for value in range(256)]
+        alpha = alpha.point(table)
+        if erode > 0:
+            alpha = alpha.filter(ImageFilter.MinFilter(2 * erode + 1))
+        image.putalpha(alpha)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 class ComfyUIError(Exception):
     """Raised when ComfyUI rejects a request or a workflow fails to execute."""
 
@@ -120,6 +155,9 @@ class ComfyUIClient:
         clip_name2: str = DEFAULT_CLIP_NAME2,
         vae_name: str = DEFAULT_VAE_NAME,
         bg_model_name: str | None = None,
+        alpha_black_point: int = ALPHA_BLACK_POINT,
+        alpha_white_point: int = ALPHA_WHITE_POINT,
+        alpha_erode_pixels: int = ALPHA_ERODE_PIXELS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
@@ -134,6 +172,9 @@ class ComfyUIClient:
         self._bg_model_name = bg_model_name
         self._discovered_bg_model: str | None = None
         self._invert_alpha: bool | None = None
+        self._alpha_black_point = alpha_black_point
+        self._alpha_white_point = alpha_white_point
+        self._alpha_erode_pixels = alpha_erode_pixels
 
     def close(self) -> None:
         """Close the underlying HTTP client, if this instance created it."""
@@ -198,8 +239,15 @@ class ComfyUIClient:
             bg_model_name=model_name,
         )
         result = self._run_graph(graph)
-        if result.image_bytes is not None and invert:
-            result.image_bytes = _invert_alpha(result.image_bytes)
+        if result.image_bytes is not None:
+            if invert:
+                result.image_bytes = _invert_alpha(result.image_bytes)
+            result.image_bytes = _clean_alpha(
+                result.image_bytes,
+                black=self._alpha_black_point,
+                white=self._alpha_white_point,
+                erode=self._alpha_erode_pixels,
+            )
         return result
 
     def health(self) -> bool:

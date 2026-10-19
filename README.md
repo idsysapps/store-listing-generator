@@ -273,6 +273,9 @@ Ideogram text routing and the AWS Bedrock image calls have been removed.
 | `COMFYUI_CLIP_NAME2` | `clip_l.safetensors` | CLIP-L text encoder |
 | `COMFYUI_VAE_NAME` | `ae.safetensors` | Flux VAE |
 | `COMFYUI_BG_MODEL_NAME` | (auto-discovered) | BiRefNet background removal model; discovered from the server when unset |
+| `COMFYUI_BG_ALPHA_BLACK` | `24` | Alpha black point for the cut-out; clears the residual background haze |
+| `COMFYUI_BG_ALPHA_WHITE` | `240` | Alpha white point for the cut-out |
+| `COMFYUI_BG_ERODE_PIXELS` | `1` | Pixels the cut-out is eroded by, to drop the dark halo around the subject |
 | `VISION_LLM_BASE_URL` | `LLM_BASE_URL` | OpenAI-compatible base URL for the vision model (the DGX proxy) |
 | `VISION_LLM_MODEL` | `qwen_vl_ocr` | Vision model name |
 | `VISION_LLM_API_KEY` | `LLM_API_KEY` | Usually a dummy for a local proxy |

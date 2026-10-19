@@ -15,6 +15,7 @@ from store_listing.orchestration.comfyui_client import (
     ComfyUIError,
     _alpha_polarity_is_inverted,
     _build_calibration_image,
+    _clean_alpha,
     _invert_alpha,
 )
 
@@ -257,6 +258,69 @@ class TestRemoveBackground:
 
         assert content_types
         assert content_types[0].startswith("multipart/form-data")
+
+
+class TestCleanAlpha:
+    def _rgba(self, pixels: dict[tuple[int, int], int], size: int = 8) -> bytes:
+        image = Image.new("RGBA", (size, size), (10, 20, 30, 0))
+        for (x, y), alpha in pixels.items():
+            image.putpixel((x, y), (10, 20, 30, alpha))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def test_removes_the_faint_haze_over_the_background(self) -> None:
+        cleaned = Image.open(
+            io.BytesIO(_clean_alpha(self._rgba({(0, 0): 10, (7, 7): 10})))
+        ).convert("RGBA")
+        assert _alpha_at(cleaned, 0, 0) == 0
+        assert _alpha_at(cleaned, 7, 7) == 0
+
+    def test_keeps_the_subject_fully_opaque(self) -> None:
+        pixels: dict[tuple[int, int], int] = {}
+        for x in range(2, 6):
+            for y in range(2, 6):
+                pixels[(x, y)] = 255
+        cleaned = Image.open(io.BytesIO(_clean_alpha(self._rgba(pixels)))).convert("RGBA")
+        assert _alpha_at(cleaned, 3, 3) == 255
+
+    def test_leaves_the_colour_channels_alone(self) -> None:
+        cleaned = Image.open(io.BytesIO(_clean_alpha(self._rgba({(0, 0): 255})))).convert("RGBA")
+        assert cleaned.crop((0, 0, 1, 1)).tobytes()[:3] == bytes((10, 20, 30))
+
+    def test_erodes_the_soft_edge_so_the_cut_falls_inside_the_subject(self) -> None:
+        # A 4x4 solid block of alpha 255 in an 8x8 canvas, with one ring of
+        # half-transparent pixels around it.
+        pixels: dict[tuple[int, int], int] = {}
+        for x in range(2, 6):
+            for y in range(2, 6):
+                pixels[(x, y)] = 255
+        for x in range(1, 7):
+            for y in (1, 6):
+                pixels[(x, y)] = 128
+        for y in range(1, 7):
+            for x in (1, 6):
+                pixels[(x, y)] = 128
+
+        cleaned = Image.open(io.BytesIO(_clean_alpha(self._rgba(pixels)))).convert("RGBA")
+
+        # the half-transparent ring is gone
+        assert _alpha_at(cleaned, 1, 1) == 0
+        # and the solid core survives
+        assert _alpha_at(cleaned, 3, 3) == 255
+
+    def test_erosion_can_be_disabled(self) -> None:
+        pixels: dict[tuple[int, int], int] = {}
+        for x in range(2, 6):
+            for y in range(2, 6):
+                pixels[(x, y)] = 255
+        for x in range(1, 7):
+            for y in (1, 6):
+                pixels[(x, y)] = 128
+
+        cleaned = Image.open(io.BytesIO(_clean_alpha(self._rgba(pixels), erode=0))).convert("RGBA")
+
+        assert _alpha_at(cleaned, 1, 1) > 0
 
 
 class TestBackgroundModelDiscovery:
