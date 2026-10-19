@@ -22,6 +22,15 @@ config:
   awsDefaultRegion: "us-west-2"
   s3EndpointUrl: ""
   designS3Bucket: "store-listing-designs"
+  comfyuiBaseUrl: "http://comfyui:8188"
+  comfyuiTimeoutSeconds: "300"
+  comfyuiBgAlphaBlack: "24"
+  comfyuiBgAlphaWhite: "240"
+  comfyuiBgErodePixels: "1"
+  visionLlmBaseUrl: ""
+  visionLlmModel: "qwen_vl_ocr"
+  textMatchThreshold: "0.85"
+  maxTextRegenerationAttempts: "2"
 
 secrets:
   databaseUser: store_listing
@@ -37,9 +46,7 @@ secrets:
   llmApiKey: ""
   awsAccessKeyId: ""
   awsSecretAccessKey: ""
-  bedrockAccessKeyId: ""
-  bedrockSecretAccessKey: ""
-  leonardoApiKey: ""
+  visionLlmApiKey: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest

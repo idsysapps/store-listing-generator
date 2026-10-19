@@ -257,6 +257,41 @@ store-listing-generator/
 | `GITHUB_TOKEN` | (empty) | Token used to open auto-health issues (requires `GITHUB_REPO` too) |
 | `GITHUB_REPO` | (empty) | `owner/repo` to file auto-health issues against |
 
+### Image generation (ComfyUI on the DGX)
+
+Design brief images are rendered by **ComfyUI + Flux Schnell** on the DGX Spark and
+verified with a vision model before they are uploaded to S3. Leonardo.ai, the
+Ideogram text routing and the AWS Bedrock image calls have been removed.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COMFYUI_BASE_URL` | `http://localhost:8188` | ComfyUI on the DGX |
+| `COMFYUI_TIMEOUT_SECONDS` | `300` | Per-workflow wall-clock limit |
+| `COMFYUI_POLL_INTERVAL_SECONDS` | `1.0` | How often the workflow history is polled |
+| `COMFYUI_UNET_NAME` | `flux1-schnell.safetensors` | Flux diffusion model |
+| `COMFYUI_CLIP_NAME1` | `t5xxl_fp8_e4m3fn.safetensors` | T5-XXL text encoder |
+| `COMFYUI_CLIP_NAME2` | `clip_l.safetensors` | CLIP-L text encoder |
+| `COMFYUI_VAE_NAME` | `ae.safetensors` | Flux VAE |
+| `COMFYUI_BG_MODEL_NAME` | (auto-discovered) | BiRefNet background removal model; discovered from the server when unset |
+| `COMFYUI_BG_ALPHA_BLACK` | `24` | Alpha black point for the cut-out; clears the residual background haze |
+| `COMFYUI_BG_ALPHA_WHITE` | `240` | Alpha white point for the cut-out |
+| `COMFYUI_BG_ERODE_PIXELS` | `1` | Pixels the cut-out is eroded by, to drop the dark halo around the subject |
+| `VISION_LLM_BASE_URL` | `LLM_BASE_URL` | OpenAI-compatible base URL for the vision model (the DGX proxy) |
+| `VISION_LLM_MODEL` | `qwen_vl_ocr` | Vision model name |
+| `VISION_LLM_API_KEY` | `LLM_API_KEY` | Usually a dummy for a local proxy |
+| `TEXT_MATCH_THRESHOLD` | `0.85` | Similarity threshold for the rendered text to count as a match |
+| `MAX_TEXT_REGENERATION_ATTEMPTS` | `2` | Retries after a text mismatch (3 generations max) |
+
+The OCR gate **fails closed**: when the text rendered into the image cannot be
+verified within the retry budget, the image is not uploaded and the brief is
+counted as an error.
+
+`dtf_apparel` designs are rendered on a flat saturated magenta background that is
+keyed out to produce the transparent PNG, so white artwork and white text stay
+visible. The `sublimation` and `sticker_vinyl` designs are printed full-bleed on
+white paper. The DGX side is documented in
+[`deploy/dgx/COMFYUI_SETUP.md`](deploy/dgx/COMFYUI_SETUP.md).
+
 ## Source Health & Free-Path-First Harvesting
 
 Each scheduled harvest task records an outcome (`success` / `failure` / `empty`)

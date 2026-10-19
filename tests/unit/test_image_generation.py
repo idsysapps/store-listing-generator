@@ -1,25 +1,20 @@
-"""Tests for Bedrock-based image generation from design briefs."""
+"""Tests for ComfyUI/Flux image generation from design briefs."""
 
 from __future__ import annotations
 
-import base64
-import json
 from typing import Any
 from unittest.mock import MagicMock
 
+from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.image_generation import (
-    REMOVE_BG_MODEL_ID,
-    ImageResult,
-    build_ideogram_prompt,
-    build_prompt_from_brief,
+    build_flux_prompt,
     generate_image,
-    remove_background,
 )
 
 
 def _make_brief(**overrides: Any) -> DesignBrief:
-    defaults = {
+    defaults: dict[str, Any] = {
         "concept": "Skeleton doing yoga poses",
         "product_type": "dtf_apparel",
         "specific_products": ["t-shirt", "hoodie"],
@@ -33,370 +28,231 @@ def _make_brief(**overrides: Any) -> DesignBrief:
     return DesignBrief(**defaults)
 
 
-class TestBuildPromptFromBrief:
-    def test_includes_visual_style(self) -> None:
-        brief = _make_brief(visual_style="Watercolor pastel, soft pink and blue tones")
-        prompt = build_prompt_from_brief(brief)
-        assert "Watercolor pastel" in prompt
+def _client(image_bytes: bytes | None = b"\x89PNG\r\n\x1a\n", **kwargs: Any) -> MagicMock:
+    client = MagicMock()
+    client.generate_image.return_value = ComfyUIResult(image_bytes=image_bytes, prompt_id="p1")
+    client.remove_background.return_value = ComfyUIResult(
+        image_bytes=b"transparent", prompt_id="p2"
+    )
+    for key, value in kwargs.items():
+        setattr(client, key, value)
+    return client
 
-    def test_includes_product_context(self) -> None:
-        brief = _make_brief(product_type="dtf_apparel")
-        prompt = build_prompt_from_brief(brief)
+
+class TestBuildFluxPrompt:
+    def test_full_bleed_includes_the_scene_style_and_product_context(self) -> None:
+        brief = _make_brief(
+            layout_type="full_bleed",
+            headline_text=None,
+            tagline_text=None,
+            scene_description="a skeleton doing yoga on a beach towel",
+        )
+        prompt = build_flux_prompt(brief)
+
+        assert "a skeleton doing yoga on a beach towel" in prompt
+        assert "Retro vintage" in prompt
         assert "DTF" in prompt
 
-    def test_no_text_instruction_in_prompt(self) -> None:
-        brief = _make_brief(headline_text="SPOOKY SEASON")
-        prompt = build_prompt_from_brief(brief)
-        assert "SPOOKY SEASON" not in prompt
+    def test_full_bleed_explicitly_excludes_lettering(self) -> None:
+        brief = _make_brief(layout_type="full_bleed", headline_text=None, tagline_text=None)
+        prompt = build_flux_prompt(brief)
+
         assert "do not include any text or lettering" in prompt.lower()
 
-    def test_no_text_instruction_even_with_tagline(self) -> None:
-        brief = _make_brief(headline_text="Born To Be", tagline_text="Spooky")
-        prompt = build_prompt_from_brief(brief)
-        assert "Born To Be" not in prompt
-        assert "Spooky" not in prompt
-
-    def test_regeneration_feedback_appended_to_prompt(self) -> None:
-        brief = _make_brief(regeneration_feedback="make the skeleton more cartoonish")
-        prompt = build_prompt_from_brief(brief)
-        assert "make the skeleton more cartoonish" in prompt
-
-    def test_no_feedback_section_when_feedback_is_none(self) -> None:
-        brief = _make_brief(regeneration_feedback=None)
-        prompt = build_prompt_from_brief(brief)
-        assert "creative direction" not in prompt.lower()
-
-    def test_ends_with_do_not_draw_anything_else(self) -> None:
-        brief = _make_brief()
-        prompt = build_prompt_from_brief(brief)
-        assert "Do not draw anything else." in prompt
-
-    def test_includes_no_text_instruction(self) -> None:
-        brief = _make_brief()
-        prompt = build_prompt_from_brief(brief)
-        assert "Do not include any text or lettering." in prompt
-
-    def test_scene_description_used_instead_of_concept(self) -> None:
+    def test_full_bleed_does_not_contain_the_headline(self) -> None:
         brief = _make_brief(
-            concept="This Meeting Could Have Been An Email - Skeleton Edition",
-            headline_text="STILL IN THIS MEETING",
-            scene_description="a skeleton sitting at an office desk holding coffee",
+            layout_type="full_bleed",
+            headline_text="SPOOKY SEASON",
+            tagline_text="TRICK OR TREAT",
         )
-        prompt = build_prompt_from_brief(brief)
-        assert "skeleton sitting at an office desk" in prompt
-        assert "This Meeting Could Have Been An Email" not in prompt
+        prompt = build_flux_prompt(brief)
 
-    def test_falls_back_to_concept_when_scene_description_is_none(self) -> None:
+        assert "SPOOKY SEASON" not in prompt
+        assert "TRICK OR TREAT" not in prompt
+
+    def test_text_top_includes_the_quoted_headline_and_colour(self) -> None:
         brief = _make_brief(
-            concept="Skeleton doing yoga poses",
-            headline_text="NAMASTE",
-            scene_description=None,
-        )
-        prompt = build_prompt_from_brief(brief)
-        assert "Skeleton doing yoga poses" in prompt
-
-    def test_prompt_under_80_words(self) -> None:
-        brief = _make_brief(
-            concept="Skeleton Meeting",
-            headline_text="STILL IN THIS MEETING",
-            scene_description="a skeleton at an office desk holding coffee",
-            visual_style="retro vintage",
-        )
-        prompt = build_prompt_from_brief(brief)
-        word_count = len(prompt.split())
-        assert word_count < 80, f"Prompt has {word_count} words: {prompt}"
-
-    def test_dtf_apparel_prompt_mentions_white_background(self) -> None:
-        brief = _make_brief(product_type="dtf_apparel")
-        prompt = build_prompt_from_brief(brief)
-        assert "white background" in prompt.lower()
-
-    def test_sublimation_prompt_mentions_sublimation(self) -> None:
-        brief = _make_brief(product_type="sublimation")
-        prompt = build_prompt_from_brief(brief)
-        assert "sublimation" in prompt.lower()
-
-
-class TestBuildIdeogramPrompt:
-    def test_includes_headline_text_in_prompt(self) -> None:
-        brief = _make_brief(
-            headline_text="STILL IN THIS MEETING",
-            scene_description="a skeleton at an office desk holding coffee",
-        )
-        prompt = build_ideogram_prompt(brief)
-        assert "STILL IN THIS MEETING" in prompt
-
-    def test_includes_tagline_text_in_prompt(self) -> None:
-        brief = _make_brief(
-            headline_text="BORN TO BE",
-            tagline_text="SPOOKY",
-            scene_description="a skeleton on a birthday cake",
-        )
-        prompt = build_ideogram_prompt(brief)
-        assert "SPOOKY" in prompt
-
-    def test_includes_font_color_instruction(self) -> None:
-        brief = _make_brief(
-            headline_text="TEST",
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            tagline_text=None,
             font_color="#FF8C42",
-            scene_description="a skeleton waving",
         )
-        prompt = build_ideogram_prompt(brief)
-        assert "#FF8C42" in prompt
+        prompt = build_flux_prompt(brief)
 
-    def test_defaults_to_black_when_no_font_color(self) -> None:
+        assert 'Bold text reading "SPOOKY SEASON"' in prompt
+        assert "#FF8C42" in prompt
+        assert "at the top" in prompt
+
+    def test_text_top_does_not_contain_the_tagline(self) -> None:
         brief = _make_brief(
-            headline_text="TEST",
-            font_color=None,
-            scene_description="a skeleton waving",
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            tagline_text="TRICK OR TREAT",
         )
-        prompt = build_ideogram_prompt(brief)
+        prompt = build_flux_prompt(brief)
+
+        assert "TRICK OR TREAT" not in prompt
+
+    def test_text_top_bottom_includes_both_strings(self) -> None:
+        brief = _make_brief(
+            layout_type="text_top_bottom",
+            headline_text="SPOOKY SEASON",
+            tagline_text="TRICK OR TREAT",
+            font_color="#FFFFFF",
+        )
+        prompt = build_flux_prompt(brief)
+
+        assert 'Bold text reading "SPOOKY SEASON"' in prompt
+        assert 'Text reading "TRICK OR TREAT"' in prompt
+        assert "at the top" in prompt
+        assert "at the bottom" in prompt
+
+    def test_font_colour_defaults_to_black(self) -> None:
+        brief = _make_brief(
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            font_color=None,
+        )
+        prompt = build_flux_prompt(brief)
+
         assert "#000000" in prompt
 
-    def test_includes_scene_description(self) -> None:
-        brief = _make_brief(
-            headline_text="HELLO",
-            scene_description="a skeleton riding a skateboard",
-        )
-        prompt = build_ideogram_prompt(brief)
-        assert "skeleton riding a skateboard" in prompt
-
-    def test_headline_before_scene_in_prompt(self) -> None:
-        brief = _make_brief(
-            headline_text="TOP TEXT",
-            scene_description="a skeleton dancing",
-        )
-        prompt = build_ideogram_prompt(brief)
-        headline_pos = prompt.index("TOP TEXT")
-        scene_pos = prompt.index("skeleton dancing")
-        assert headline_pos < scene_pos
-
-    def test_tagline_after_scene_in_prompt(self) -> None:
-        brief = _make_brief(
-            headline_text="TOP",
-            tagline_text="BOTTOM",
-            scene_description="a skeleton dancing",
-        )
-        prompt = build_ideogram_prompt(brief)
-        scene_pos = prompt.index("skeleton dancing")
-        tagline_pos = prompt.index("BOTTOM")
-        assert tagline_pos > scene_pos
-
-    def test_includes_product_context(self) -> None:
+    def test_a_white_font_colour_is_kept_for_dtf_apparel(self) -> None:
+        # The dtf background is magenta and is removed before printing, so
+        # white text is visible.
         brief = _make_brief(
             product_type="dtf_apparel",
-            headline_text="TEST",
-            scene_description="a skeleton waving",
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            font_color="#FFFFFF",
         )
-        prompt = build_ideogram_prompt(brief)
-        assert "DTF" in prompt
+        prompt = build_flux_prompt(brief)
 
-    def test_ends_with_do_not_draw_anything_else(self) -> None:
+        assert "#FFFFFF" in prompt
+
+    def test_a_white_font_colour_falls_back_to_black_on_a_white_background(self) -> None:
+        # The print-through product types keep their white background, so
+        # white text on it would be invisible.
         brief = _make_brief(
-            headline_text="TEST",
-            scene_description="a skeleton waving",
+            product_type="sublimation",
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            font_color="#FFFFFF",
         )
-        prompt = build_ideogram_prompt(brief)
+        prompt = build_flux_prompt(brief)
+
+        assert "#FFFFFF" not in prompt
+        assert "#000000" in prompt
+
+    def test_a_near_white_font_colour_falls_back_to_black(self) -> None:
+        brief = _make_brief(
+            product_type="sublimation",
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            font_color="#F5F5F0",
+        )
+        prompt = build_flux_prompt(brief)
+
+        assert "#F5F5F0" not in prompt
+        assert "#000000" in prompt
+
+    def test_regeneration_feedback_is_appended(self) -> None:
+        brief = _make_brief(
+            layout_type="full_bleed",
+            headline_text=None,
+            regeneration_feedback="more vibrant colors please",
+        )
+        prompt = build_flux_prompt(brief)
+
+        assert "more vibrant colors please" in prompt
+
+    def test_never_asks_for_extra_elements(self) -> None:
+        brief = _make_brief(layout_type="full_bleed", headline_text=None)
+        prompt = build_flux_prompt(brief)
+
         assert "Do not draw anything else." in prompt
-
-    def test_prompt_under_80_words(self) -> None:
-        brief = _make_brief(
-            headline_text="STILL IN THIS MEETING",
-            tagline_text="SEND AN EMAIL",
-            scene_description="a skeleton sitting at an office desk holding coffee",
-            visual_style="minimalist line-art, muted orange palette",
-            font_color="#FF8C42",
-        )
-        prompt = build_ideogram_prompt(brief)
-        word_count = len(prompt.split())
-        assert word_count < 80, f"Prompt has {word_count} words: {prompt}"
-
-    def test_regeneration_feedback_appended(self) -> None:
-        brief = _make_brief(
-            headline_text="TEST",
-            scene_description="a skeleton waving",
-            regeneration_feedback="make the skeleton more cartoonish",
-        )
-        prompt = build_ideogram_prompt(brief)
-        assert "make the skeleton more cartoonish" in prompt
 
 
 class TestGenerateImage:
-    def test_returns_image_result(self) -> None:
-        mock_client = MagicMock()
-        fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        mock_client.invoke_model.return_value = {
-            "body": MagicMock(
-                read=lambda: json.dumps({"images": [base64.b64encode(fake_png).decode()]}).encode()
-            ),
-        }
-
-        brief = _make_brief()
-        result = generate_image(brief, bedrock_client=mock_client)
-
-        assert isinstance(result, ImageResult)
-        assert result.image_bytes == fake_png
-        assert result.prompt != ""
-
-    def test_calls_bedrock_with_correct_model(self) -> None:
-        mock_client = MagicMock()
-        fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        mock_client.invoke_model.return_value = {
-            "body": MagicMock(
-                read=lambda: json.dumps({"images": [base64.b64encode(fake_png).decode()]}).encode()
-            ),
-        }
-
-        brief = _make_brief()
-        generate_image(brief, bedrock_client=mock_client)
-
-        call_kwargs = mock_client.invoke_model.call_args
-        assert "stability" in call_kwargs.kwargs.get("modelId", call_kwargs[1].get("modelId", ""))
-
-    def test_sends_prompt_in_body(self) -> None:
-        mock_client = MagicMock()
-        fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        mock_client.invoke_model.return_value = {
-            "body": MagicMock(
-                read=lambda: json.dumps({"images": [base64.b64encode(fake_png).decode()]}).encode()
-            ),
-        }
-
+    def test_calls_the_client_with_the_folded_prompt(self) -> None:
+        client = _client()
         brief = _make_brief(
-            concept="Galaxy cat astronaut",
             product_type="sublimation",
-            scene_description="a cat in a spacesuit floating among galaxies",
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            font_color="#FF0000",
         )
-        generate_image(brief, bedrock_client=mock_client)
 
-        call_kwargs = mock_client.invoke_model.call_args
-        body_str = call_kwargs.kwargs.get("body", call_kwargs[1].get("body", ""))
-        body = json.loads(body_str)
-        assert "cat in a spacesuit" in str(body)
+        result = generate_image(brief, comfyui_client=client)
 
-    def test_returns_error_on_bedrock_failure(self) -> None:
-        mock_client = MagicMock()
-        mock_client.invoke_model.side_effect = Exception("Bedrock timeout")
-
-        brief = _make_brief()
-        result = generate_image(brief, bedrock_client=mock_client)
-
-        assert isinstance(result, ImageResult)
-        assert result.image_bytes is None
-        assert "Bedrock timeout" in (result.error or "")
-
-    def test_uses_square_aspect_ratio(self) -> None:
-        mock_client = MagicMock()
-        fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        mock_client.invoke_model.return_value = {
-            "body": MagicMock(
-                read=lambda: json.dumps({"images": [base64.b64encode(fake_png).decode()]}).encode()
-            ),
-        }
-
-        brief = _make_brief(product_type="sublimation")
-        generate_image(brief, bedrock_client=mock_client)
-
-        call_kwargs = mock_client.invoke_model.call_args
-        body_str = call_kwargs.kwargs.get("body", call_kwargs[1].get("body", ""))
-        body = json.loads(body_str)
-        assert body.get("aspect_ratio") == "1:1"
-        assert body.get("mode") == "text-to-image"
-        assert body.get("output_format") == "png"
-
-
-class TestRemoveBackground:
-    def _mock_bg_response(self, output_bytes: bytes) -> MagicMock:
-        mock_client = MagicMock()
-        mock_client.invoke_model.return_value = {
-            "body": MagicMock(
-                read=lambda: json.dumps(
-                    {"images": [base64.b64encode(output_bytes).decode()]}
-                ).encode()
-            ),
-        }
-        return mock_client
-
-    def test_calls_remove_background_model(self) -> None:
-        input_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        output_png = b"\x89PNG\r\n\x1a\n" + b"\x01" * 100
-        mock_client = self._mock_bg_response(output_png)
-
-        result = remove_background(input_png, bedrock_client=mock_client)
-
-        call_kwargs = mock_client.invoke_model.call_args
-        assert call_kwargs.kwargs["modelId"] == REMOVE_BG_MODEL_ID
-        assert result == output_png
-
-    def test_sends_image_as_base64(self) -> None:
-        input_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        output_png = b"\x89PNG\r\n\x1a\n" + b"\x01" * 100
-        mock_client = self._mock_bg_response(output_png)
-
-        remove_background(input_png, bedrock_client=mock_client)
-
-        call_kwargs = mock_client.invoke_model.call_args
-        body = json.loads(call_kwargs.kwargs["body"])
-        assert body["image"] == base64.b64encode(input_png).decode()
-
-    def test_dtf_generate_calls_remove_background(self) -> None:
-        fake_gen_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        fake_nobg_png = b"\x89PNG\r\n\x1a\n" + b"\x01" * 100
-        mock_client = MagicMock()
-        mock_client.invoke_model.side_effect = [
-            {
-                "body": MagicMock(
-                    read=lambda: json.dumps(
-                        {"images": [base64.b64encode(fake_gen_png).decode()]}
-                    ).encode()
-                ),
-            },
-            {
-                "body": MagicMock(
-                    read=lambda: json.dumps(
-                        {"images": [base64.b64encode(fake_nobg_png).decode()]}
-                    ).encode()
-                ),
-            },
-        ]
-
-        brief = _make_brief(product_type="dtf_apparel")
-        result = generate_image(brief, bedrock_client=mock_client)
-
-        assert mock_client.invoke_model.call_count == 2
-        assert result.image_bytes == fake_nobg_png
-
-    def test_sublimation_skips_remove_background(self) -> None:
-        fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        mock_client = MagicMock()
-        mock_client.invoke_model.return_value = {
-            "body": MagicMock(
-                read=lambda: json.dumps({"images": [base64.b64encode(fake_png).decode()]}).encode()
-            ),
-        }
-
-        brief = _make_brief(product_type="sublimation")
-        result = generate_image(brief, bedrock_client=mock_client)
-
-        assert mock_client.invoke_model.call_count == 1
-        assert result.image_bytes == fake_png
-
-    def test_bg_removal_failure_returns_raw_image(self) -> None:
-        fake_png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        mock_client = MagicMock()
-        mock_client.invoke_model.side_effect = [
-            {
-                "body": MagicMock(
-                    read=lambda: json.dumps(
-                        {"images": [base64.b64encode(fake_png).decode()]}
-                    ).encode()
-                ),
-            },
-            Exception("BG removal failed"),
-        ]
-
-        brief = _make_brief(product_type="dtf_apparel")
-        result = generate_image(brief, bedrock_client=mock_client)
-
-        assert result.image_bytes == fake_png
         assert result.error is None
+        assert result.image_bytes == b"\x89PNG\r\n\x1a\n"
+        prompt = client.generate_image.call_args.kwargs["prompt"]
+        assert 'Bold text reading "SPOOKY SEASON"' in prompt
+
+    def test_a_client_error_becomes_an_error_result_instead_of_raising(self) -> None:
+        client = _client()
+        client.generate_image.side_effect = ComfyUIError("ComfyUI rejected the workflow")
+        brief = _make_brief(layout_type="full_bleed", headline_text=None)
+
+        result = generate_image(brief, comfyui_client=client)
+
+        assert result.image_bytes is None
+        assert result.error is not None
+        assert "ComfyUI rejected the workflow" in result.error
+
+    def test_dtf_brief_returns_the_raw_and_transparent_bytes(self) -> None:
+        client = _client(image_bytes=b"raw-bytes")
+        brief = _make_brief(
+            product_type="dtf_apparel", layout_type="full_bleed", headline_text=None
+        )
+
+        result = generate_image(brief, comfyui_client=client)
+
+        assert result.raw_bytes == b"raw-bytes"
+        assert result.image_bytes == b"transparent"
+        client.remove_background.assert_called_once_with(b"raw-bytes")
+
+    def test_non_dtf_brief_does_not_remove_the_background(self) -> None:
+        client = _client(image_bytes=b"raw-bytes")
+        brief = _make_brief(
+            product_type="sublimation", layout_type="full_bleed", headline_text=None
+        )
+
+        result = generate_image(brief, comfyui_client=client)
+
+        assert result.image_bytes == b"raw-bytes"
+        client.remove_background.assert_not_called()
+
+    def test_a_background_removal_failure_falls_back_to_the_raw_image(self) -> None:
+        client = _client(image_bytes=b"raw-bytes")
+        client.remove_background.side_effect = ComfyUIError("BiRefNet exploded")
+        brief = _make_brief(
+            product_type="dtf_apparel", layout_type="full_bleed", headline_text=None
+        )
+
+        result = generate_image(brief, comfyui_client=client)
+
+        assert result.image_bytes == b"raw-bytes"
+        assert result.raw_bytes == b"raw-bytes"
+
+    def test_the_seed_is_passed_through(self) -> None:
+        client = _client()
+        brief = _make_brief(layout_type="full_bleed", headline_text=None)
+
+        generate_image(brief, comfyui_client=client, seed=1234)
+
+        assert client.generate_image.call_args.kwargs["seed"] == 1234
+
+    def test_an_extra_prompt_is_appended_for_retries(self) -> None:
+        client = _client()
+        brief = _make_brief(layout_type="full_bleed", headline_text=None)
+
+        generate_image(
+            brief,
+            comfyui_client=client,
+            extra_prompt='The text must read exactly "SPOOKY SEASON".',
+        )
+
+        prompt = client.generate_image.call_args.kwargs["prompt"]
+        assert 'The text must read exactly "SPOOKY SEASON".' in prompt

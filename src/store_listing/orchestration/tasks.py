@@ -436,39 +436,46 @@ def rerank_design_briefs_task() -> dict:
 
 @celery_app.task
 def generate_design_images_task() -> dict:
-    """Generate images for design briefs via Leonardo/Bedrock, store in S3, update DB."""
+    """Generate images for design briefs via ComfyUI on the DGX, store in S3, update DB."""
     import boto3
 
-    from store_listing.orchestration.image_generation import BEDROCK_REGION
+    from store_listing.orchestration.comfyui_client import ComfyUIClient
     from store_listing.orchestration.image_pipeline import generate_images_for_briefs
     from store_listing.orchestration.image_storage import S3_BUCKET, S3_ENDPOINT_URL
-    from store_listing.orchestration.leonardo_client import LeonardoClient
-
-    bedrock_kwargs: dict[str, str] = {"region_name": BEDROCK_REGION}
-    bedrock_key = os.environ.get("BEDROCK_ACCESS_KEY_ID", "")
-    bedrock_secret = os.environ.get("BEDROCK_SECRET_ACCESS_KEY", "")
-    if bedrock_key and bedrock_secret:
-        bedrock_kwargs["aws_access_key_id"] = bedrock_key
-        bedrock_kwargs["aws_secret_access_key"] = bedrock_secret
-    bedrock_client = boto3.client("bedrock-runtime", **bedrock_kwargs)
+    from store_listing.orchestration.llm_client import get_vision_client, get_vision_model
+    from store_listing.orchestration.text_validation import TextValidator
 
     s3_kwargs: dict[str, str] = {}
     if S3_ENDPOINT_URL:
         s3_kwargs["endpoint_url"] = S3_ENDPOINT_URL
     s3_client = boto3.client("s3", **s3_kwargs)
 
-    leonardo_key = os.environ.get("LEONARDO_API_KEY", "")
-    leo_client: LeonardoClient | None = None
-    if leonardo_key:
-        leo_client = LeonardoClient(api_key=leonardo_key)
+    comfyui_client = ComfyUIClient(
+        base_url=os.environ.get("COMFYUI_BASE_URL", "http://localhost:8188"),
+        timeout_seconds=float(os.environ.get("COMFYUI_TIMEOUT_SECONDS", "300")),
+        poll_interval_seconds=float(os.environ.get("COMFYUI_POLL_INTERVAL_SECONDS", "1.0")),
+        unet_name=os.environ.get("COMFYUI_UNET_NAME", "flux1-schnell.safetensors"),
+        clip_name1=os.environ.get("COMFYUI_CLIP_NAME1", "t5xxl_fp8_e4m3fn.safetensors"),
+        clip_name2=os.environ.get("COMFYUI_CLIP_NAME2", "clip_l.safetensors"),
+        vae_name=os.environ.get("COMFYUI_VAE_NAME", "ae.safetensors"),
+        bg_model_name=os.environ.get("COMFYUI_BG_MODEL_NAME") or None,
+        alpha_black_point=int(os.environ.get("COMFYUI_BG_ALPHA_BLACK", "24")),
+        alpha_white_point=int(os.environ.get("COMFYUI_BG_ALPHA_WHITE", "240")),
+        alpha_erode_pixels=int(os.environ.get("COMFYUI_BG_ERODE_PIXELS", "1")),
+    )
+    text_validator = TextValidator(
+        client=get_vision_client(),
+        model=get_vision_model(),
+        threshold=float(os.environ.get("TEXT_MATCH_THRESHOLD", "0.85")),
+    )
 
     return generate_images_for_briefs(
         db_client=DatabaseClient(),
-        bedrock_client=bedrock_client,
+        comfyui_client=comfyui_client,
         s3_client=s3_client,
         bucket=S3_BUCKET,
         endpoint_url=S3_ENDPOINT_URL,
-        leonardo_client=leo_client,
+        text_validator=text_validator,
     )
 
 
@@ -477,35 +484,42 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
     """Generate image for a single design brief — triggered by requestRegeneration."""
     import boto3
 
-    from store_listing.orchestration.image_generation import BEDROCK_REGION
+    from store_listing.orchestration.comfyui_client import ComfyUIClient
     from store_listing.orchestration.image_pipeline import generate_image_for_brief
     from store_listing.orchestration.image_storage import S3_BUCKET, S3_ENDPOINT_URL
-    from store_listing.orchestration.leonardo_client import LeonardoClient
-
-    bedrock_kwargs: dict[str, str] = {"region_name": BEDROCK_REGION}
-    bedrock_key = os.environ.get("BEDROCK_ACCESS_KEY_ID", "")
-    bedrock_secret = os.environ.get("BEDROCK_SECRET_ACCESS_KEY", "")
-    if bedrock_key and bedrock_secret:
-        bedrock_kwargs["aws_access_key_id"] = bedrock_key
-        bedrock_kwargs["aws_secret_access_key"] = bedrock_secret
-    bedrock_client = boto3.client("bedrock-runtime", **bedrock_kwargs)
+    from store_listing.orchestration.llm_client import get_vision_client, get_vision_model
+    from store_listing.orchestration.text_validation import TextValidator
 
     s3_kwargs: dict[str, str] = {}
     if S3_ENDPOINT_URL:
         s3_kwargs["endpoint_url"] = S3_ENDPOINT_URL
     s3_client = boto3.client("s3", **s3_kwargs)
 
-    leonardo_key = os.environ.get("LEONARDO_API_KEY", "")
-    leo_client: LeonardoClient | None = None
-    if leonardo_key:
-        leo_client = LeonardoClient(api_key=leonardo_key)
+    comfyui_client = ComfyUIClient(
+        base_url=os.environ.get("COMFYUI_BASE_URL", "http://localhost:8188"),
+        timeout_seconds=float(os.environ.get("COMFYUI_TIMEOUT_SECONDS", "300")),
+        poll_interval_seconds=float(os.environ.get("COMFYUI_POLL_INTERVAL_SECONDS", "1.0")),
+        unet_name=os.environ.get("COMFYUI_UNET_NAME", "flux1-schnell.safetensors"),
+        clip_name1=os.environ.get("COMFYUI_CLIP_NAME1", "t5xxl_fp8_e4m3fn.safetensors"),
+        clip_name2=os.environ.get("COMFYUI_CLIP_NAME2", "clip_l.safetensors"),
+        vae_name=os.environ.get("COMFYUI_VAE_NAME", "ae.safetensors"),
+        bg_model_name=os.environ.get("COMFYUI_BG_MODEL_NAME") or None,
+        alpha_black_point=int(os.environ.get("COMFYUI_BG_ALPHA_BLACK", "24")),
+        alpha_white_point=int(os.environ.get("COMFYUI_BG_ALPHA_WHITE", "240")),
+        alpha_erode_pixels=int(os.environ.get("COMFYUI_BG_ERODE_PIXELS", "1")),
+    )
+    text_validator = TextValidator(
+        client=get_vision_client(),
+        model=get_vision_model(),
+        threshold=float(os.environ.get("TEXT_MATCH_THRESHOLD", "0.85")),
+    )
 
     return generate_image_for_brief(
         brief_id=brief_id,
         db_client=DatabaseClient(),
-        bedrock_client=bedrock_client,
+        comfyui_client=comfyui_client,
         s3_client=s3_client,
         bucket=S3_BUCKET,
         endpoint_url=S3_ENDPOINT_URL,
-        leonardo_client=leo_client,
+        text_validator=text_validator,
     )

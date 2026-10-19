@@ -1,37 +1,46 @@
-"""Image generation from design briefs.
+"""Image generation from design briefs via ComfyUI + Flux Schnell on the DGX.
 
-Supports Leonardo.ai (Flux) and AWS Bedrock (Stability) backends.
-Leonardo is the default for generation; Bedrock is kept for background
-removal. Both are temporary until DGX hardware arrives for self-hosted
-ComfyUI + Flux Schnell. See issue #111.
+Leonardo.ai, the Ideogram text-routing workaround and the AWS Bedrock image
+calls were removed in #111: the self-hosted DGX is the only generation path.
 """
 
 from __future__ import annotations
 
-import asyncio
-import base64
-import json
 import logging
-import os
 from dataclasses import dataclass
-from typing import Any
 
+from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
 from store_listing.orchestration.design_briefs import DesignBrief
-from store_listing.orchestration.leonardo_client import LeonardoClient, LeonardoGenerationResult
 
 logger = logging.getLogger(__name__)
 
-BEDROCK_MODEL_ID: str = os.environ.get("BEDROCK_IMAGE_MODEL_ID", "stability.sd3-5-large-v1:0")
-BEDROCK_REGION: str = os.environ.get("AWS_BEDROCK_REGION", "us-west-2")
-
 PRODUCT_TYPE_CONTEXT: dict[str, str] = {
+    # dtf_apparel is the one product whose background is removed, so it is
+    # rendered on a flat saturated magenta that can be keyed out exactly.
+    # A dark background does not work: the background removal then fills the
+    # enclosed counters of letters like O, R and A instead of cutting them out.
+    # Magenta also keeps white artwork and white text visible. See issue #111.
     "dtf_apparel": (
-        "sticker illustration on plain white background, bold outlines, "
-        "flat colors, compact centered composition, DTF transfer print"
+        "sticker illustration, bold outlines, flat colors, compact centered composition, "
+        "DTF transfer print, isolated on a solid pure magenta background, plain magenta "
+        "backdrop, chroma key background, uniform flat magenta color"
     ),
-    "sublimation": "full-color sublimation print, seamless edges, vibrant colors",
-    "sticker_vinyl": "sticker decal, clean cut lines, bold outlines",
+    # These are printed full-bleed, so their background is kept and has to be
+    # white - it becomes the paper.
+    "sublimation": (
+        "full-color sublimation print, seamless edges, vibrant colors, "
+        "isolated on a solid pure white background, plain white backdrop"
+    ),
+    "sticker_vinyl": (
+        "sticker decal, clean cut lines, bold outlines, "
+        "isolated on a solid pure white background, plain white backdrop"
+    ),
 }
+
+# The product types whose background is printed as-is and is therefore white.
+WHITE_BACKGROUND_PRODUCTS = frozenset({"sublimation", "sticker_vinyl"})
+
+DEFAULT_FONT_COLOR = "#000000"
 
 
 @dataclass
@@ -40,6 +49,7 @@ class ImageResult:
     prompt: str
     error: str | None = None
     raw_bytes: bytes | None = None
+    background_removed: bool = False
 
 
 def _split_concept(concept: str) -> tuple[str, str | None]:
@@ -77,39 +87,65 @@ def _feedback_section(brief: DesignBrief) -> str:
     return f" {brief.regeneration_feedback}."
 
 
-def build_prompt_from_brief(brief: DesignBrief) -> str:
+DEFAULT_FONT_COLOR = "#000000"
+
+
+def _is_near_white(colour: str) -> bool:
+    """True for a white or near-white hex colour."""
+    digits = colour.lstrip("#")
+    if len(digits) != 6:
+        return False
+    try:
+        channels = [int(digits[index : index + 2], 16) for index in (0, 2, 4)]
+    except ValueError:
+        return False
+    return min(channels) >= 200
+
+
+def _font_colour(brief: DesignBrief) -> str:
+    """The text colour, falling back to black when it would be invisible.
+
+    White text is fine on the magenta background of a dtf_apparel brief - that
+    background is removed before printing. On the white background of the
+    print-through product types it would be invisible, so it is corrected here.
+    Briefs written before the backgrounds changed can still carry one.
+    """
+    colour = brief.font_color or DEFAULT_FONT_COLOR
+    if brief.product_type in WHITE_BACKGROUND_PRODUCTS and _is_near_white(colour):
+        logger.warning("Brief %r has a near-white font colour on a white background", brief.concept)
+        return DEFAULT_FONT_COLOR
+    return colour
+
+
+def build_flux_prompt(brief: DesignBrief) -> str:
+    """Build the Flux prompt for a brief, folding the layout fields in.
+
+    full_bleed       -> the scene only, explicitly no lettering
+    text_top         -> the headline at the top, then the scene
+    text_top_bottom  -> the headline at the top, the scene, the tagline at the bottom
+    """
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
     scene = _scene_for_prompt(brief)
     feedback = _feedback_section(brief)
+    font_color = _font_colour(brief)
+    layout_type = brief.layout_type or "full_bleed"
 
-    parts: list[str] = []
-    parts.append(f"{scene}, {brief.visual_style}, {product_context}.")
-    parts.append("Do not include any text or lettering.")
-    parts.append("Do not draw anything else.")
-    if feedback:
-        parts.append(feedback.strip())
-    return " ".join(parts)
-
-
-IDEOGRAM_MODEL: str = "ideogram-v3.0"
-IDEOGRAM_QUALITY: str = "QUALITY"
-
-
-def build_ideogram_prompt(brief: DesignBrief) -> str:
-    """Build prompt for Ideogram 3.0 — includes text rendering instructions."""
-    product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
-    scene = _scene_for_prompt(brief)
-    feedback = _feedback_section(brief)
-    font_color = brief.font_color or "#000000"
+    if layout_type == "full_bleed" and brief.headline_text:
+        logger.warning(
+            "Brief has layout_type 'full_bleed' but a headline (%r) - rendering without text",
+            brief.headline_text,
+        )
 
     parts: list[str] = []
 
-    if brief.headline_text:
+    if layout_type != "full_bleed" and brief.headline_text:
         parts.append(f'Bold text reading "{brief.headline_text}" in {font_color} at the top.')
 
     parts.append(f"{scene}, {brief.visual_style}, {product_context}.")
 
-    if brief.tagline_text:
+    if layout_type == "full_bleed":
+        parts.append("Do not include any text or lettering.")
+    elif layout_type == "text_top_bottom" and brief.tagline_text:
         parts.append(f'Text reading "{brief.tagline_text}" in {font_color} at the bottom.')
 
     parts.append("Do not draw anything else.")
@@ -123,98 +159,53 @@ def build_ideogram_prompt(brief: DesignBrief) -> str:
 def generate_image(
     brief: DesignBrief,
     *,
-    bedrock_client: Any,
-    model_id: str | None = None,
+    comfyui_client: ComfyUIClient,
+    seed: int | None = None,
+    extra_prompt: str = "",
 ) -> ImageResult:
-    prompt = build_prompt_from_brief(brief)
-    model = model_id or BEDROCK_MODEL_ID
+    """Generate an image for a brief on the DGX.
+
+    ``dtf_apparel`` briefs get their background removed with BiRefNet on the DGX;
+    the original render is kept in ``raw_bytes``. Failures never raise - they are
+    reported through ``ImageResult.error``.
+    """
+    prompt = build_flux_prompt(brief)
+    if extra_prompt:
+        prompt = f"{prompt} {extra_prompt}"
 
     try:
-        response = bedrock_client.invoke_model(
-            modelId=model,
-            body=json.dumps(
-                {
-                    "prompt": prompt,
-                    "mode": "text-to-image",
-                    "aspect_ratio": "1:1",
-                    "output_format": "png",
-                }
-            ),
-        )
-        result = json.loads(response["body"].read())
-        image_b64 = result["images"][0]
-        image_bytes = base64.b64decode(image_b64)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Bedrock image generation failed: %s", e)
+        result = comfyui_client.generate_image(prompt=prompt, seed=seed)
+    except ComfyUIError as e:
+        logger.warning("ComfyUI image generation failed: %s", e)
         return ImageResult(image_bytes=None, prompt=prompt, error=str(e))
 
-    raw_bytes = image_bytes
+    if result.image_bytes is None:
+        error = result.error or "ComfyUI returned no image"
+        logger.warning("ComfyUI image generation failed: %s", error)
+        return ImageResult(image_bytes=None, prompt=prompt, error=error)
+
+    raw_bytes = result.image_bytes
+    image_bytes = raw_bytes
+    background_removed = False
+
     if brief.product_type == "dtf_apparel":
         try:
-            image_bytes = remove_background(image_bytes, bedrock_client=bedrock_client)
-        except Exception as e:  # noqa: BLE001
+            transparent = comfyui_client.remove_background(raw_bytes)
+        except ComfyUIError as e:
             logger.warning("Background removal failed, returning raw image: %s", e)
+        else:
+            if transparent.image_bytes is not None:
+                image_bytes = transparent.image_bytes
+                background_removed = True
+            else:
+                logger.warning(
+                    "Background removal returned no image, returning raw image: %s",
+                    transparent.error,
+                )
 
-    return ImageResult(image_bytes=image_bytes, prompt=prompt, raw_bytes=raw_bytes)
-
-
-def _needs_ideogram(brief: DesignBrief) -> bool:
-    return brief.layout_type in ("text_top", "text_top_bottom") and bool(brief.headline_text)
-
-
-def generate_image_leonardo(
-    brief: DesignBrief,
-    *,
-    leonardo_client: LeonardoClient,
-    bedrock_client: Any | None = None,
-) -> ImageResult:
-    use_ideogram = _needs_ideogram(brief)
-    if use_ideogram:
-        prompt = build_ideogram_prompt(brief)
-        model = IDEOGRAM_MODEL
-        quality = IDEOGRAM_QUALITY
-    else:
-        prompt = build_prompt_from_brief(brief)
-        model = None
-        quality = None
-
-    try:
-        leo_result: LeonardoGenerationResult = asyncio.get_event_loop().run_until_complete(
-            leonardo_client.generate(prompt=prompt, model=model, quality=quality)
-        )
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            leo_result = loop.run_until_complete(
-                leonardo_client.generate(prompt=prompt, model=model, quality=quality)
-            )
-        finally:
-            loop.close()
-
-    if leo_result.image_bytes is None:
-        logger.warning("Leonardo image generation failed: %s", leo_result.error)
-        return ImageResult(image_bytes=None, prompt=prompt, error=leo_result.error)
-
-    raw_bytes = leo_result.image_bytes
-    image_bytes = raw_bytes
-
-    if brief.product_type == "dtf_apparel" and bedrock_client is not None:
-        try:
-            image_bytes = remove_background(raw_bytes, bedrock_client=bedrock_client)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Background removal failed, returning raw image: %s", e)
-
-    return ImageResult(image_bytes=image_bytes, prompt=prompt, raw_bytes=raw_bytes)
-
-
-REMOVE_BG_MODEL_ID: str = "us.stability.stable-image-remove-background-v1:0"
-
-
-def remove_background(image_bytes: bytes, *, bedrock_client: Any) -> bytes:
-    image_b64 = base64.b64encode(image_bytes).decode()
-    response = bedrock_client.invoke_model(
-        modelId=REMOVE_BG_MODEL_ID,
-        body=json.dumps({"image": image_b64}),
+    return ImageResult(
+        image_bytes=image_bytes,
+        prompt=prompt,
+        raw_bytes=raw_bytes,
+        background_removed=background_removed,
     )
-    result = json.loads(response["body"].read())
-    return base64.b64decode(result["images"][0])

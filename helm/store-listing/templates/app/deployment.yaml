@@ -186,21 +186,29 @@ spec:
                   key: AWS_SECRET_ACCESS_KEY
             - name: AWS_DEFAULT_REGION
               value: {{ .Values.config.awsDefaultRegion | default "us-west-2" | quote }}
-            - name: BEDROCK_ACCESS_KEY_ID
+            - name: COMFYUI_BASE_URL
+              value: {{ .Values.config.comfyuiBaseUrl | default "http://comfyui:8188" | quote }}
+            - name: COMFYUI_TIMEOUT_SECONDS
+              value: {{ .Values.config.comfyuiTimeoutSeconds | default "300" | quote }}
+            - name: COMFYUI_BG_ALPHA_BLACK
+              value: {{ .Values.config.comfyuiBgAlphaBlack | default "24" | quote }}
+            - name: COMFYUI_BG_ALPHA_WHITE
+              value: {{ .Values.config.comfyuiBgAlphaWhite | default "240" | quote }}
+            - name: COMFYUI_BG_ERODE_PIXELS
+              value: {{ .Values.config.comfyuiBgErodePixels | default "1" | quote }}
+            - name: VISION_LLM_BASE_URL
+              value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
+            - name: VISION_LLM_MODEL
+              value: {{ .Values.config.visionLlmModel | default "qwen_vl_ocr" | quote }}
+            - name: VISION_LLM_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
-                  key: BEDROCK_ACCESS_KEY_ID
-            - name: BEDROCK_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "store-listing.fullname" . }}-secrets
-                  key: BEDROCK_SECRET_ACCESS_KEY
-            - name: LEONARDO_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "store-listing.fullname" . }}-secrets
-                  key: LEONARDO_API_KEY
+                  key: VISION_LLM_API_KEY
+            - name: TEXT_MATCH_THRESHOLD
+              value: {{ .Values.config.textMatchThreshold | default "0.85" | quote }}
+            - name: MAX_TEXT_REGENERATION_ATTEMPTS
+              value: {{ .Values.config.maxTextRegenerationAttempts | default "2" | quote }}
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}
@@ -378,21 +386,29 @@ spec:
                   key: AWS_SECRET_ACCESS_KEY
             - name: AWS_DEFAULT_REGION
               value: {{ .Values.config.awsDefaultRegion | default "us-west-2" | quote }}
-            - name: BEDROCK_ACCESS_KEY_ID
+            - name: COMFYUI_BASE_URL
+              value: {{ .Values.config.comfyuiBaseUrl | default "http://comfyui:8188" | quote }}
+            - name: COMFYUI_TIMEOUT_SECONDS
+              value: {{ .Values.config.comfyuiTimeoutSeconds | default "300" | quote }}
+            - name: COMFYUI_BG_ALPHA_BLACK
+              value: {{ .Values.config.comfyuiBgAlphaBlack | default "24" | quote }}
+            - name: COMFYUI_BG_ALPHA_WHITE
+              value: {{ .Values.config.comfyuiBgAlphaWhite | default "240" | quote }}
+            - name: COMFYUI_BG_ERODE_PIXELS
+              value: {{ .Values.config.comfyuiBgErodePixels | default "1" | quote }}
+            - name: VISION_LLM_BASE_URL
+              value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
+            - name: VISION_LLM_MODEL
+              value: {{ .Values.config.visionLlmModel | default "qwen_vl_ocr" | quote }}
+            - name: VISION_LLM_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
-                  key: BEDROCK_ACCESS_KEY_ID
-            - name: BEDROCK_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "store-listing.fullname" . }}-secrets
-                  key: BEDROCK_SECRET_ACCESS_KEY
-            - name: LEONARDO_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "store-listing.fullname" . }}-secrets
-                  key: LEONARDO_API_KEY
+                  key: VISION_LLM_API_KEY
+            - name: TEXT_MATCH_THRESHOLD
+              value: {{ .Values.config.textMatchThreshold | default "0.85" | quote }}
+            - name: MAX_TEXT_REGENERATION_ATTEMPTS
+              value: {{ .Values.config.maxTextRegenerationAttempts | default "2" | quote }}
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}
