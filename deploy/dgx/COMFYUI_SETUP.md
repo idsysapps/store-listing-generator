@@ -21,19 +21,28 @@ must be built natively on the DGX before first use.
 ## Updating the Stack
 
 The compose file and the proxy are the only two files the running stack reads.
-Copy them across and recreate the containers:
+`/opt/trtllm` is root-owned, so copy the files to a writable directory first
+and move them into place with `sudo`:
 
 ```bash
 # From the repository root
 scp deploy/dgx/docker-compose.yml deploy/dgx/openai-proxy.py \
-    mathianasj@192.168.2.123:/opt/trtllm/
+    mathianasj@192.168.2.123:/tmp/
 ssh -t mathianasj@192.168.2.123 \
-    'docker compose -f /opt/trtllm/docker-compose.yml up -d'
+    'sudo cp /tmp/docker-compose.yml /tmp/openai-proxy.py /opt/trtllm/ \
+     && cd /opt/trtllm && sudo docker compose up -d'
 ```
 
 `docker compose up -d` only recreates what changed, so the ComfyUI container and
 its loaded models survive the update. The first start of a new service pulls its
 model (Qwen2.5-VL-7B is ~16 GB).
+
+> **This blocks for several minutes.** The services wait for each other to
+> report healthy before the next one starts (see
+> [Services start one at a time](#services-start-one-at-a-time)), and each
+> healthcheck has a 300 s `start_period` so the model load does not count as a
+> failure. Watch it from a second terminal with
+> `ssh mathianasj@192.168.2.123 'cd /opt/trtllm && docker compose ps'`.
 
 To confirm the stack came up:
 
