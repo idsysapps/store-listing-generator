@@ -22,7 +22,11 @@ from typing import Any, Self
 import httpx
 from PIL import Image, ImageFilter
 
-from store_listing.orchestration.chroma_key import despill_key_spill, punch_out_key_colour
+from store_listing.orchestration.chroma_key import (
+    correct_key_mix,
+    despill_key_spill,
+    punch_out_key_colour,
+)
 from store_listing.orchestration.comfyui_workflows import (
     build_birefnet_background_graph,
     build_flux_txt2img_graph,
@@ -241,6 +245,9 @@ class ComfyUIClient:
         # ...and take the key colour back out of the soft edges, so they do not
         # print with a coloured fringe.
         result.image_bytes = despill_key_spill(result.image_bytes, image_bytes)
+        # The model's alpha is too high on the pixels that still hold the key
+        # colour, which is what leaves a tint of it behind.
+        result.image_bytes = correct_key_mix(result.image_bytes, image_bytes)
         return result
 
     def health(self) -> bool:

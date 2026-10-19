@@ -10,9 +10,15 @@ because it does three things a salient-object model does not:
 * it needs no model on the DGX, so it is faster and cannot invert.
 
 The key colour is estimated from the image border, which is background by
-construction, and the distance is measured in YCbCr so that a *darker shade* of
-the key colour - artwork the model happens to tint towards the background - is
-not mistaken for the background itself.
+construction.
+
+The distance is measured in the U/V (chroma) plane only, the way ffmpeg's
+``chromakey`` filter does it, so the luma is ignored. That is what keeps a
+near-black detail in the artwork - the skeleton's eye sockets, the pumpkin's
+dark mouth - safe: their chroma is neutral, so they sit as far from a saturated
+key as the white artwork does. Measuring the luma as well would put a near-black
+detail *closer* to a dark key than the white artwork is, and it would be keyed
+out.
 """
 
 from __future__ import annotations
@@ -20,26 +26,46 @@ from __future__ import annotations
 import io
 import logging
 
+import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 logger = logging.getLogger(__name__)
 
-# The distance ramp: at or below TOLERANCE_IN the pixel is background, at or
-# above TOLERANCE_OUT it is fully opaque artwork.
-DEFAULT_TOLERANCE_IN = 25
-DEFAULT_TOLERANCE_OUT = 55
+# Keying parameters, in the same units ffmpeg's chromakey filter uses: the
+# distance is normalised so that 1.0 is the full chroma range.
+#
+# A pixel is background when its distance is at or below SIMILARITY, and fully
+# opaque artwork when it is at or above SIMILARITY + BLEND. The ramp between
+# the two is the soft edge.
+#
+# Measured on a rendered design: the key and the background sit at 0.00, the
+# magenta-tinted edges of the artwork at 0.12, and the artwork itself - white
+# text, the orange pumpkin, the cream skeleton, the near-black eye sockets and
+# the pumpkin's dark mouth - at 0.30 and above. So 0.13 is a wide margin below
+# the artwork and a wide one above the background.
+SIMILARITY = 0.13
+BLEND = 0.05
 
-# How close to the key colour a pixel has to be to count as the background.
-# Tight, so that a darker shade of the key in the artwork is not mistaken for
-# it.
-KEY_TOLERANCE = 20
+# The tolerance for counting a pixel as the background itself, which is what
+# finds the holes: a letter's counter is enclosed by the artwork, so the flood
+# from the edge of the image cannot reach it.
+HOLE_SIMILARITY = 0.03
 
 # How far the background may reach into the artwork's anti-aliased edge. Only
 # used to take the rim off the inside of a hole.
-GROW_TOLERANCE = 95
+GROW_SIMILARITY = 0.16
+
+# The pixels the alpha correction looks at: anything that still carries some of
+# the key colour. Measured on a rendered design the artwork's closest pixel sits
+# at 0.25, so this is a safe margin below it.
+KEY_MIX_SIMILARITY = 0.20
 
 # How many border pixels to sample when estimating the key colour.
 BORDER_SAMPLE_STEP = 4
+
+# The chroma distance is kept in an 8-bit image so the masks can be built with
+# ImageChops; 255 is the full range.
+_SCALE = 255.0
 
 
 def estimate_key_colour(image: Image.Image) -> tuple[int, int, int]:
@@ -66,88 +92,84 @@ def estimate_key_colour(image: Image.Image) -> tuple[int, int, int]:
     return tuple(sorted(channel)[len(channel) // 2] for channel in channels)  # type: ignore[return-value]
 
 
-def _key_in_ycbcr(key: tuple[int, int, int]) -> tuple[int, int, int]:
-    r, g, b = key
-    y = int(0.299 * r + 0.587 * g + 0.114 * b)
-    cb = int(128 - 0.168736 * r - 0.331264 * g + 0.5 * b)
-    cr = int(128 + 0.5 * r - 0.418688 * g - 0.081312 * b)
-    return y, cb, cr
+def _chroma_distance(rgb: Image.Image, key: tuple[int, int, int]) -> np.ndarray:
+    """The chroma distance from every pixel to the key colour, normalised to 0..1.
+
+    The distance is measured in the U/V (chroma) plane only, so the luma is
+    ignored. That is what keeps a near-black detail in the artwork - the
+    skeleton's eye sockets, the pumpkin's dark mouth - safe: their chroma is
+    neutral, so they sit as far from a saturated key as the white artwork does.
+
+    Measuring the luma as well would put a near-black detail *closer* to a dark
+    key than the white artwork is, and it would get keyed out.
+    """
+    ycbcr = np.asarray(rgb.convert("YCbCr")).astype(np.float64)
+    key_ycbcr = np.asarray(
+        Image.new("RGB", (1, 1), key).convert("YCbCr").getpixel((0, 0)), dtype=np.float64
+    )
+    du = ycbcr[:, :, 1] - key_ycbcr[1]
+    dv = ycbcr[:, :, 2] - key_ycbcr[2]
+    return np.sqrt(du * du + dv * dv) / (255.0 * np.sqrt(2.0))
 
 
 def _distance_image(rgb: Image.Image, key: tuple[int, int, int]) -> Image.Image:
-    """How far every pixel is from the key colour, in YCbCr.
+    """The chroma distance as an 8-bit image, scaled so 255 is the full range.
 
-    The per-channel difference is combined with a *max* rather than a sum, which
-    makes this a box around the key colour in chroma space - the standard
-    chroma-key shape. It also keeps the whole keying pass in C instead of a
-    per-pixel Python loop.
+    Kept as an image so the masks can be built with ``ImageChops``.
     """
-    y, cb, cr = rgb.convert("YCbCr").split()
-    key_y, key_cb, key_cr = _key_in_ycbcr(key)
-    size = rgb.size
-    return ImageChops.lighter(
-        ImageChops.lighter(
-            ImageChops.difference(y, Image.new("L", size, key_y)),
-            ImageChops.difference(cb, Image.new("L", size, key_cb)),
-        ),
-        ImageChops.difference(cr, Image.new("L", size, key_cr)),
-    )
+    distance = _chroma_distance(rgb, key)
+    scaled = np.clip(distance * _SCALE, 0, 255).astype(np.uint8)
+    return Image.fromarray(scaled, mode="L")
 
 
-def _alpha_table(tolerance_in: int, tolerance_out: int) -> list[int]:
-    span = max(1, tolerance_out - tolerance_in)
+def _alpha_table(similarity: float, blend: float) -> list[int]:
+    """The alpha ramp, as ffmpeg's chromakey defines it."""
+    inner = similarity * _SCALE
+    span = max(1.0, blend * _SCALE)
     table: list[int] = []
-    for distance in range(256):
-        if distance <= tolerance_in:
-            table.append(0)
-        elif distance >= tolerance_out:
-            table.append(255)
-        else:
-            table.append(int(255 * (distance - tolerance_in) / span))
+    for value in range(256):
+        table.append(int(max(0.0, min(1.0, (value - inner) / span)) * 255))
     return table
-
-
-def _despill(rgb: Image.Image, alpha: Image.Image, key: tuple[int, int, int]) -> Image.Image:
-    """Remove the key colour's contribution from the partially transparent pixels.
-
-    A pixel on the edge is a blend of the artwork and the key colour. Once the
-    alpha says how much of it is artwork, the artwork colour can be recovered:
-    ``F = (O - (1 - a) * K) / a``. Without this the edges keep a fringe of the
-    key colour.
-    """
-    width, height = rgb.size
-    rgb_values = rgb.tobytes()
-    alpha_values = alpha.tobytes()
-    out = bytearray(rgb_values)
-    for index, value in enumerate(alpha_values):
-        if value == 0 or value == 255:
-            continue
-        fraction = value / 255
-        base = index * 3
-        for channel in range(3):
-            corrected = (rgb_values[base + channel] - (1 - fraction) * key[channel]) / fraction
-            out[base + channel] = max(0, min(255, int(corrected)))
-    return Image.frombytes("RGB", (width, height), bytes(out))
 
 
 def key_out_background(
     image_bytes: bytes,
     *,
     key_colour: tuple[int, int, int] | None = None,
-    tolerance_in: int = DEFAULT_TOLERANCE_IN,
-    tolerance_out: int = DEFAULT_TOLERANCE_OUT,
+    similarity: float = SIMILARITY,
+    blend: float = BLEND,
     despill: bool = True,
 ) -> bytes:
     """Return an RGBA PNG with the flat background keyed out."""
     with Image.open(io.BytesIO(image_bytes)) as opened:
         rgb = opened.convert("RGB")
+    width, height = rgb.size
 
     key = key_colour or estimate_key_colour(rgb)
     distance = _distance_image(rgb, key)
-    alpha = distance.point(_alpha_table(tolerance_in, tolerance_out))
+    alpha = distance.point(_alpha_table(similarity, blend))
 
     if despill:
-        rgb = _despill(rgb, alpha, key)
+        alpha_values = alpha.tobytes()
+        rgb_values = rgb.tobytes()
+        out = bytearray(width * height * 4)
+        for index, value in enumerate(alpha_values):
+            base = index * 3
+            target = index * 4
+            out[target + 3] = value
+            if value == 0 or value == 255:
+                out[target] = rgb_values[base]
+                out[target + 1] = rgb_values[base + 1]
+                out[target + 2] = rgb_values[base + 2]
+                continue
+            share = 1 - value / 255
+            for channel in range(3):
+                corrected = rgb_values[base + channel] - share * key[channel]
+                out[target + channel] = max(0, min(255, int(corrected)))
+        keyed = Image.frombytes("RGBA", (width, height), bytes(out))
+        buffer = io.BytesIO()
+        keyed.save(buffer, format="PNG")
+        return buffer.getvalue()
 
     result = rgb.convert("RGBA")
     result.putalpha(alpha)
@@ -167,10 +189,8 @@ def background_fraction(
     with Image.open(io.BytesIO(image_bytes)) as opened:
         rgb = opened.convert("RGB")
     key = key_colour or estimate_key_colour(rgb)
-    distance = _distance_image(rgb, key)
-    pixels = distance.tobytes()
-    close = sum(1 for value in pixels if value <= DEFAULT_TOLERANCE_IN)
-    return close / len(pixels)
+    distance = _chroma_distance(rgb, key)
+    return float((distance <= HOLE_SIMILARITY).mean())
 
 
 def despill_key_spill(
@@ -220,13 +240,113 @@ def despill_key_spill(
     return buffer.getvalue()
 
 
+def correct_key_mix(
+    rgba_bytes: bytes,
+    source_bytes: bytes,
+    *,
+    key_colour: tuple[int, int, int] | None = None,
+    similarity: float = KEY_MIX_SIMILARITY,
+    search_radius: int = 6,
+) -> bytes:
+    """Recover the artwork fraction of the pixels that still carry the key colour.
+
+    A pixel on the edge of the artwork is a blend of the artwork and the key:
+    ``O = a * F + (1 - a) * K``. The segmentation model over-estimates ``a`` on
+    these pixels - it is confident that a letter is solid - so they keep a tint
+    of the background colour.
+
+    Given the foreground colour ``F`` of the neighbourhood, ``a`` can be solved
+    for directly, and the pixel's colour replaced with the foreground colour so
+    no background tint is left in the alpha. ``F`` is taken from the nearest
+    opaque pixel that is not itself the key colour, which is the artwork the
+    pixel is blending into.
+    """
+    with Image.open(io.BytesIO(source_bytes)) as opened:
+        source = opened.convert("RGB")
+    with Image.open(io.BytesIO(rgba_bytes)) as opened:
+        result = opened.convert("RGBA")
+
+    key = key_colour or estimate_key_colour(source)
+    width, height = result.size
+    source_values = np.asarray(source).astype(np.float64)
+    distance = _chroma_distance(source, key)
+    alpha = np.asarray(result.getchannel("A")).astype(np.float64)
+    rgb = np.asarray(result.convert("RGB")).astype(np.float64)
+
+    # Every pixel that still carries some of the key colour is a candidate,
+    # whether the model called it fully opaque or not.
+    candidates = (alpha > 0) & (distance <= similarity)
+    if not candidates.any():
+        return rgba_bytes
+
+    key_vector = np.asarray(key, dtype=np.float64)
+    # The foreground colour of each candidate: the nearest opaque pixel that is
+    # not the key colour. Candidates are tracked by their flat index so that the
+    # candidate and the neighbour that supplied the colour cannot be confused.
+    flat_candidates = np.flatnonzero(candidates.ravel())
+    foreground = np.zeros((flat_candidates.size, 3), dtype=np.float64)
+    found = np.zeros(flat_candidates.size, dtype=bool)
+    opaque = ((alpha >= 250) & (distance > similarity)).ravel()
+
+    for radius in range(1, search_radius + 1):
+        pending = np.flatnonzero(~found)
+        if pending.size == 0:
+            break
+        base = flat_candidates[pending]
+        cy = base // width
+        cx = base % width
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                if abs(dy) != radius and abs(dx) != radius:
+                    continue
+                sy = cy + dy
+                sx = cx + dx
+                inside = (sy >= 0) & (sy < height) & (sx >= 0) & (sx < width)
+                if not inside.any():
+                    continue
+                # Clamp before indexing; `inside` still masks the edges out.
+                neighbour = np.clip(sy, 0, height - 1) * width + np.clip(sx, 0, width - 1)
+                hit = inside & opaque[neighbour]
+                if not hit.any():
+                    continue
+                target = np.flatnonzero(hit)
+                foreground[pending[target]] = source_values.reshape(-1, 3)[neighbour[target]]
+                found[pending[target]] = True
+
+    if not found.any():
+        return rgba_bytes
+
+    observed = source_values.reshape(-1, 3)[flat_candidates[found]]
+    fore = foreground[found]
+    direction = fore - key_vector
+    denominator = (direction**2).sum(axis=1)
+    numerator = ((observed - key_vector) * direction).sum(axis=1)
+    fraction = np.where(denominator > 0, numerator / np.maximum(denominator, 1e-6), 1.0)
+    fraction = np.clip(fraction, 0.0, 1.0)
+
+    out_alpha = alpha.copy()
+    out_rgb = rgb.copy()
+    corrected = np.flatnonzero(found)
+    target = flat_candidates[corrected]
+    out_alpha.ravel()[target] = fraction * 255
+    out_rgb.ravel()[target * 3] = fore[:, 0]
+    out_rgb.ravel()[target * 3 + 1] = fore[:, 1]
+    out_rgb.ravel()[target * 3 + 2] = fore[:, 2]
+
+    out = np.dstack([out_rgb, out_alpha]).astype(np.uint8)
+    result = Image.frombytes("RGBA", (width, height), out.tobytes())
+    buffer = io.BytesIO()
+    result.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def punch_out_key_colour(
     rgba_bytes: bytes,
     source_bytes: bytes,
     *,
     key_colour: tuple[int, int, int] | None = None,
-    tolerance: int = KEY_TOLERANCE,
-    grow_tolerance: int = GROW_TOLERANCE,
+    similarity: float = HOLE_SIMILARITY,
+    grow_similarity: float = GROW_SIMILARITY,
     grow_rounds: int = 2,
 ) -> bytes:
     """Clear the background out of the mask, holes included.
@@ -250,8 +370,10 @@ def punch_out_key_colour(
     key = key_colour or estimate_key_colour(source)
     distance = _distance_image(source, key)
 
+    inner = int(similarity * _SCALE)
+
     def is_key(value: int) -> int:
-        return 0 if value <= tolerance else 255
+        return 0 if value <= inner else 255
 
     # 0 = key coloured, 255 = artwork.
     region = distance.point(is_key)
@@ -269,8 +391,10 @@ def punch_out_key_colour(
     hole = region.point(is_hole)
     outer = region.point(is_outer)
 
+    grow_inner = int(grow_similarity * _SCALE)
+
     def is_growable(value: int) -> int:
-        return 255 if value <= grow_tolerance else 0
+        return 255 if value <= grow_inner else 0
 
     growable = distance.point(is_growable)
     for _ in range(max(0, grow_rounds)):
