@@ -2,6 +2,9 @@ package com.trends.domain;
 
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
@@ -46,6 +49,7 @@ public class FabricationMaterial extends PanacheEntityBase {
     @Column(name = "active", nullable = false)
     public Boolean active = true;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "attributes", columnDefinition = "JSONB")
     public String attributes;
 
