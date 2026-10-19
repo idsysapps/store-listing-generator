@@ -1,6 +1,6 @@
 services:
   vllm-coder:
-    image: ghcr.io/timothystewart6/vllm-gb10:latest
+    image: ghcr.io/timothystewart6/vllm-gb10:v0.31.0-gb10.1
     container_name: vllm-coder
     restart: unless-stopped
     ipc: host
@@ -18,22 +18,24 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
       - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
       - SAFETENSORS_FAST_GPU=1
-      - OMP_NUM_THREADS=10
     command:
       - "vllm"
       - "serve"
-      - "nvidia/Qwen3-30B-A3B-NVFP4"
+      - "ibm-granite/granite-4.2-8b"
       - "--host=0.0.0.0"
       - "--port=8001"
       - "--gpu-memory-utilization=0.30"
-      - "--max-model-len=16384"
+      - "--quantization=fp8_per_tensor"
+      - "--max-model-len=131072"
       - "--max-num-seqs=4"
       - "--tensor-parallel-size=1"
       - "--dtype=bfloat16"
-      - "--enforce-eager"
       - "--trust-remote-code"
       - "--enable-prefix-caching"
-      - "--served-model-name=qwen3_coder"
+      - "--served-model-name=granite_coder"
+      - "--enable-auto-tool-choice"
+      - "--tool-call-parser=qwen3_coder"
+      - "--reasoning-parser=deepseek_r1"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
       interval: 30s
@@ -42,7 +44,7 @@ services:
       start_period: 180s
 
   vllm-briefs:
-    image: ghcr.io/timothystewart6/vllm-gb10:latest
+    image: ghcr.io/timothystewart6/vllm-gb10:v0.31.0-gb10.1
     container_name: vllm-briefs
     restart: unless-stopped
     ipc: host
@@ -63,22 +65,24 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
       - HF_TOKEN=${HUGGING_FACE_HUB_TOKEN}
       - SAFETENSORS_FAST_GPU=1
-      - OMP_NUM_THREADS=10
     command:
       - "vllm"
       - "serve"
-      - "nvidia/Qwen3-14B-NVFP4"
+      - "Qwen/Qwen3-14B"
       - "--host=0.0.0.0"
       - "--port=8002"
-      - "--gpu-memory-utilization=0.30"
-      - "--max-model-len=16384"
+      - "--gpu-memory-utilization=0.20"
+      - "--quantization=fp8_per_tensor"
+      - "--max-model-len=32768"
       - "--max-num-seqs=4"
       - "--tensor-parallel-size=1"
       - "--dtype=bfloat16"
-      - "--enforce-eager"
       - "--trust-remote-code"
       - "--enable-prefix-caching"
       - "--served-model-name=qwen38_briefs"
+      - "--enable-auto-tool-choice"
+      - "--tool-call-parser=hermes"
+      - "--reasoning-parser=qwen3"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8002/health"]
       interval: 30s
