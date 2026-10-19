@@ -24,10 +24,12 @@ services:
       - "Qwen/Qwen3-14B"
       - "--host=0.0.0.0"
       - "--port=8002"
-      - "--gpu-memory-utilization=0.20"
+      - "--gpu-memory-utilization=0.25"
       - "--quantization=fp8_per_tensor"
-      - "--max-model-len=32768"
-      - "--max-num-seqs=4"
+      # A smaller context and batch keeps the profiling run (which is what
+      # decides the KV cache size) well inside the budget.
+      - "--max-model-len=16384"
+      - "--max-num-seqs=2"
       - "--tensor-parallel-size=1"
       - "--dtype=bfloat16"
       - "--trust-remote-code"
@@ -36,12 +38,16 @@ services:
       - "--enable-auto-tool-choice"
       - "--tool-call-parser=hermes"
       - "--reasoning-parser=qwen3"
+      # CUDA graph capture needs several GB on top of the weights, and the
+      # capture is what pushed the first cold start over the budget. Eager mode
+      # avoids it; this model runs in a daily batch, not on a latency path.
+      - "--enforce-eager"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8002/health"]
       interval: 30s
       timeout: 10s
       retries: 30
-      start_period: 180s
+      start_period: 300s
 
   vllm-vision:
     image: ghcr.io/timothystewart6/vllm-gb10:v0.31.0-gb10.1
@@ -49,6 +55,9 @@ services:
     restart: unless-stopped
     ipc: host
     network_mode: host
+    depends_on:
+      vllm-briefs:
+        condition: service_healthy
     deploy:
       resources:
         reservations:
@@ -68,14 +77,21 @@ services:
       - "Qwen/Qwen2.5-VL-7B-Instruct"
       - "--host=0.0.0.0"
       - "--port=8003"
-      - "--gpu-memory-utilization=0.15"
-      - "--max-model-len=8192"
-      - "--max-num-seqs=2"
+      # 15.7 GB of weights in bf16 plus the activation peak needs more than
+      # 0.15 of the 122 GB device memory.
+      - "--gpu-memory-utilization=0.30"
+      # The OCR gate sends a single downscaled JPEG - 4k of context is ample
+      # and keeps the profiling run small.
+      - "--max-model-len=4096"
+      - "--max-num-seqs=1"
       # Blackwell (sm_121) VL kernels are not reliably supported in fp8 - use bf16.
       - "--dtype=bfloat16"
       - "--trust-remote-code"
-      - "--limit-mm-per-prompt={\"image\":1}"
+      # video:0 - without it vLLM profiles the video encoder at its maximum
+      # feature size, which is the single largest memory spike in the startup.
+      - "--limit-mm-per-prompt={\"image\":1,\"video\":0}"
       - "--served-model-name=qwen_vl_ocr"
+      - "--enforce-eager"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8003/health"]
       interval: 30s
@@ -98,7 +114,7 @@ services:
       memlock: -1
       stack: 67108864
     depends_on:
-      vllm-briefs:
+      vllm-vision:
         condition: service_healthy
     deploy:
       resources:

@@ -132,17 +132,40 @@ The openai-proxy exposes both models over one OpenAI-compatible endpoint at
 
 ## GPU Memory Budget
 
-GB10 has 128 GB of unified memory shared by every service:
+GB10 has 128 GB of unified memory shared by every service, and the two vLLM
+services are the tightest constraint:
 
-| Service | `--gpu-memory-utilization` |
-|---------|---------------------------|
-| vllm-briefs | 0.20 |
-| vllm-vision | 0.15 |
-| ComfyUI | takes the remainder (~23 GB for Flux + BiRefNet) |
+| Service | `--gpu-memory-utilization` | Notes |
+|---------|---------------------------|-------|
+| vllm-briefs | 0.25 | fp8 weights, 16k context, eager mode |
+| vllm-vision | 0.30 | 15.7 GB of bf16 weights plus the activation peak |
+| ComfyUI | the remainder (~0.23) | Flux Schnell (23.8 GB) + BiRefNet |
 
-The coder service was removed, so roughly 30 % of the unified memory is now
-available to ComfyUI. If ComfyUI still runs out of memory, raise
-`vllm-briefs` to `0.30` and `vllm-vision` to `0.20` and re-check
+The vision model needs the larger share: `Qwen2.5-VL-7B` is 15.7 GB in
+bfloat16, and vLLM's profiling run needs headroom on top of that before it can
+size the KV cache. At `0.15` the budget was smaller than the weights alone and
+the engine died with `No available memory for the cache blocks`.
+
+### Two settings that matter
+
+- **`--enforce-eager`** on both vLLM services. CUDA graph capture needs several
+  GB on top of the weights, and a cold capture was what pushed the first start
+  over the budget. Eager mode avoids the capture entirely. Neither model is on
+  a latency path - briefs run in a daily batch and the vision model only
+  validates generated images.
+- **`--limit-mm-per-prompt={"image":1,"video":0}`** on the vision model.
+  Without `video:0`, vLLM profiles the video encoder at its maximum feature
+  size during startup, which was the single largest memory spike in the boot.
+
+### Services start one at a time
+
+The `depends_on: service_healthy` chain (briefs → vision → ComfyUI → proxy) is
+deliberate. When both vLLM services started together they raced for the unified
+memory pool, and each computed its KV cache budget against a free-memory
+snapshot the other had already consumed - both engines died with a negative KV
+cache. Serialising the startup makes the budget deterministic.
+
+If ComfyUI still runs out of memory, lower `vllm-vision` to `0.25` and re-check
 `nvidia-smi` on the host.
 
 ## Alternative Images
