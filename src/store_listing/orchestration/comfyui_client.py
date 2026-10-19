@@ -20,8 +20,9 @@ from dataclasses import dataclass
 from typing import Any, Self
 
 import httpx
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageFilter
 
+from store_listing.orchestration.chroma_key import punch_out_key_colour
 from store_listing.orchestration.comfyui_workflows import (
     build_birefnet_background_graph,
     build_flux_txt2img_graph,
@@ -38,52 +39,38 @@ DEFAULT_CLIP_NAME1 = "t5xxl_fp8_e4m3fn.safetensors"
 DEFAULT_CLIP_NAME2 = "clip_l.safetensors"
 DEFAULT_VAE_NAME = "ae.safetensors"
 
-CALIBRATION_SIZE = 256
-CALIBRATION_SUBJECT_FRACTION = 0.5
-
 # Alpha cleanup applied to the background removal result.
 ALPHA_BLACK_POINT = 24
 ALPHA_WHITE_POINT = 240
 ALPHA_ERODE_PIXELS = 1
 
 
-def _build_calibration_image() -> bytes:
-    """A synthetic image whose foreground is known: a dark square on a light background.
-
-    Used to measure the mask polarity the server returns - see
-    :func:`_alpha_polarity_is_inverted`.
-    """
-    image = Image.new("RGB", (CALIBRATION_SIZE, CALIBRATION_SIZE), (255, 255, 255))
-    subject = int(CALIBRATION_SIZE * CALIBRATION_SUBJECT_FRACTION)
-    offset = (CALIBRATION_SIZE - subject) // 2
-    ImageDraw.Draw(image).rectangle(
-        (offset, offset, offset + subject, offset + subject), fill=(0, 0, 0)
-    )
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-def _alpha_polarity_is_inverted(rgba_bytes: bytes) -> bool:
-    """True when the alpha channel marks the background opaque and the subject cut out.
+def _mask_is_inverted(rgba_bytes: bytes) -> bool:
+    """True when the mask treats the background as foreground.
 
     ComfyUI 0.37.1's ``RemoveBackground`` returns a background map (1 = background)
-    even though the node documents a foreground mask, and ``JoinImageWithAlpha``
-    treats 255 as opaque. Joining the two directly punches the subject out and
-    keeps the background. This measures which convention the server is using
-    instead of assuming one.
+    for some renders and a foreground map for others, so the polarity has to be
+    measured per image rather than assumed. The border of a design is background
+    by construction, so an opaque border means the mask has to be flipped.
     """
     with Image.open(io.BytesIO(rgba_bytes)) as opened:
         alpha = opened.convert("RGBA").getchannel("A")
-        size = alpha.size[0]
-        quarter = max(1, size // 4)
-        corner = max(1, size // 16)
-        subject_pixels = alpha.crop((quarter, quarter, size - quarter, size - quarter)).tobytes()
-        background_pixels = alpha.crop((0, 0, corner, corner)).tobytes()
-        subject = sum(subject_pixels) / max(1, len(subject_pixels))
-        background = sum(background_pixels) / max(1, len(background_pixels))
-
-    return subject < background
+        width, height = alpha.size
+        values = alpha.tobytes()
+        step = max(1, min(width, height) // 64)
+        opaque = 0
+        total = 0
+        for x in range(0, width, step):
+            for y in (0, height - 1):
+                total += 1
+                if values[y * width + x] > 127:
+                    opaque += 1
+        for y in range(0, height, step):
+            for x in (0, width - 1):
+                total += 1
+                if values[y * width + x] > 127:
+                    opaque += 1
+    return opaque * 2 > total
 
 
 def _invert_alpha(rgba_bytes: bytes) -> bytes:
@@ -171,7 +158,6 @@ class ComfyUIClient:
         self._vae_name = vae_name
         self._bg_model_name = bg_model_name
         self._discovered_bg_model: str | None = None
-        self._invert_alpha: bool | None = None
         self._alpha_black_point = alpha_black_point
         self._alpha_white_point = alpha_white_point
         self._alpha_erode_pixels = alpha_erode_pixels
@@ -231,7 +217,6 @@ class ComfyUIClient:
     ) -> ComfyUIResult:
         """Upload the image to ComfyUI, run BiRefNet, return a transparent RGBA PNG."""
         model_name = bg_model_name or self._bg_model_name or self._discover_bg_model()
-        invert = self._alpha_needs_inversion(model_name)
 
         uploaded = self._upload_image(image_bytes)
         graph = build_birefnet_background_graph(
@@ -239,15 +224,20 @@ class ComfyUIClient:
             bg_model_name=model_name,
         )
         result = self._run_graph(graph)
-        if result.image_bytes is not None:
-            if invert:
-                result.image_bytes = _invert_alpha(result.image_bytes)
-            result.image_bytes = _clean_alpha(
-                result.image_bytes,
-                black=self._alpha_black_point,
-                white=self._alpha_white_point,
-                erode=self._alpha_erode_pixels,
-            )
+        if result.image_bytes is None:
+            return result
+
+        if _mask_is_inverted(result.image_bytes):
+            result.image_bytes = _invert_alpha(result.image_bytes)
+        result.image_bytes = _clean_alpha(
+            result.image_bytes,
+            black=self._alpha_black_point,
+            white=self._alpha_white_point,
+            erode=self._alpha_erode_pixels,
+        )
+        # The model treats the enclosed counter of a letter as part of the
+        # subject, so those pixels keep the background colour. Punch them out.
+        result.image_bytes = punch_out_key_colour(result.image_bytes, image_bytes)
         return result
 
     def health(self) -> bool:
@@ -260,46 +250,6 @@ class ComfyUIClient:
         return response.status_code == 200
 
     # -- internals ---------------------------------------------------------
-
-    def _alpha_needs_inversion(self, model_name: str) -> bool:
-        """Whether the server's mask has to be flipped before it becomes an alpha channel."""
-        if self._invert_alpha is None:
-            self._invert_alpha = self._probe_alpha_polarity(model_name)
-        return self._invert_alpha
-
-    def _probe_alpha_polarity(self, model_name: str) -> bool:
-        """Measure the mask polarity by running the model on a known foreground.
-
-        ComfyUI 0.37.1 returns a background map from ``RemoveBackground`` even
-        though the node documents a foreground mask, so the alpha has to be
-        flipped. Rather than hard-code that, run the model on a synthetic image
-        whose subject is known and compare the alpha over the subject with the
-        alpha over the background.
-        """
-        try:
-            calibration = _build_calibration_image()
-            uploaded = self._upload_image(calibration)
-            graph = build_birefnet_background_graph(
-                image_name=uploaded["name"],
-                bg_model_name=model_name,
-            )
-            result = self._run_graph(graph)
-            if result.image_bytes is None:
-                raise ComfyUIError("the probe did not return an image")
-            inverted = _alpha_polarity_is_inverted(result.image_bytes)
-        except ComfyUIError as exc:
-            logger.warning(
-                "Could not measure the background removal mask polarity (%s) - "
-                "assuming the server returns a background map",
-                exc,
-            )
-            return True
-
-        logger.info(
-            "Background removal mask polarity: %s",
-            "background map (flipping the alpha)" if inverted else "foreground map",
-        )
-        return inverted
 
     def _discover_bg_model(self) -> str:
         """Find the background removal model the server actually has installed.
@@ -427,7 +377,10 @@ class ComfyUIClient:
         return response.content
 
     def _upload_image(self, image_bytes: bytes) -> dict[str, str]:
-        files = {"image": ("input.png", image_bytes, "image/png")}
+        # A unique name per upload: reusing one name with overwrite=true can
+        # leave ComfyUI's input directory pointing at a file it can no longer read.
+        name = f"input_{uuid.uuid4().hex[:12]}.png"
+        files = {"image": (name, image_bytes, "image/png")}
         data = {"overwrite": "true", "type": "input"}
         try:
             response = self._http.post(f"{self.base_url}/upload/image", files=files, data=data)

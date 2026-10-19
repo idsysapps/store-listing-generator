@@ -15,13 +15,30 @@ from store_listing.orchestration.design_briefs import DesignBrief
 logger = logging.getLogger(__name__)
 
 PRODUCT_TYPE_CONTEXT: dict[str, str] = {
+    # dtf_apparel is the one product whose background is removed, so it is
+    # rendered on a flat saturated magenta that can be keyed out exactly.
+    # A dark background does not work: the background removal then fills the
+    # enclosed counters of letters like O, R and A instead of cutting them out.
+    # Magenta also keeps white artwork and white text visible. See issue #111.
     "dtf_apparel": (
-        "sticker illustration on plain white background, bold outlines, "
-        "flat colors, compact centered composition, DTF transfer print"
+        "sticker illustration, bold outlines, flat colors, compact centered composition, "
+        "DTF transfer print, isolated on a solid pure magenta background, plain magenta "
+        "backdrop, chroma key background, uniform flat magenta color"
     ),
-    "sublimation": "full-color sublimation print, seamless edges, vibrant colors",
-    "sticker_vinyl": "sticker decal, clean cut lines, bold outlines",
+    # These are printed full-bleed, so their background is kept and has to be
+    # white - it becomes the paper.
+    "sublimation": (
+        "full-color sublimation print, seamless edges, vibrant colors, "
+        "isolated on a solid pure white background, plain white backdrop"
+    ),
+    "sticker_vinyl": (
+        "sticker decal, clean cut lines, bold outlines, "
+        "isolated on a solid pure white background, plain white backdrop"
+    ),
 }
+
+# The product types whose background is printed as-is and is therefore white.
+WHITE_BACKGROUND_PRODUCTS = frozenset({"sublimation", "sticker_vinyl"})
 
 DEFAULT_FONT_COLOR = "#000000"
 
@@ -70,6 +87,36 @@ def _feedback_section(brief: DesignBrief) -> str:
     return f" {brief.regeneration_feedback}."
 
 
+DEFAULT_FONT_COLOR = "#000000"
+
+
+def _is_near_white(colour: str) -> bool:
+    """True for a white or near-white hex colour."""
+    digits = colour.lstrip("#")
+    if len(digits) != 6:
+        return False
+    try:
+        channels = [int(digits[index : index + 2], 16) for index in (0, 2, 4)]
+    except ValueError:
+        return False
+    return min(channels) >= 200
+
+
+def _font_colour(brief: DesignBrief) -> str:
+    """The text colour, falling back to black when it would be invisible.
+
+    White text is fine on the magenta background of a dtf_apparel brief - that
+    background is removed before printing. On the white background of the
+    print-through product types it would be invisible, so it is corrected here.
+    Briefs written before the backgrounds changed can still carry one.
+    """
+    colour = brief.font_color or DEFAULT_FONT_COLOR
+    if brief.product_type in WHITE_BACKGROUND_PRODUCTS and _is_near_white(colour):
+        logger.warning("Brief %r has a near-white font colour on a white background", brief.concept)
+        return DEFAULT_FONT_COLOR
+    return colour
+
+
 def build_flux_prompt(brief: DesignBrief) -> str:
     """Build the Flux prompt for a brief, folding the layout fields in.
 
@@ -80,7 +127,7 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
     scene = _scene_for_prompt(brief)
     feedback = _feedback_section(brief)
-    font_color = brief.font_color or DEFAULT_FONT_COLOR
+    font_color = _font_colour(brief)
     layout_type = brief.layout_type or "full_bleed"
 
     if layout_type == "full_bleed" and brief.headline_text:

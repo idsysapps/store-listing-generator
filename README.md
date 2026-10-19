@@ -284,7 +284,12 @@ Ideogram text routing and the AWS Bedrock image calls have been removed.
 
 The OCR gate **fails closed**: when the text rendered into the image cannot be
 verified within the retry budget, the image is not uploaded and the brief is
-counted as an error. The DGX side is documented in
+counted as an error.
+
+`dtf_apparel` designs are rendered on a flat saturated magenta background that is
+keyed out to produce the transparent PNG, so white artwork and white text stay
+visible. The `sublimation` and `sticker_vinyl` designs are printed full-bleed on
+white paper. The DGX side is documented in
 [`deploy/dgx/COMFYUI_SETUP.md`](deploy/dgx/COMFYUI_SETUP.md).
 
 ## Source Health & Free-Path-First Harvesting

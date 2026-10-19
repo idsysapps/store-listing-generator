@@ -117,6 +117,45 @@ class TestBuildFluxPrompt:
 
         assert "#000000" in prompt
 
+    def test_a_white_font_colour_is_kept_for_dtf_apparel(self) -> None:
+        # The dtf background is magenta and is removed before printing, so
+        # white text is visible.
+        brief = _make_brief(
+            product_type="dtf_apparel",
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            font_color="#FFFFFF",
+        )
+        prompt = build_flux_prompt(brief)
+
+        assert "#FFFFFF" in prompt
+
+    def test_a_white_font_colour_falls_back_to_black_on_a_white_background(self) -> None:
+        # The print-through product types keep their white background, so
+        # white text on it would be invisible.
+        brief = _make_brief(
+            product_type="sublimation",
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            font_color="#FFFFFF",
+        )
+        prompt = build_flux_prompt(brief)
+
+        assert "#FFFFFF" not in prompt
+        assert "#000000" in prompt
+
+    def test_a_near_white_font_colour_falls_back_to_black(self) -> None:
+        brief = _make_brief(
+            product_type="sublimation",
+            layout_type="text_top",
+            headline_text="SPOOKY SEASON",
+            font_color="#F5F5F0",
+        )
+        prompt = build_flux_prompt(brief)
+
+        assert "#F5F5F0" not in prompt
+        assert "#000000" in prompt
+
     def test_regeneration_feedback_is_appended(self) -> None:
         brief = _make_brief(
             layout_type="full_bleed",

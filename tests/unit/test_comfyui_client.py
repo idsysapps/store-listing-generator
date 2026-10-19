@@ -13,10 +13,9 @@ from PIL import Image
 from store_listing.orchestration.comfyui_client import (
     ComfyUIClient,
     ComfyUIError,
-    _alpha_polarity_is_inverted,
-    _build_calibration_image,
     _clean_alpha,
     _invert_alpha,
+    _mask_is_inverted,
 )
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -412,30 +411,7 @@ def _alpha_at(image: Image.Image, x: int, y: int) -> int:
     return channel.crop((x, y, x + 1, y + 1)).tobytes()[0]
 
 
-class TestCalibrationImage:
-    def test_is_a_png(self) -> None:
-        image = Image.open(io.BytesIO(_build_calibration_image()))
-        assert image.format == "PNG"
-
-    def test_has_a_dark_subject_on_a_light_background(self) -> None:
-        image = Image.open(io.BytesIO(_build_calibration_image())).convert("L")
-        size = image.size[0]
-        centre = _mean_luma(image, (size // 2 - 16, size // 2 - 16, size // 2 + 16, size // 2 + 16))
-        corner = _mean_luma(image, (0, 0, 16, 16))
-        assert centre < 128
-        assert corner > 128
-
-    def test_the_subject_covers_the_middle_of_the_canvas(self) -> None:
-        image = Image.open(io.BytesIO(_build_calibration_image())).convert("L")
-        size = image.size[0]
-        assert _mean_luma(image, (0, 0, 16, 16)) > 128
-        assert (
-            _mean_luma(image, (size // 2 - 16, size // 2 - 16, size // 2 + 16, size // 2 + 16))
-            < 128
-        )
-
-
-class TestAlphaPolarity:
+class TestMaskPolarity:
     def _rgba(self, centre: int, corner: int) -> bytes:
         image = Image.new("RGBA", (64, 64), (255, 0, 0, corner))
         for x in range(16, 48):
@@ -447,11 +423,11 @@ class TestAlphaPolarity:
 
     def test_detects_an_inverted_mask(self) -> None:
         # subject transparent, background opaque
-        assert _alpha_polarity_is_inverted(self._rgba(centre=0, corner=255)) is True
+        assert _mask_is_inverted(self._rgba(centre=0, corner=255)) is True
 
     def test_detects_a_correct_mask(self) -> None:
         # subject opaque, background transparent
-        assert _alpha_polarity_is_inverted(self._rgba(centre=255, corner=0)) is False
+        assert _mask_is_inverted(self._rgba(centre=255, corner=0)) is False
 
 
 class TestInvertAlpha:
@@ -499,59 +475,108 @@ class TestRemoveBackgroundPolarity:
 
         return handler
 
-    def _rgba_with(self, centre: int, corner: int, size: int = 64) -> bytes:
-        image = Image.new("RGBA", (size, size), (255, 0, 0, corner))
+    def _source(self, size: int = 64) -> bytes:
+        """A design on a flat magenta background with an orange square in the middle."""
+        image = Image.new("RGB", (size, size), (247, 0, 102))
         half = size // 4
         for x in range(half, size - half):
             for y in range(half, size - half):
-                image.putpixel((x, y), (255, 0, 0, centre))
+                image.putpixel((x, y), (250, 120, 10))
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
         return buffer.getvalue()
 
-    def test_inverts_the_alpha_when_the_server_returns_a_background_map(self) -> None:
-        probe = self._rgba_with(centre=0, corner=255)
-        result_image = self._rgba_with(centre=0, corner=255)
+    def _server_output(self, source: bytes, *, inverted: bool) -> bytes:
+        """What the server returns: a mask with the requested polarity."""
+        with Image.open(io.BytesIO(source)) as opened:
+            image = opened.convert("RGB")
+        values = image.tobytes()
+        width, height = image.size
+        half = width // 4
+        out = image.convert("RGBA")
+        data: list[tuple[int, int, int, int]] = []
+        for y in range(height):
+            for x in range(width):
+                is_artwork = half <= x < width - half and half <= y < height - half
+                alpha = 255 if is_artwork else 0
+                if inverted:
+                    alpha = 255 - alpha
+                offset = (y * width + x) * 3
+                data.append((values[offset], values[offset + 1], values[offset + 2], alpha))
+        out.putdata(data)
+        buffer = io.BytesIO()
+        out.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def test_a_background_map_is_corrected(self) -> None:
+        source = self._source()
         counter = [0]
         client = _client(
-            self._handler([probe, result_image], counter), bg_model_name="birefnet.safetensors"
+            self._handler([self._server_output(source, inverted=True)], counter),
+            bg_model_name="birefnet.safetensors",
         )
 
-        result = client.remove_background(_png_bytes())
+        result = client.remove_background(source)
 
         assert result.image_bytes is not None
         alpha = Image.open(io.BytesIO(result.image_bytes)).convert("RGBA").getchannel("A")
-        # the subject is now opaque and the background transparent
-        assert _alpha_at(alpha, 32, 32) == 255
-        assert _alpha_at(alpha, 2, 2) == 0
+        assert _alpha_at(alpha, 32, 32) == 255, "the artwork should be opaque"
+        assert _alpha_at(alpha, 2, 2) == 0, "the background should be transparent"
 
-    def test_leaves_the_alpha_alone_when_the_server_returns_a_foreground_map(self) -> None:
-        probe = self._rgba_with(centre=255, corner=0)
-        result_image = self._rgba_with(centre=255, corner=0)
+    def test_a_foreground_map_is_left_alone(self) -> None:
+        source = self._source()
         counter = [0]
         client = _client(
-            self._handler([probe, result_image], counter), bg_model_name="birefnet.safetensors"
+            self._handler([self._server_output(source, inverted=False)], counter),
+            bg_model_name="birefnet.safetensors",
         )
 
-        result = client.remove_background(_png_bytes())
+        result = client.remove_background(source)
 
         assert result.image_bytes is not None
         alpha = Image.open(io.BytesIO(result.image_bytes)).convert("RGBA").getchannel("A")
         assert _alpha_at(alpha, 32, 32) == 255
         assert _alpha_at(alpha, 2, 2) == 0
 
-    def test_the_probe_runs_only_once(self) -> None:
-        probe = self._rgba_with(centre=0, corner=255)
+    def test_the_background_colour_is_punched_out_of_the_artwork(self) -> None:
+        # A letter's enclosed counter keeps the background colour in the mask.
+        # Those pixels are punched out.
+        source = self._source()
+        with Image.open(io.BytesIO(source)) as opened:
+            image = opened.convert("RGB")
+        image.putpixel((32, 32), (247, 0, 102))  # a counter that the model kept
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        source = buffer.getvalue()
+
         counter = [0]
-        client = _client(self._handler([probe], counter), bg_model_name="birefnet.safetensors")
+        client = _client(
+            self._handler([self._server_output(source, inverted=False)], counter),
+            bg_model_name="birefnet.safetensors",
+        )
 
-        client.remove_background(_png_bytes())
-        client.remove_background(_png_bytes())
+        result = client.remove_background(source)
 
-        # one probe + two removals
-        assert counter[0] == 3
+        assert result.image_bytes is not None
+        alpha = Image.open(io.BytesIO(result.image_bytes)).convert("RGBA").getchannel("A")
+        assert _alpha_at(alpha, 32, 32) == 0, (
+            "the background-coloured counter should be punched out"
+        )
 
-    def test_a_failed_probe_falls_back_to_inverting(self) -> None:
+    def test_only_one_workflow_is_run_per_removal(self) -> None:
+        source = self._source()
+        counter = [0]
+        client = _client(
+            self._handler([self._server_output(source, inverted=False)], counter),
+            bg_model_name="birefnet.safetensors",
+        )
+
+        client.remove_background(source)
+        client.remove_background(source)
+
+        assert counter[0] == 2
+
+    def test_a_failed_removal_reports_the_error(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             if request.url.path == "/upload/image":
                 return httpx.Response(
@@ -562,17 +587,12 @@ class TestRemoveBackgroundPolarity:
             if request.url.path.startswith("/history/"):
                 return _history_ok(filename="bg_removed_00001_.png", node_id="5")
             if request.url.path == "/view":
-                return httpx.Response(200, content=self._rgba_with(centre=0, corner=255))
+                return httpx.Response(200, content=b"")
             return httpx.Response(404)
 
         client = _client(handler, bg_model_name="birefnet.safetensors")
-        # The probe and the removal share the same /view response here, so the
-        # probe measures an inverted mask and the removal is corrected.
-        result = client.remove_background(_png_bytes())
-
-        assert result.image_bytes is not None
-        alpha = Image.open(io.BytesIO(result.image_bytes)).convert("RGBA").getchannel("A")
-        assert _alpha_at(alpha, 32, 32) == 255
+        with pytest.raises(ComfyUIError):
+            client.remove_background(_png_bytes())
 
 
 class TestHealth:
