@@ -18,6 +18,44 @@ must be built natively on the DGX before first use.
 3. Copies docker-compose.yml and openai-proxy.py to `/opt/trtllm/`
 4. Starts all services (vLLM briefs, vLLM vision, ComfyUI, proxy)
 
+## Updating the Stack
+
+The compose file and the proxy are the only two files the running stack reads.
+Copy them across and recreate the containers:
+
+```bash
+# From the repository root
+scp deploy/dgx/docker-compose.yml deploy/dgx/openai-proxy.py \
+    mathianasj@192.168.2.123:/opt/trtllm/
+ssh -t mathianasj@192.168.2.123 \
+    'docker compose -f /opt/trtllm/docker-compose.yml up -d'
+```
+
+`docker compose up -d` only recreates what changed, so the ComfyUI container and
+its loaded models survive the update. The first start of a new service pulls its
+model (Qwen2.5-VL-7B is ~16 GB).
+
+To confirm the stack came up:
+
+```bash
+curl -s http://127.0.0.1:8188/system_stats   # ComfyUI
+curl -s http://127.0.0.1:9000/v1/models       # the proxy's model list
+```
+
+### Autostart on boot
+
+Every service in the compose file uses `restart: unless-stopped`, so Docker
+restarts the stack on boot by itself. The old `trtllm.service` systemd unit
+(which wrapped `docker compose up` for the retired TensorRT-LLM deployment) is
+no longer part of the repository. If it is still installed on the host, remove
+it so the stack is not started twice:
+
+```bash
+sudo systemctl disable --now trtllm.service
+sudo rm /etc/systemd/system/trtllm.service
+sudo systemctl daemon-reload
+```
+
 ## Model Directory
 
 Models are stored on the host at `/opt/comfyui-data/models/`:

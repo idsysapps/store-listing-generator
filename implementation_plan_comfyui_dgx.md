@@ -20,6 +20,7 @@ to have run in production.
 | ComfyUI needs a restart to pick up models | It does not — 0.37.1 resolves the model enums per request. A restart is not required. |
 | Vision model on `sm_121` is a risk | `Qwen2.5-VL-7B-Instruct` in `bfloat16` is configured in `deploy/dgx/docker-compose.yml`; fp8 is deliberately not used. |
 | Three vLLM services (coder, briefs, vision) | The **coder** service (`granite-4.2-8b`, `:8001`) was removed — it was not used by the application and its 30 % GPU reservation is better spent on ComfyUI. The proxy now routes `qwen38_briefs` and `qwen_vl_ocr` only, and `qwen38_briefs` is the default model. |
+| The `deploy/dgx` directory held a TensorRT-LLM deployment | `Dockerfile`, `entrypoint.sh`, `model-configs/` and `trtllm.service` targeted the retired Triton/TensorRT-LLM stack and were referenced by nothing else. They were removed; the services autostart through Docker's `restart: unless-stopped` policy instead. |
 
 
 ---

@@ -50,11 +50,21 @@ sudo systemctl stop ollama.service 2>/dev/null || true
 sudo systemctl disable ollama.service 2>/dev/null || true
 sudo docker stop vllm-briefs vllm-vision comfyui vllm-proxy 2>/dev/null || true
 
+# The TensorRT-LLM systemd unit is retired - the compose services autostart on
+# boot through Docker's restart policy, and the old unit would start them twice.
+if systemctl list-unit-files trtllm.service 2>/dev/null | grep -q "^trtllm.service"; then
+    echo "==> Removing the retired trtllm.service unit"
+    sudo systemctl disable --now trtllm.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/trtllm.service
+    sudo systemctl daemon-reload
+fi
+
 echo "==> Starting vLLM + ComfyUI stack"
 cd "$INSTALL_DIR"
 sudo docker compose up -d
 
-IP=$(hostname -I | awk '{print $1}')
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')" || IP=""
+[ -n "$IP" ] || IP="<dgx-ip>"
 echo ""
 echo "==> Stack starting. First run may take several minutes for model downloads."
 echo "    Monitor: sudo docker compose -f $INSTALL_DIR/docker-compose.yml logs -f"
