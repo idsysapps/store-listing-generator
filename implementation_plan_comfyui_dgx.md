@@ -1,8 +1,25 @@
 # Implementation Plan — Issue #111: ComfyUI + Flux Schnell on DGX (replace Leonardo.ai + Bedrock)
 
-**Status:** ready to execute
-**Branch:** `feat/comfyui-dgx-image-generation` (exists; last commit `cd0b6e8 chore: add DGX ComfyUI + TensorRT-LLM deployment config (refs #111)`)
+**Status:** Phases 0–8 implemented and merged into `feat/comfyui-dgx-image-generation`.
+Phases 1–8 are live-validated against the DGX (Flux generation, BiRefNet background
+removal and the ComfyUI error paths all pass the integration tests). Phase 9
+(AWS decommissioning) is still outstanding — it is manual ops and waits for the path
+to have run in production.
+
+**Branch:** `feat/comfyui-dgx-image-generation`
 **Supersedes:** the stale `implementation_plan_comfyui_dgx.md` (root) — see [Why the old plan was wrong](#why-the-old-plan-was-wrong)
+
+### What changed from the plan as written
+
+| Plan said | Reality |
+|-----------|---------|
+| Remove Leonardo and Bedrock immediately (D2) | Done, as agreed — but the vision model and the OCR gate shipped in the same change, so the app never had a window with no generation path. |
+| `COMFYUI_BG_MODEL_NAME` default `birefnet.safetensors` | The client now **discovers** the installed background-removal model from `GET /object_info/LoadBackgroundRemovalModel`; the env var is now an override, not a default. |
+| OCR gate reads the transparent image | The gate reads the **raw** render (what Flux actually produced) before background removal. |
+| `ImageResult` keeps four fields | A fifth field, `background_removed`, was added so the pipeline can tell a real transparent PNG from a background-removal fallback. |
+| ComfyUI needs a restart to pick up models | It does not — 0.37.1 resolves the model enums per request. A restart is not required. |
+| Vision model on `sm_121` is a risk | `Qwen2.5-VL-7B-Instruct` in `bfloat16` is configured in `deploy/dgx/docker-compose.yml`; fp8 is deliberately not used. |
+
 
 ---
 
