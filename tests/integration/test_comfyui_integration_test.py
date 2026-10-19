@@ -51,6 +51,7 @@ def test_birefnet_returns_a_transparent_png(client: ComfyUIClient) -> None:
         prompt="a single orange pumpkin on a plain white background",
         width=512,
         height=512,
+        seed=20261019,
     )
     assert source.image_bytes is not None
 
@@ -60,8 +61,15 @@ def test_birefnet_returns_a_transparent_png(client: ComfyUIClient) -> None:
     assert result.image_bytes is not None
     with Image.open(BytesIO(result.image_bytes)) as image:
         assert image.mode == "RGBA"
-        alpha_bytes = image.getchannel("A").tobytes()
-        assert min(alpha_bytes) < 255
+        alpha = image.getchannel("A")
+        pixels = alpha.tobytes()
+        # The background is cut out and the subject is kept. Asserting only
+        # that *something* is transparent would not catch an inverted mask -
+        # the corners are background, so they have to be the transparent part.
+        corner = alpha.crop((0, 0, 16, 16)).tobytes()
+        assert sum(corner) / len(corner) < 64, "the background should be transparent"
+        opaque = sum(1 for value in pixels if value > 192)
+        assert opaque / len(pixels) > 0.02, "the subject should still be opaque"
 
 
 def test_a_missing_model_is_reported_clearly(client: ComfyUIClient) -> None:
