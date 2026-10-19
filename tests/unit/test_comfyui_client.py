@@ -120,16 +120,20 @@ class TestGenerateImage:
             return httpx.Response(
                 400,
                 json={
-                    "error": {"type": "prompt_outputs_failed_validation", "message": "bad graph"},
+                    "error": {
+                        "type": "prompt_outputs_failed_validation",
+                        "message": "Prompt outputs failed validation",
+                    },
                     "node_errors": {
                         "1": {
+                            "class_type": "UNETLoader",
                             "errors": [
                                 {
                                     "type": "value_not_in_list",
-                                    "message": "'flux1-schnell.safetensors' not in []",
-                                    "details": "it is not in the list",
+                                    "message": "Value not in list",
+                                    "details": ("unet_name: 'flux1-schnell.safetensors' not in []"),
                                 }
-                            ]
+                            ],
                         }
                     },
                 },
@@ -139,6 +143,7 @@ class TestGenerateImage:
             _client(handler).generate_image(prompt="a red bicycle")
 
         assert "flux1-schnell.safetensors" in str(excinfo.value)
+        assert "UNETLoader" in str(excinfo.value)
 
     def test_raises_when_execution_reports_an_error(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -221,7 +226,9 @@ class TestRemoveBackground:
                 return httpx.Response(200, content=rgba)
             return httpx.Response(404)
 
-        result = _client(handler).remove_background(_png_bytes())
+        result = _client(handler, bg_model_name="birefnet.safetensors").remove_background(
+            _png_bytes()
+        )
 
         assert result.error is None
         assert result.image_bytes == rgba
@@ -243,10 +250,89 @@ class TestRemoveBackground:
                 return _history_ok(filename="bg_removed_00001_.png", node_id="5")
             return httpx.Response(200, content=_png_bytes("RGBA"))
 
-        _client(handler).remove_background(_png_bytes())
+        _client(handler, bg_model_name="birefnet.safetensors").remove_background(_png_bytes())
 
         assert content_types
         assert content_types[0].startswith("multipart/form-data")
+
+
+class TestBackgroundModelDiscovery:
+    def _object_info(self, options: list[str]) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "LoadBackgroundRemovalModel": {
+                    "input": {
+                        "required": {
+                            "bg_removal_name": [
+                                "COMBO",
+                                {"options": options, "multiselect": False, "tooltip": "x"},
+                            ]
+                        }
+                    }
+                }
+            },
+        )
+
+    def test_discovers_the_installed_model_when_none_is_configured(self) -> None:
+        posted: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/object_info/LoadBackgroundRemovalModel":
+                return self._object_info(["model.safetensors"])
+            if request.url.path == "/upload/image":
+                return httpx.Response(
+                    200, json={"name": "uploaded_abc.png", "subfolder": "", "type": "input"}
+                )
+            if request.url.path == "/prompt":
+                import json
+
+                posted.append(json.loads(request.content)["prompt"])
+                return _prompt_ok()
+            if request.url.path.startswith("/history/"):
+                return _history_ok(filename="bg_removed_00001_.png", node_id="5")
+            return httpx.Response(200, content=_png_bytes("RGBA"))
+
+        _client(handler).remove_background(_png_bytes())
+
+        assert posted[0]["1"]["inputs"]["bg_removal_name"] == "model.safetensors"
+
+    def test_an_explicitly_configured_model_is_used_as_is(self) -> None:
+        posted: list[dict] = []
+        object_info_calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/object_info/LoadBackgroundRemovalModel":
+                object_info_calls.append(request.url.path)
+                return self._object_info(["model.safetensors"])
+            if request.url.path == "/upload/image":
+                return httpx.Response(
+                    200, json={"name": "uploaded_abc.png", "subfolder": "", "type": "input"}
+                )
+            if request.url.path == "/prompt":
+                import json
+
+                posted.append(json.loads(request.content)["prompt"])
+                return _prompt_ok()
+            if request.url.path.startswith("/history/"):
+                return _history_ok(filename="bg_removed_00001_.png", node_id="5")
+            return httpx.Response(200, content=_png_bytes("RGBA"))
+
+        _client(handler, bg_model_name="birefnet.safetensors").remove_background(_png_bytes())
+
+        assert posted[0]["1"]["inputs"]["bg_removal_name"] == "birefnet.safetensors"
+        assert object_info_calls == []
+
+    def test_raises_when_no_model_is_installed(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/object_info/LoadBackgroundRemovalModel":
+                return self._object_info([])
+            return httpx.Response(404)
+
+        with pytest.raises(ComfyUIError) as excinfo:
+            _client(handler).remove_background(_png_bytes())
+
+        assert "No background removal model" in str(excinfo.value)
 
 
 class TestHealth:

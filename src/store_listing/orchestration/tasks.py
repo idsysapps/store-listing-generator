@@ -454,6 +454,11 @@ def generate_design_images_task() -> dict:
         base_url=os.environ.get("COMFYUI_BASE_URL", "http://localhost:8188"),
         timeout_seconds=float(os.environ.get("COMFYUI_TIMEOUT_SECONDS", "300")),
         poll_interval_seconds=float(os.environ.get("COMFYUI_POLL_INTERVAL_SECONDS", "1.0")),
+        unet_name=os.environ.get("COMFYUI_UNET_NAME", "flux1-schnell.safetensors"),
+        clip_name1=os.environ.get("COMFYUI_CLIP_NAME1", "t5xxl_fp8_e4m3fn.safetensors"),
+        clip_name2=os.environ.get("COMFYUI_CLIP_NAME2", "clip_l.safetensors"),
+        vae_name=os.environ.get("COMFYUI_VAE_NAME", "ae.safetensors"),
+        bg_model_name=os.environ.get("COMFYUI_BG_MODEL_NAME") or None,
     )
     text_validator = TextValidator(
         client=get_vision_client(),
@@ -491,6 +496,11 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         base_url=os.environ.get("COMFYUI_BASE_URL", "http://localhost:8188"),
         timeout_seconds=float(os.environ.get("COMFYUI_TIMEOUT_SECONDS", "300")),
         poll_interval_seconds=float(os.environ.get("COMFYUI_POLL_INTERVAL_SECONDS", "1.0")),
+        unet_name=os.environ.get("COMFYUI_UNET_NAME", "flux1-schnell.safetensors"),
+        clip_name1=os.environ.get("COMFYUI_CLIP_NAME1", "t5xxl_fp8_e4m3fn.safetensors"),
+        clip_name2=os.environ.get("COMFYUI_CLIP_NAME2", "clip_l.safetensors"),
+        vae_name=os.environ.get("COMFYUI_VAE_NAME", "ae.safetensors"),
+        bg_model_name=os.environ.get("COMFYUI_BG_MODEL_NAME") or None,
     )
     text_validator = TextValidator(
         client=get_vision_client(),

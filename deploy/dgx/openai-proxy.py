@@ -26,6 +26,8 @@ PORT = 9000
 MODEL_ROUTES: dict[str, str] = {
     "granite_coder": "http://localhost:8001",
     "qwen38_briefs": "http://localhost:8002",
+    # Vision model used to verify the text rendered into a generated image.
+    "qwen_vl_ocr": "http://localhost:8003",
 }
 
 DEFAULT_MODEL = "granite_coder"

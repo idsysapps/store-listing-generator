@@ -28,22 +28,49 @@ MODELS_DIR="$COMFYUI_DATA/models"
 
 HF_BASE="https://huggingface.co"
 
+file_size() {
+    stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null || echo 0
+}
+
 download() {
     local url="$1"
     local dest="$2"
     local expected_size="$3"
 
+    local dir name url_name scratch actual_size
+    dir="$(dirname "$dest")"
+    name="$(basename "$dest")"
+    url_name="${url##*/}"
+    scratch="$dir/$url_name"
+
+    # Already present under the canonical name?
     if [ -f "$dest" ]; then
-        local actual_size
-        actual_size=$(stat -c %s "$dest" 2>/dev/null || stat -f %z "$dest" 2>/dev/null || echo 0)
+        actual_size="$(file_size "$dest")"
         if [ "$actual_size" = "$expected_size" ]; then
             echo "    - Already downloaded ($(du -h "$dest" | cut -f1)), skipping"
             return 0
         fi
-        echo "    - Existing file is $actual_size bytes, expected $expected_size - resuming"
+        echo "    - $dest is $actual_size bytes, expected $expected_size - re-downloading"
     fi
 
-    wget -c --show-progress --tries=5 --timeout=60 -P "$(dirname "$dest")" "$url"
+    # wget names the file after the URL, so a previous run may have left the
+    # bytes under that name. Reuse it when it is already complete.
+    if [ -f "$scratch" ]; then
+        actual_size="$(file_size "$scratch")"
+        if [ "$actual_size" = "$expected_size" ]; then
+            echo "    - Already downloaded under the upstream name, renaming"
+            mv "$scratch" "$dest"
+            return 0
+        fi
+        echo "    - Resuming $scratch from $actual_size bytes"
+    fi
+
+    # -c resumes the partial file, so an interrupted run continues where it stopped.
+    wget -c --show-progress --tries=5 --timeout=60 -P "$dir" "$url"
+
+    if [ "$url_name" != "$name" ]; then
+        mv "$dir/$url_name" "$dest"
+    fi
 }
 
 echo "==> Model directory: $MODELS_DIR"
@@ -108,7 +135,7 @@ verify() {
         return
     fi
     local actual
-    actual=$(stat -c %s "$file" 2>/dev/null || stat -f %z "$file" 2>/dev/null || echo 0)
+    actual="$(file_size "$file")"
     if [ "$actual" = "$expected" ]; then
         echo "    OK: $(basename "$file") ($actual bytes)"
     else

@@ -35,7 +35,6 @@ DEFAULT_UNET_NAME = "flux1-schnell.safetensors"
 DEFAULT_CLIP_NAME1 = "t5xxl_fp8_e4m3fn.safetensors"
 DEFAULT_CLIP_NAME2 = "clip_l.safetensors"
 DEFAULT_VAE_NAME = "ae.safetensors"
-DEFAULT_BG_MODEL_NAME = "birefnet.safetensors"
 
 
 class ComfyUIError(Exception):
@@ -62,6 +61,11 @@ class ComfyUIClient:
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         http_client: httpx.Client | None = None,
+        unet_name: str = DEFAULT_UNET_NAME,
+        clip_name1: str = DEFAULT_CLIP_NAME1,
+        clip_name2: str = DEFAULT_CLIP_NAME2,
+        vae_name: str = DEFAULT_VAE_NAME,
+        bg_model_name: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
@@ -69,6 +73,12 @@ class ComfyUIClient:
         self._owns_client = http_client is None
         self._http = http_client or httpx.Client(timeout=httpx.Timeout(timeout_seconds))
         self._client_id = f"store-listing-{uuid.uuid4().hex[:12]}"
+        self._unet_name = unet_name
+        self._clip_name1 = clip_name1
+        self._clip_name2 = clip_name2
+        self._vae_name = vae_name
+        self._bg_model_name = bg_model_name
+        self._discovered_bg_model: str | None = None
 
     def close(self) -> None:
         """Close the underlying HTTP client, if this instance created it."""
@@ -93,10 +103,10 @@ class ComfyUIClient:
         sampler_name: str = "euler",
         scheduler: str = "simple",
         negative_prompt: str = "",
-        unet_name: str = DEFAULT_UNET_NAME,
-        clip_name1: str = DEFAULT_CLIP_NAME1,
-        clip_name2: str = DEFAULT_CLIP_NAME2,
-        vae_name: str = DEFAULT_VAE_NAME,
+        unet_name: str | None = None,
+        clip_name1: str | None = None,
+        clip_name2: str | None = None,
+        vae_name: str | None = None,
     ) -> ComfyUIResult:
         """Queue a Flux Schnell text-to-image workflow and block until it is ready."""
         actual_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
@@ -110,10 +120,10 @@ class ComfyUIClient:
             sampler_name=sampler_name,
             scheduler=scheduler,
             negative_prompt=negative_prompt,
-            unet_name=unet_name,
-            clip_name1=clip_name1,
-            clip_name2=clip_name2,
-            vae_name=vae_name,
+            unet_name=unet_name or self._unet_name,
+            clip_name1=clip_name1 or self._clip_name1,
+            clip_name2=clip_name2 or self._clip_name2,
+            vae_name=vae_name or self._vae_name,
         )
         return self._run_graph(graph, seed=actual_seed)
 
@@ -121,13 +131,14 @@ class ComfyUIClient:
         self,
         image_bytes: bytes,
         *,
-        bg_model_name: str = DEFAULT_BG_MODEL_NAME,
+        bg_model_name: str | None = None,
     ) -> ComfyUIResult:
         """Upload the image to ComfyUI, run BiRefNet, return a transparent RGBA PNG."""
+        model_name = bg_model_name or self._bg_model_name or self._discover_bg_model()
         uploaded = self._upload_image(image_bytes)
         graph = build_birefnet_background_graph(
             image_name=uploaded["name"],
-            bg_model_name=bg_model_name,
+            bg_model_name=model_name,
         )
         return self._run_graph(graph)
 
@@ -141,6 +152,47 @@ class ComfyUIClient:
         return response.status_code == 200
 
     # -- internals ---------------------------------------------------------
+
+    def _discover_bg_model(self) -> str:
+        """Find the background removal model the server actually has installed.
+
+        The file name on disk is not something we control (it depends on how the
+        checkpoint was installed), so ask the server which models it can load
+        rather than hard-coding a name.
+        """
+        if self._discovered_bg_model is not None:
+            return self._discovered_bg_model
+
+        try:
+            response = self._http.get(f"{self.base_url}/object_info/LoadBackgroundRemovalModel")
+        except httpx.HTTPError as exc:
+            raise ComfyUIError(
+                f"Could not reach ComfyUI to discover the background removal model: {exc}"
+            ) from exc
+        if response.status_code != 200:
+            raise ComfyUIError(
+                f"ComfyUI does not expose LoadBackgroundRemovalModel - HTTP {response.status_code}"
+            )
+
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise ComfyUIError("ComfyUI returned a non-JSON response for /object_info") from exc
+
+        node = body.get("LoadBackgroundRemovalModel") or {}
+        required = (node.get("input") or {}).get("required") or {}
+        spec = required.get("bg_removal_name") or []
+        options = spec[1].get("options", []) if len(spec) > 1 and isinstance(spec[1], dict) else []
+
+        if not options:
+            raise ComfyUIError(
+                "No background removal model is installed on the ComfyUI server - "
+                "run deploy/dgx/download-flux.sh on the DGX"
+            )
+
+        self._discovered_bg_model = str(options[0])
+        logger.info("Using background removal model %s", self._discovered_bg_model)
+        return self._discovered_bg_model
 
     def _run_graph(self, graph: dict[str, Any], *, seed: int | None = None) -> ComfyUIResult:
         save_node_id = self._find_save_node(graph)
@@ -262,9 +314,13 @@ class ComfyUIClient:
 
         parts: list[str] = []
         for node_id, node_error in (body.get("node_errors") or {}).items():
+            class_type = (node_error or {}).get("class_type")
+            label = f"node {node_id}" + (f" ({class_type})" if class_type else "")
             for error in (node_error or {}).get("errors", []):
-                message = error.get("message") or error.get("details") or str(error)
-                parts.append(f"node {node_id}: {message}")
+                # ComfyUI's "message" is generic ("Value not in list"); the
+                # "details" field carries the offending value and the allowed list.
+                message = error.get("details") or error.get("message") or str(error)
+                parts.append(f"{label}: {message}")
         if not parts:
             error = body.get("error")
             if isinstance(error, dict):
