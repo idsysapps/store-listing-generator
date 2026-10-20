@@ -16,8 +16,9 @@ from typing import Any
 
 from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.design_briefs import DesignBrief
-from store_listing.orchestration.image_generation import generate_image
+from store_listing.orchestration.image_generation import font_colour, generate_image
 from store_listing.orchestration.image_storage import ImageStorageClient
+from store_listing.orchestration.text_compositor import LayoutSpec, composite_text
 from store_listing.orchestration.text_validation import TextValidator
 
 logger = logging.getLogger(__name__)
@@ -55,23 +56,17 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
 
 
 def _retry_hint(brief: DesignBrief) -> str:
-    """Nudge for the next attempt, naming every text the brief asks for.
+    """Nudge for the next attempt: keep the area the text goes in clear.
 
-    Asking for the headline only - and forbidding other words on top - told the
-    model to drop the tagline on every retry, which is the text the brief
-    actually wanted rendered.
+    The text is composited onto the artwork, so a retry cannot ask the model
+    to spell it - it can only ask for a clearer area to put it in.
     """
-    texts = [
-        text.strip() for text in (brief.headline_text, brief.tagline_text) if text and text.strip()
-    ]
-    if len(texts) == 2:
-        return (
-            f'The top text must read exactly "{texts[0]}" and the bottom text must read exactly "{texts[1]}". '
-            "Render no other words."
-        )
-    if texts:
-        return f'The text must read exactly "{texts[0]}". Render no other words.'
-    return "Render the requested text exactly, with no other words."
+    layout_type = brief.layout_type or "full_bleed"
+    if layout_type == "text_top_bottom":
+        return "Leave the top and the bottom of the canvas clear and empty."
+    if layout_type == "text_top":
+        return "Leave the top of the canvas clear and empty."
+    return "Render the requested scene more clearly."
 
 
 def generate_images_for_briefs(
@@ -121,7 +116,13 @@ def _generate_single_brief(
     brief = _brief_from_row(brief_row)
     brief_id = brief_row["id"]
     is_dtf = brief_row["product_type"] == "dtf_apparel"
-    needs_text_check = bool(brief.headline_text or brief.tagline_text)
+    layout = LayoutSpec(
+        layout_type=brief.layout_type or "full_bleed",
+        headline_text=brief.headline_text,
+        tagline_text=brief.tagline_text,
+        font_color=font_colour(brief),
+    )
+    needs_text_check = layout.needs_text
     max_retries = _max_text_retries()
 
     base_seed = random.randint(0, 2**31 - 1)
@@ -145,21 +146,27 @@ def _generate_single_brief(
             )
             return False, result.error or "image generation failed"
 
+        # The text is drawn onto the artwork, not asked of the model: it cannot
+        # spell, and a colour in a prompt is not a colour (issue #187).
+        raw_bytes = composite_text(result.raw_bytes or result.image_bytes, layout)
+
         if text_validator is None or not needs_text_check:
             break
 
         verdict = text_validator.validate(
-            result.raw_bytes or result.image_bytes,
-            headline=brief.headline_text,
-            tagline=brief.tagline_text,
+            raw_bytes,
+            headline=layout.headline_text,
+            tagline=layout.tagline_text,
         )
         if verdict.matched:
-            if verdict.missing or verdict.unverifiable:
+            if verdict.missing or verdict.unverifiable or verdict.duplicated:
                 logger.warning(
-                    "Text validation passed with gaps for brief %d: missing %s, unverifiable %s, observed %r",
+                    "Text validation passed with gaps for brief %d: missing %s, unverifiable %s, "
+                    "duplicated %s, observed %r",
                     brief_id,
                     verdict.missing,
                     verdict.unverifiable,
+                    verdict.duplicated,
                     verdict.observed,
                 )
             break
@@ -179,10 +186,9 @@ def _generate_single_brief(
 
         retry_hint = _retry_hint(brief)
 
-    raw_bytes = result.raw_bytes if result.raw_bytes else result.image_bytes
     transparent_bytes: bytes | None = None
-    if is_dtf and result.background_removed:
-        transparent_bytes = result.image_bytes
+    if is_dtf and result.background_removed and result.image_bytes:
+        transparent_bytes = composite_text(result.image_bytes, layout)
 
     keys = storage.upload_design(
         raw_bytes=raw_bytes,

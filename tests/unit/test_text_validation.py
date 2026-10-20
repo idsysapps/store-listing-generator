@@ -194,6 +194,43 @@ class TestTextValidator:
         assert result.matched is False
         assert result.missing == ["TRICK OR TREAT"]
 
+    def test_a_headline_and_a_tagline_on_their_own_lines_both_match(self) -> None:
+        client = _vision_client("SPOOKY SEASON\nTRICK OR TREAT")
+        validator = TextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(
+            _png_bytes(), headline="SPOOKY SEASON", tagline="TRICK OR TREAT"
+        )
+
+        assert result.matched is True
+        assert result.missing == []
+
+    def test_text_the_model_drew_twice_is_reported(self) -> None:
+        client = _vision_client("SPOOKY SEASON\nSPOOKY SEASON")
+        validator = TextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), headline="SPOOKY SEASON", tagline=None)
+
+        assert result.matched is True
+        assert result.duplicated == ["SPOOKY SEASON"]
+
+    def test_a_headline_wrapped_over_two_lines_is_still_found(self) -> None:
+        client = _vision_client("SPOOKY\nSEASON")
+        validator = TextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), headline="SPOOKY SEASON", tagline=None)
+
+        assert result.matched is True
+        assert result.missing == []
+
+    def test_the_transcription_is_kept_verbatim(self) -> None:
+        client = _vision_client("Bag of... Spooky Fun.")
+        validator = TextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), headline="Bag of Spooky Fun", tagline=None)
+
+        assert result.observed == "Bag of... Spooky Fun."
+
     def test_sends_the_image_to_the_vision_model(self) -> None:
         client = _vision_client("SPOOKY SEASON")
         validator = TextValidator(client=client, model="qwen_vl_ocr")
