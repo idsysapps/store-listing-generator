@@ -25,7 +25,7 @@ public class FabricationMaterial extends PanacheEntityBase {
     @Column(name = "brand", length = 100)
     public String brand;
 
-    @Column(name = "substrate_type", nullable = false, length = 50)
+    @Column(name = "substrate_type", length = 50)
     public String substrateType;
 
     @Column(name = "color", length = 100)
@@ -37,7 +37,7 @@ public class FabricationMaterial extends PanacheEntityBase {
     @Column(name = "material_composition", length = 255)
     public String materialComposition;
 
-    @Column(name = "product_type", nullable = false, length = 50)
+    @Column(name = "product_type", length = 50)
     public String productType;
 
     @Column(name = "sku", length = 100)

@@ -205,11 +205,11 @@ data:
         external_id VARCHAR(100) NOT NULL UNIQUE,
         name VARCHAR(255) NOT NULL,
         brand VARCHAR(100),
-        substrate_type VARCHAR(50) NOT NULL,
+        substrate_type VARCHAR(50),
         color VARCHAR(100),
         sizes TEXT[],
         material_composition VARCHAR(255),
-        product_type VARCHAR(50) NOT NULL,
+        product_type VARCHAR(50),
         sku VARCHAR(100),
         unit_cost DECIMAL(10,2),
         active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -388,11 +388,11 @@ data:
         external_id VARCHAR(100) NOT NULL UNIQUE,
         name VARCHAR(255) NOT NULL,
         brand VARCHAR(100),
-        substrate_type VARCHAR(50) NOT NULL,
+        substrate_type VARCHAR(50),
         color VARCHAR(100),
         sizes TEXT[],
         material_composition VARCHAR(255),
-        product_type VARCHAR(50) NOT NULL,
+        product_type VARCHAR(50),
         sku VARCHAR(100),
         unit_cost DECIMAL(10,2),
         active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -404,6 +404,11 @@ data:
     CREATE INDEX IF NOT EXISTS idx_fab_materials_product_type ON fabrication_materials(product_type);
     CREATE INDEX IF NOT EXISTS idx_fab_materials_active ON fabrication_materials(active);
     CREATE INDEX IF NOT EXISTS idx_fab_materials_external_id ON fabrication_materials(external_id);
+
+    -- cost-book publishes substrate_type and product_type only when the material
+    -- carries them, so both columns have to accept a null.
+    ALTER TABLE fabrication_materials ALTER COLUMN substrate_type DROP NOT NULL;
+    ALTER TABLE fabrication_materials ALTER COLUMN product_type DROP NOT NULL;
 
     -- Add recommended_materials to design_briefs
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS recommended_materials JSONB;
