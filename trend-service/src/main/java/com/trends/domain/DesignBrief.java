@@ -2,6 +2,9 @@ package com.trends.domain;
 
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -70,6 +73,7 @@ public class DesignBrief extends PanacheEntityBase {
     @Column(name = "personal_use", nullable = false)
     public Boolean personalUse = false;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "recommended_materials", columnDefinition = "JSONB")
     public String recommendedMaterials;
 
