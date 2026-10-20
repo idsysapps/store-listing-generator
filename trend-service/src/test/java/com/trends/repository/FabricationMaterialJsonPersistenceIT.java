@@ -139,6 +139,17 @@ class FabricationMaterialJsonPersistenceIT {
     }
 
     @Test
+    void shouldPersistMaterialWithoutSubstrateTypeAndProductType() throws SQLException {
+        Integer id = persistMaterialWithoutOptionalFields();
+
+        FabricationMaterial saved = findById(id);
+        assertNotNull(saved, "material should have been persisted");
+        assertNull(saved.substrateType, "substrate_type should stay null when the event carries none");
+        assertNull(saved.productType, "product_type should stay null when the event carries none");
+        assertEquals("Core Adult", saved.name, "the fields the event does carry should be stored");
+    }
+
+    @Test
     void shouldPersistMaterialSizesAsTextArray() throws SQLException {
         Integer id = persistMaterial(ATTRIBUTES);
 
@@ -181,6 +192,26 @@ class FabricationMaterialJsonPersistenceIT {
         material.unitCost = new BigDecimal("4.50");
         material.active = true;
         material.attributes = attributes;
+        material.createdAt = OffsetDateTime.now();
+        material.updatedAt = OffsetDateTime.now();
+
+        try (Session session = sessionFactory.openSession()) {
+            Transaction transaction = session.beginTransaction();
+            session.persist(material);
+            transaction.commit();
+        }
+        return material.id;
+    }
+
+    private static Integer persistMaterialWithoutOptionalFields() {
+        FabricationMaterial material = new FabricationMaterial();
+        material.externalId = "c9924c1b-78a6-4a38-9bb0-32c44cc4eb1a-true-celadon";
+        material.name = "Core Adult";
+        material.brand = "Port & Company";
+        material.color = "True Celadon";
+        material.sku = "PC54-TRUE-CELADON-L";
+        material.unitCost = new BigDecimal("2.39");
+        material.active = true;
         material.createdAt = OffsetDateTime.now();
         material.updatedAt = OffsetDateTime.now();
 

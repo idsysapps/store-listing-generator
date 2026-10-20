@@ -54,6 +54,15 @@ def _llm_design_briefs_enabled() -> bool:
     return os.environ.get("LLM_DESIGN_BRIEFS_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
+def _require_tagline_text() -> bool:
+    """Whether a missing tagline should reject the image.
+
+    Off by default: diffusion drops the secondary line often, and losing the
+    whole design over it costs more than shipping it without the tagline.
+    """
+    return os.environ.get("REQUIRE_TAGLINE_TEXT", "false").lower() in ("1", "true", "yes")
+
+
 celery_app.conf.beat_schedule = {
     "seasonal-seed-injection": {
         "task": "store_listing.orchestration.tasks.inject_seasonal_seeds_task",
@@ -467,6 +476,7 @@ def generate_design_images_task() -> dict:
         client=get_vision_client(),
         model=get_vision_model(),
         threshold=float(os.environ.get("TEXT_MATCH_THRESHOLD", "0.85")),
+        require_tagline=_require_tagline_text(),
     )
 
     return generate_images_for_briefs(
@@ -512,6 +522,7 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         client=get_vision_client(),
         model=get_vision_model(),
         threshold=float(os.environ.get("TEXT_MATCH_THRESHOLD", "0.85")),
+        require_tagline=_require_tagline_text(),
     )
 
     return generate_image_for_brief(

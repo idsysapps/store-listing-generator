@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock
@@ -46,6 +47,22 @@ def _validator(*verdicts: bool) -> MagicMock:
             score=1.0 if verdict else 0.2,
         )
         for verdict in verdicts
+    ]
+    return validator
+
+
+def _validator_with_missing(*missing: list[str]) -> MagicMock:
+    """A validator that accepts the image but reports text it could not read back."""
+    validator = MagicMock()
+    validator.validate.side_effect = [
+        TextValidationResult(
+            matched=True,
+            expected=["SPOOKY SEASON", "TRICK OR TREAT"],
+            observed="SPOOKY SEASON",
+            score=1.0,
+            missing=dropped,
+        )
+        for dropped in missing
     ]
     return validator
 
@@ -221,6 +238,57 @@ class TestTextValidationGate:
 
         second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"]
         assert "SPOOKY SEASON" in second_prompt
+
+    def test_a_retry_asks_for_the_tagline_as_well(self) -> None:
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    layout_type="text_top_bottom",
+                    headline_text="SPOOKY SEASON",
+                    tagline_text="TRICK OR TREAT",
+                )
+            ]
+        )
+        validator = _validator(False, True)
+        comfyui = _comfyui_client()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            text_validator=validator,
+        )
+
+        second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"]
+        assert 'must read exactly "SPOOKY SEASON"' in second_prompt
+        assert 'must read exactly "TRICK OR TREAT"' in second_prompt
+
+    def test_a_dropped_tagline_is_uploaded_and_reported(self, caplog) -> None:
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    layout_type="text_top_bottom",
+                    headline_text="SPOOKY SEASON",
+                    tagline_text="TRICK OR TREAT",
+                )
+            ]
+        )
+        validator = _validator_with_missing(["TRICK OR TREAT"])
+        s3 = MagicMock()
+
+        with caplog.at_level(logging.WARNING):
+            result = generate_images_for_briefs(
+                db_client=db,
+                comfyui_client=_comfyui_client(),
+                s3_client=s3,
+                bucket="test-bucket",
+                text_validator=validator,
+            )
+
+        assert result["images_generated"] == 1
+        s3.put_object.assert_called_once()
+        assert "TRICK OR TREAT" in caplog.text
 
     def test_briefs_without_text_never_reach_the_validator(self) -> None:
         db = _mock_db_client(briefs=[_brief()])

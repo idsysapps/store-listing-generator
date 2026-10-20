@@ -209,6 +209,8 @@ spec:
               value: {{ .Values.config.textMatchThreshold | default "0.85" | quote }}
             - name: MAX_TEXT_REGENERATION_ATTEMPTS
               value: {{ .Values.config.maxTextRegenerationAttempts | default "2" | quote }}
+            - name: REQUIRE_TAGLINE_TEXT
+              value: {{ .Values.config.requireTaglineText | default "false" | quote }}
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}
@@ -409,6 +411,8 @@ spec:
               value: {{ .Values.config.textMatchThreshold | default "0.85" | quote }}
             - name: MAX_TEXT_REGENERATION_ATTEMPTS
               value: {{ .Values.config.maxTextRegenerationAttempts | default "2" | quote }}
+            - name: REQUIRE_TAGLINE_TEXT
+              value: {{ .Values.config.requireTaglineText | default "false" | quote }}
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}

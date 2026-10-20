@@ -91,6 +91,34 @@ class MaterialStreamConsumerTest {
     }
 
     @Test
+    void testProcessUpsertEvent_CreatesMaterialWithoutOptionalFields() {
+        // Cost-book publishes a field only when the material actually carries it, so a
+        // catalog entry without a product type arrives without substrate_type and
+        // product_type. Those columns have to accept a null.
+        when(materialRepository.findByExternalId("c9924c1b-true-celadon")).thenReturn(null);
+
+        consumer.processUpsertEvent(
+                "c9924c1b-true-celadon", "Core Adult", "Port & Company",
+                null, "True Celadon", null,
+                null, null,
+                "PC54-TRUE-CELADON-L", "2.39", "true", null);
+
+        ArgumentCaptor<FabricationMaterial> captor = ArgumentCaptor.forClass(FabricationMaterial.class);
+        verify(materialRepository).persist(captor.capture());
+
+        FabricationMaterial saved = captor.getValue();
+        assertNull(saved.substrateType, "substrate_type is optional in the event contract");
+        assertNull(saved.productType, "product_type is optional in the event contract");
+        assertNull(saved.sizes, "sizes are optional in the event contract");
+        assertEquals("Core Adult", saved.name);
+        assertEquals("Port & Company", saved.brand);
+        assertEquals("True Celadon", saved.color);
+        assertEquals("PC54-TRUE-CELADON-L", saved.sku);
+        assertEquals(new BigDecimal("2.39"), saved.unitCost);
+        assertTrue(saved.active);
+    }
+
+    @Test
     void testProcessDeactivateEvent_DeactivatesMaterial() {
         consumer.processDeactivateEvent("bc3001-white");
 
