@@ -1,9 +1,40 @@
-"""Pure, framework-agnostic seed promotion rules (TEA-style `update` shared by tasks)."""
+"""Seed promotion rules and pool sizing (framework-agnostic, TEA-style `update`).
 
+The pool of curated seeds is the raw material the design brief task is made
+of, so its size, its reserve and the reuse cooldown are policy, not detail
+(issue #192). The limits are configurable per deployment.
+"""
+
+import os
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Final
 
-MAX_ACTIVE_SEEDS: Final[int] = 50
+DEFAULT_MAX_ACTIVE_SEEDS: Final[int] = 200
+DEFAULT_MIN_BRIEFABLE_SEEDS: Final[int] = 30
+DEFAULT_BRIEF_SEED_COOLDOWN_DAYS: Final[int] = 14
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    """Read an int knob from the environment, falling back to the default."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+# How many seeds the pool may hold before the curation archives the surplus.
+MAX_ACTIVE_SEEDS: Final[int] = _env_int("LLM_MAX_ACTIVE_SEEDS", DEFAULT_MAX_ACTIVE_SEEDS)
+# How many briefable seeds the curation must never archive below.
+MIN_BRIEFABLE_SEEDS: Final[int] = _env_int("LLM_MIN_BRIEFABLE_SEEDS", DEFAULT_MIN_BRIEFABLE_SEEDS)
+# How long a seed stays out of the brief pool after it produced a brief.
+BRIEF_SEED_COOLDOWN_DAYS: Final[int] = _env_int(
+    "LLM_BRIEF_SEED_COOLDOWN_DAYS", DEFAULT_BRIEF_SEED_COOLDOWN_DAYS, minimum=0
+)
 
 STARTER_SEEDS: Final[list[str]] = [
     "funny t-shirt",
@@ -76,10 +107,43 @@ def enforce_cap(
     active_seeds: list[ActiveSeed],
     incoming: int,
     max_active: int = MAX_ACTIVE_SEEDS,
+    briefable_ids: Collection[int] = frozenset(),
+    reserve: int = 0,
 ) -> list[str]:
-    """Queries to archive (lowest promotion_score first) so the seed pool stays <= max."""
+    """Queries to archive (lowest promotion_score first) so the seed pool stays <= max.
+
+    Seeds the brief task cannot use right now - the ones that already produced
+    a brief and are still inside their cooldown - are archived first. Fresh
+    seeds are only archived down to `reserve`, so the pool is allowed to stay
+    above the cap rather than starve the brief task (issue #192).
+    """
     excess = len(active_seeds) + incoming - max_active
     if excess <= 0:
         return []
-    ranked = sorted(active_seeds, key=lambda seed: (seed.promotion_score, seed.query))
-    return [seed.query for seed in ranked[:excess]]
+
+    briefable = {seed.id for seed in active_seeds if seed.id in briefable_ids}
+    retired = sorted(
+        (seed for seed in active_seeds if seed.id not in briefable),
+        key=lambda seed: (seed.promotion_score, seed.query),
+    )
+    fresh = sorted(
+        (seed for seed in active_seeds if seed.id in briefable),
+        key=lambda seed: (seed.promotion_score, seed.query),
+    )
+
+    archives: list[str] = []
+    for seed in retired:
+        if len(archives) >= excess:
+            break
+        archives.append(seed.query)
+
+    remaining_briefable = len(fresh)
+    for seed in fresh:
+        if len(archives) >= excess:
+            break
+        if remaining_briefable - 1 < reserve:
+            break
+        archives.append(seed.query)
+        remaining_briefable -= 1
+
+    return archives

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from store_listing.orchestration import seed_curation as curation_mod
 from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate
 from store_listing.orchestration.seed_curation import (
     PRODUCT_TAGS,
@@ -268,6 +269,7 @@ class TestCurateSeeds:
         db = MagicMock()
         db.list_pending_candidates.return_value = candidates or []
         db.list_active_seeds.return_value = active_seeds or []
+        db.list_briefable_seed_ids.return_value = []
         db.cross_seed_counts.return_value = {}
         db.insert_active_seed.return_value = 1
         db.insert_curation_log.return_value = 1
@@ -434,6 +436,54 @@ class TestCurateSeeds:
         assert result["status"] == "error"
         assert "API down" in result["error"]
 
+    def test_archives_used_seeds_before_fresh_ones(self, monkeypatch) -> None:
+        # The brief task needs fresh seeds; a seed that already produced a
+        # brief is the first thing to archive when the pool is over cap.
+        monkeypatch.setattr(curation_mod, "MAX_ACTIVE_SEEDS", 1)
+        candidates = [_candidate(42, "new trend")]
+        db = self._mock_db(candidates=candidates)
+        db.list_active_seeds.return_value = [
+            ActiveSeed(id=1, query="used", promotion_score=9000),
+            ActiveSeed(id=2, query="fresh", promotion_score=100),
+        ]
+        db.list_briefable_seed_ids.return_value = [2]
+        llm = self._mock_llm(
+            _eval_response([{"id": 42, "action": "PROMOTE", "reasoning": "great hook"}])
+        )
+
+        curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        db.archive_active_seed.assert_called_once_with("used")
+
+    def test_keeps_the_briefable_reserve(self, monkeypatch) -> None:
+        # The cap is soft: the pool may stay above it rather than starve the
+        # brief task (issue #192).
+        monkeypatch.setattr(curation_mod, "MAX_ACTIVE_SEEDS", 0)
+        monkeypatch.setattr(curation_mod, "MIN_BRIEFABLE_SEEDS", 1)
+        candidates = [_candidate(42, "new trend")]
+        db = self._mock_db(candidates=candidates)
+        db.list_active_seeds.return_value = [ActiveSeed(id=2, query="fresh", promotion_score=100)]
+        db.list_briefable_seed_ids.return_value = [2]
+        llm = self._mock_llm(
+            _eval_response([{"id": 42, "action": "PROMOTE", "reasoning": "great hook"}])
+        )
+
+        curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert not db.archive_active_seed.called
+
+    def test_reports_the_briefable_count(self) -> None:
+        candidates = [_candidate(42, "new trend")]
+        db = self._mock_db(candidates=candidates)
+        db.list_briefable_seed_ids.return_value = [1, 2, 3]
+        llm = self._mock_llm(
+            _eval_response([{"id": 42, "action": "PROMOTE", "reasoning": "great hook"}])
+        )
+
+        result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["briefable"] == 3
+
     def test_ignores_unknown_candidate_ids(self) -> None:
         candidates = [_candidate(1, "hoodie")]
         db = self._mock_db(candidates=candidates)
@@ -515,6 +565,7 @@ class TestCurateSeedsProductTags:
         db = MagicMock()
         db.list_pending_candidates.return_value = candidates or []
         db.list_active_seeds.return_value = active_seeds or []
+        db.list_briefable_seed_ids.return_value = []
         db.cross_seed_counts.return_value = {}
         db.insert_active_seed.return_value = 1
         db.insert_curation_log.return_value = 1

@@ -1,5 +1,7 @@
 from store_listing.orchestration.promotion import (
+    BRIEF_SEED_COOLDOWN_DAYS,
     MAX_ACTIVE_SEEDS,
+    MIN_BRIEFABLE_SEEDS,
     STARTER_SEEDS,
     ActiveSeed,
     SeedCandidate,
@@ -115,10 +117,51 @@ class TestEnforceCap:
         archived = enforce_cap(active, incoming=2, max_active=3)
         assert archived == ["l"]
 
+    def test_archives_used_seeds_before_fresh_ones(self) -> None:
+        # A seed that already produced a brief is dead weight; a fresh one is
+        # the material the next brief batch is made of.
+        active = [ActiveSeed(1, "fresh", 10), ActiveSeed(2, "used", 90)]
+        archived = enforce_cap(active, incoming=0, max_active=1, briefable_ids={1})
+        assert archived == ["used"]
+
+    def test_keeps_the_briefable_reserve(self) -> None:
+        # The cap may not eat the material the brief task needs (issue #192).
+        active = [
+            ActiveSeed(1, "low", 10),
+            ActiveSeed(2, "mid", 50),
+            ActiveSeed(3, "high", 100),
+        ]
+        archived = enforce_cap(
+            active,
+            incoming=0,
+            max_active=1,
+            briefable_ids={1, 2, 3},
+            reserve=2,
+        )
+        assert archived == ["low"]
+
+    def test_cap_is_soft_when_the_reserve_binds(self) -> None:
+        # Starving the brief task is worse than exceeding the cap.
+        active = [ActiveSeed(1, "a", 10), ActiveSeed(2, "b", 20)]
+        archived = enforce_cap(
+            active,
+            incoming=0,
+            max_active=0,
+            briefable_ids={1, 2},
+            reserve=2,
+        )
+        assert archived == []
+
 
 class TestConstants:
-    def test_max_active_seeds_is_fifty(self) -> None:
-        assert MAX_ACTIVE_SEEDS == 50
+    def test_max_active_seeds_is_two_hundred(self) -> None:
+        assert MAX_ACTIVE_SEEDS == 200
+
+    def test_min_briefable_seeds_is_thirty(self) -> None:
+        assert MIN_BRIEFABLE_SEEDS == 30
+
+    def test_brief_seed_cooldown_is_fourteen_days(self) -> None:
+        assert BRIEF_SEED_COOLDOWN_DAYS == 14
 
     def test_starter_seeds_are_fifteen(self) -> None:
         assert len(STARTER_SEEDS) == 15

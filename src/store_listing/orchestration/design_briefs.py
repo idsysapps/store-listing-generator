@@ -122,7 +122,9 @@ class DesignBrief:
 
 
 class DesignBriefDBClient(Protocol):
-    def list_briefable_seeds(self) -> list[BriefableCandidate]: ...
+    def list_briefable_seeds(
+        self, cooldown_days: int | None = None
+    ) -> list[BriefableCandidate]: ...
 
     def list_active_materials(
         self,
@@ -291,7 +293,13 @@ def generate_design_briefs(
 
     candidates = db_client.list_briefable_seeds()
     if not candidates:
-        return {"status": "success", "briefs_created": 0}
+        logger.warning("Design brief generation skipped: no briefable seeds")
+        return {
+            "status": "success",
+            "briefs_created": 0,
+            "briefable": 0,
+            "reason": "no briefable seeds",
+        }
 
     materials = db_client.list_active_materials()
     context = get_upcoming_events(today)
@@ -338,11 +346,19 @@ def generate_design_briefs(
             scene_description=brief.scene_description,
             recommended_materials=brief.recommended_materials,
         )
+        linked = 0
         for seed_id in brief.source_seed_ids:
             if seed_id in valid_ids:
                 db_client.insert_brief_source(brief_id=brief_id, active_seed_id=seed_id)
+                linked += 1
+        if not linked:
+            logger.warning(
+                "Design brief '%s' has no usable source seed (asked for %s)",
+                brief.concept,
+                brief.source_seed_ids,
+            )
         created += 1
 
     logger.info("Design brief generation: created=%d from %d candidates", created, len(candidates))
 
-    return {"status": "success", "briefs_created": created}
+    return {"status": "success", "briefs_created": created, "briefable": len(candidates)}
