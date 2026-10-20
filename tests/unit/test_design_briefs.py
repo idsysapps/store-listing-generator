@@ -37,6 +37,29 @@ def _briefable(
 
 
 class TestBuildBriefPrompt:
+    def test_the_prompt_asks_for_print_artwork_not_a_product_photo(self) -> None:
+        # A scene that describes a garment or a mug is rendered as a mockup, and
+        # a mockup is not a printable file (issue #188).
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        system = messages[0]["content"].lower()
+        assert "print artwork" in system
+        assert "not a photo of a product" in system
+
+    def test_the_prompt_asks_for_a_headline_in_words(self) -> None:
+        # The headline is drawn with a font, and the font has no emoji.
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        assert "no emoji" in messages[0]["content"].lower()
+
     def test_returns_system_and_user_messages(self) -> None:
         messages = build_brief_prompt(
             candidates=[_briefable(1, "dad jokes shirt")],

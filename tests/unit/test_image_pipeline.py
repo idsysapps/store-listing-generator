@@ -67,6 +67,16 @@ def _validator_with_missing(*missing: list[str]) -> MagicMock:
     return validator
 
 
+def _distinct_colours(image: Image.Image) -> set[tuple[int, int, int]]:
+    """The colours that occur in the image."""
+    colours = image.getcolors(maxcolors=1_000_000) or []
+    return {
+        (int(colour[0]), int(colour[1]), int(colour[2]))
+        for _count, colour in colours
+        if isinstance(colour, tuple) and len(colour) == 3
+    }
+
+
 def _brief(**overrides: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "id": 42,
@@ -223,7 +233,7 @@ class TestTextValidationGate:
         assert len(seeds) == 2
         assert seeds[0] != seeds[1]
 
-    def test_a_retry_carries_the_ocr_feedback_in_the_prompt(self) -> None:
+    def test_a_retry_asks_for_clear_space_where_the_text_goes(self) -> None:
         db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
         validator = _validator(False, True)
         comfyui = _comfyui_client()
@@ -237,9 +247,12 @@ class TestTextValidationGate:
         )
 
         second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"]
-        assert "SPOOKY SEASON" in second_prompt
+        # The text is composited onto the artwork, so a retry asks for a
+        # clearer area for it instead of asking the model to spell it.
+        assert "clear" in second_prompt.lower()
+        assert "must read exactly" not in second_prompt
 
-    def test_a_retry_asks_for_the_tagline_as_well(self) -> None:
+    def test_a_retry_does_not_ask_the_model_to_spell(self) -> None:
         db = _mock_db_client(
             briefs=[
                 _brief(
@@ -261,8 +274,8 @@ class TestTextValidationGate:
         )
 
         second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"]
-        assert 'must read exactly "SPOOKY SEASON"' in second_prompt
-        assert 'must read exactly "TRICK OR TREAT"' in second_prompt
+        assert "SPOOKY SEASON" not in second_prompt
+        assert "TRICK OR TREAT" not in second_prompt
 
     def test_a_dropped_tagline_is_uploaded_and_reported(self, caplog) -> None:
         db = _mock_db_client(
@@ -303,6 +316,69 @@ class TestTextValidationGate:
         )
 
         validator.validate.assert_not_called()
+
+    def test_the_composited_text_is_uploaded(self) -> None:
+        db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=_real_png()),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        body = s3.put_object.call_args.kwargs["Body"]
+        image = Image.open(BytesIO(body)).convert("RGB")
+        width, height = image.size
+        top_zone = image.crop((0, 0, width, int(height * 0.15)))
+        colours = _distinct_colours(top_zone)
+        assert colours != {(255, 255, 255)}, "the headline should have been drawn on the artwork"
+
+    def test_the_validator_sees_the_composited_image(self) -> None:
+        db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
+        validator = _validator(True)
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=_real_png()),
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            text_validator=validator,
+        )
+
+        validated = validator.validate.call_args.args[0]
+        image = Image.open(BytesIO(validated)).convert("RGB")
+        width, height = image.size
+        top_zone = image.crop((0, 0, width, int(height * 0.15)))
+        colours = _distinct_colours(top_zone)
+        assert colours != {(255, 255, 255)}, "the validated image should carry the headline"
+
+    def test_the_transparent_image_carries_the_text_too(self) -> None:
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    product_type="dtf_apparel",
+                    layout_type="text_top",
+                    headline_text="SPOOKY SEASON",
+                )
+            ]
+        )
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=_real_png(), transparent=_real_png()),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        transparent_body = s3.put_object.call_args_list[1].kwargs["Body"]
+        image = Image.open(BytesIO(transparent_body)).convert("RGB")
+        width, height = image.size
+        top_zone = image.crop((0, 0, width, int(height * 0.15)))
+        colours = _distinct_colours(top_zone)
+        assert colours != {(255, 255, 255)}, "the print file should carry the headline"
 
     def test_no_validator_skips_the_gate(self) -> None:
         db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])

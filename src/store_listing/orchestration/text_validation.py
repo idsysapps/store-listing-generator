@@ -53,6 +53,7 @@ class TextValidationResult:
     error: str | None = None
     missing: list[str] = field(default_factory=list)
     unverifiable: list[str] = field(default_factory=list)
+    duplicated: list[str] = field(default_factory=list)
 
 
 def encode_image_for_vision(image_bytes: bytes, *, max_side: int = DEFAULT_MAX_SIDE) -> str:
@@ -138,6 +139,34 @@ def is_verifiable(text: str) -> bool:
     return any(character.isalnum() for character in normalize_text(text))
 
 
+def _observed_lines(observed: str) -> list[str]:
+    """The lines of the transcription."""
+    return [line.strip() for line in observed.splitlines() if line.strip()]
+
+
+def _find_text(text: str, lines: list[str], *, threshold: float) -> tuple[bool, float, list[str]]:
+    """Find the text in the transcription.
+
+    A line that carries the text is the strongest evidence, so the lines are
+    tried first. Text the model wrapped over two lines is still found in the
+    joined observation - a headline that is too long for one line is drawn on
+    two by the compositor, and the vision model reports it that way.
+    """
+    hits: list[str] = []
+    best = 0.0
+    for line in lines:
+        matched, score = text_matches(text, line, threshold=threshold)
+        if matched:
+            hits.append(line)
+            best = max(best, score)
+    if hits:
+        return True, best, hits
+
+    joined = " ".join(lines)
+    matched, score = text_matches(text, joined, threshold=threshold)
+    return matched, score, [joined] if matched else []
+
+
 class TextValidator:
     """Reads text back out of a generated image using a vision LLM on the DGX."""
 
@@ -198,14 +227,20 @@ class TextValidator:
         scores: list[float] = []
         missing: list[str] = []
         unverifiable: list[str] = []
+        duplicated: list[str] = []
+        lines = _observed_lines(observed)
         for text in expected:
             if not is_verifiable(text):
                 unverifiable.append(text)
                 continue
-            text_matched, score = text_matches(text, observed, threshold=self._threshold)
+            found, score, hits = _find_text(text, lines, threshold=self._threshold)
             scores.append(score)
-            if not text_matched:
+            if not found:
                 missing.append(text)
+            elif len(hits) > 1:
+                # The text is on the image more than once - the model drew it
+                # twice, which is a defect of its own.
+                duplicated.append(text)
 
         # The headline is what the design sells, so it has to be there. The
         # tagline is only required in strict mode.
@@ -220,6 +255,7 @@ class TextValidator:
             score=min(scores) if scores else 1.0,
             missing=missing,
             unverifiable=unverifiable,
+            duplicated=duplicated,
         )
 
     def _transcribe(self, data_url: str) -> str:

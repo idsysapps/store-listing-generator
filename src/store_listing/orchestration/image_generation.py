@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
 from store_listing.orchestration.design_briefs import DesignBrief
+from store_listing.orchestration.text_compositor import resolve_layout
 
 logger = logging.getLogger(__name__)
 
@@ -22,20 +23,28 @@ PRODUCT_TYPE_CONTEXT: dict[str, str] = {
     # Magenta also keeps white artwork and white text visible. See issue #111.
     "dtf_apparel": (
         "sticker illustration, bold outlines, flat colors, compact centered composition, "
-        "DTF transfer print, isolated on a solid pure magenta background, plain magenta "
-        "backdrop, chroma key background, uniform flat magenta color"
+        "DTF transfer print"
     ),
     # These are printed full-bleed, so their background is kept and has to be
     # white - it becomes the paper.
-    "sublimation": (
-        "full-color sublimation print, seamless edges, vibrant colors, "
-        "isolated on a solid pure white background, plain white backdrop"
-    ),
-    "sticker_vinyl": (
-        "sticker decal, clean cut lines, bold outlines, "
-        "isolated on a solid pure white background, plain white backdrop"
-    ),
+    "sublimation": "full-color sublimation print, seamless edges, vibrant colors",
+    "sticker_vinyl": "sticker decal, clean cut lines, bold outlines",
 }
+
+# The background of the artwork, per product type. It is the last instruction
+# of the prompt: a visual style that asks for a black background must not win
+# over the white paper a print-through product is printed on (issue #188).
+BACKGROUND_INSTRUCTIONS: dict[str, str] = {
+    "dtf_apparel": (
+        "isolated on a solid pure magenta background, plain magenta backdrop, "
+        "chroma key background, uniform flat magenta color"
+    ),
+    "sublimation": "isolated on a solid pure white background, plain white backdrop",
+    "sticker_vinyl": "isolated on a solid pure white background, plain white backdrop",
+}
+
+# Every product is printed as artwork, never as a photo of a printed product.
+NO_MOCKUP = "flat print artwork, no product mockup, no garment, no photo of a printed item"
 
 # The product types whose background is printed as-is and is therefore white.
 WHITE_BACKGROUND_PRODUCTS = frozenset({"sublimation", "sticker_vinyl"})
@@ -102,8 +111,8 @@ def _is_near_white(colour: str) -> bool:
     return min(channels) >= 200
 
 
-def _font_colour(brief: DesignBrief) -> str:
-    """The text colour, falling back to black when it would be invisible.
+def font_colour(brief: DesignBrief) -> str:
+    """The colour the headline and the tagline are drawn in.
 
     White text is fine on the magenta background of a dtf_apparel brief - that
     background is removed before printing. On the white background of the
@@ -120,15 +129,22 @@ def _font_colour(brief: DesignBrief) -> str:
 def build_flux_prompt(brief: DesignBrief) -> str:
     """Build the Flux prompt for a brief, folding the layout fields in.
 
+    The prompt carries the artwork only. The headline and the tagline are
+    composited onto the artwork afterwards, because the model cannot spell
+    (issue #187) and because a colour in a prompt is not a colour.
+
     full_bleed       -> the scene only, explicitly no lettering
-    text_top         -> the headline at the top, then the scene
-    text_top_bottom  -> the headline at the top, the scene, the tagline at the bottom
+    text_top         -> the scene, with room for a headline at the top
+    text_top_bottom  -> the scene, with room for a headline at the top and a
+                        tagline at the bottom
     """
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
+    background = BACKGROUND_INSTRUCTIONS.get(brief.product_type, "plain background")
     scene = _scene_for_prompt(brief)
     feedback = _feedback_section(brief)
-    font_color = _font_colour(brief)
-    layout_type = brief.layout_type or "full_bleed"
+    layout_type = resolve_layout(
+        brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
+    )
 
     if layout_type == "full_bleed" and brief.headline_text:
         logger.warning(
@@ -138,17 +154,27 @@ def build_flux_prompt(brief: DesignBrief) -> str:
 
     parts: list[str] = []
 
-    if layout_type != "full_bleed" and brief.headline_text:
-        parts.append(f'Bold text reading "{brief.headline_text}" in {font_color} at the top.')
-
-    parts.append(f"{scene}, {brief.visual_style}, {product_context}.")
+    parts.append(f"{scene}, {brief.visual_style}, {product_context}, {NO_MOCKUP}.")
 
     if layout_type == "full_bleed":
         parts.append("Do not include any text or lettering.")
-    elif layout_type == "text_top_bottom" and brief.tagline_text:
-        parts.append(f'Text reading "{brief.tagline_text}" in {font_color} at the bottom.')
+    else:
+        parts.append("Print artwork without any lettering: no text, no words, no watermark.")
+        if layout_type == "text_top_bottom":
+            parts.append(
+                "Leave the top and the bottom of the canvas empty: plain background only, "
+                "nothing in those areas."
+            )
+        else:
+            parts.append(
+                "Leave the top of the canvas empty: plain background only, nothing in that area."
+            )
 
     parts.append("Do not draw anything else.")
+
+    # The background comes last so that it survives a visual style that asks
+    # for something else (issue #188).
+    parts.append(f"{background}.")
 
     if feedback:
         parts.append(feedback.strip())

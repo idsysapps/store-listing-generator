@@ -9,6 +9,7 @@ from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResu
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.image_generation import (
     build_flux_prompt,
+    font_colour,
     generate_image,
 )
 
@@ -70,42 +71,56 @@ class TestBuildFluxPrompt:
         assert "SPOOKY SEASON" not in prompt
         assert "TRICK OR TREAT" not in prompt
 
-    def test_text_top_includes_the_quoted_headline_and_colour(self) -> None:
-        brief = _make_brief(
-            layout_type="text_top",
-            headline_text="SPOOKY SEASON",
-            tagline_text=None,
-            font_color="#FF8C42",
-        )
+    def test_the_prompt_never_contains_the_headline_or_the_tagline(self) -> None:
+        # The text is composited onto the artwork, so the model must not be
+        # asked to spell it (issue #187).
+        for layout in ("full_bleed", "text_top", "text_top_bottom"):
+            brief = _make_brief(
+                layout_type=layout,
+                headline_text="SPOOKY SEASON",
+                tagline_text="TRICK OR TREAT",
+            )
+            prompt = build_flux_prompt(brief)
+
+            assert "SPOOKY SEASON" not in prompt, layout
+            assert "TRICK OR TREAT" not in prompt, layout
+
+    def test_the_prompt_asks_for_artwork_without_lettering(self) -> None:
+        brief = _make_brief(layout_type="text_top", headline_text="SPOOKY SEASON")
         prompt = build_flux_prompt(brief)
 
-        assert 'Bold text reading "SPOOKY SEASON"' in prompt
-        assert "#FF8C42" in prompt
-        assert "at the top" in prompt
+        assert "without any lettering" in prompt.lower()
 
-    def test_text_top_does_not_contain_the_tagline(self) -> None:
-        brief = _make_brief(
-            layout_type="text_top",
-            headline_text="SPOOKY SEASON",
-            tagline_text="TRICK OR TREAT",
-        )
-        prompt = build_flux_prompt(brief)
-
-        assert "TRICK OR TREAT" not in prompt
-
-    def test_text_top_bottom_includes_both_strings(self) -> None:
+    def test_the_prompt_asks_for_clear_space_where_the_text_goes(self) -> None:
         brief = _make_brief(
             layout_type="text_top_bottom",
             headline_text="SPOOKY SEASON",
             tagline_text="TRICK OR TREAT",
-            font_color="#FFFFFF",
+        )
+        prompt = build_flux_prompt(brief).lower()
+
+        assert "top" in prompt
+        assert "bottom" in prompt
+        assert "empty" in prompt
+
+    def test_the_background_instruction_comes_last(self) -> None:
+        # A visual style that asks for a black background must not win over the
+        # white paper background of a print-through product (issue #188).
+        brief = _make_brief(
+            product_type="sublimation",
+            layout_type="full_bleed",
+            headline_text=None,
+            visual_style="High-contrast black and orange palette",
         )
         prompt = build_flux_prompt(brief)
 
-        assert 'Bold text reading "SPOOKY SEASON"' in prompt
-        assert 'Text reading "TRICK OR TREAT"' in prompt
-        assert "at the top" in prompt
-        assert "at the bottom" in prompt
+        assert prompt.index("white background") > prompt.index("Do not draw anything else")
+
+    def test_the_prompt_forbids_a_product_mockup(self) -> None:
+        brief = _make_brief(product_type="dtf_apparel", layout_type="full_bleed")
+        prompt = build_flux_prompt(brief).lower()
+
+        assert "mockup" in prompt
 
     def test_font_colour_defaults_to_black(self) -> None:
         brief = _make_brief(
@@ -113,9 +128,8 @@ class TestBuildFluxPrompt:
             headline_text="SPOOKY SEASON",
             font_color=None,
         )
-        prompt = build_flux_prompt(brief)
 
-        assert "#000000" in prompt
+        assert font_colour(brief) == "#000000"
 
     def test_a_white_font_colour_is_kept_for_dtf_apparel(self) -> None:
         # The dtf background is magenta and is removed before printing, so
@@ -126,9 +140,8 @@ class TestBuildFluxPrompt:
             headline_text="SPOOKY SEASON",
             font_color="#FFFFFF",
         )
-        prompt = build_flux_prompt(brief)
 
-        assert "#FFFFFF" in prompt
+        assert font_colour(brief) == "#FFFFFF"
 
     def test_a_white_font_colour_falls_back_to_black_on_a_white_background(self) -> None:
         # The print-through product types keep their white background, so
@@ -139,10 +152,8 @@ class TestBuildFluxPrompt:
             headline_text="SPOOKY SEASON",
             font_color="#FFFFFF",
         )
-        prompt = build_flux_prompt(brief)
 
-        assert "#FFFFFF" not in prompt
-        assert "#000000" in prompt
+        assert font_colour(brief) == "#000000"
 
     def test_a_near_white_font_colour_falls_back_to_black(self) -> None:
         brief = _make_brief(
@@ -151,10 +162,8 @@ class TestBuildFluxPrompt:
             headline_text="SPOOKY SEASON",
             font_color="#F5F5F0",
         )
-        prompt = build_flux_prompt(brief)
 
-        assert "#F5F5F0" not in prompt
-        assert "#000000" in prompt
+        assert font_colour(brief) == "#000000"
 
     def test_regeneration_feedback_is_appended(self) -> None:
         brief = _make_brief(
@@ -188,7 +197,8 @@ class TestGenerateImage:
         assert result.error is None
         assert result.image_bytes == b"\x89PNG\r\n\x1a\n"
         prompt = client.generate_image.call_args.kwargs["prompt"]
-        assert 'Bold text reading "SPOOKY SEASON"' in prompt
+        assert "SPOOKY SEASON" not in prompt
+        assert "without any lettering" in prompt.lower()
 
     def test_a_client_error_becomes_an_error_result_instead_of_raising(self) -> None:
         client = _client()
