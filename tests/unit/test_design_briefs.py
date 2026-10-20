@@ -421,6 +421,58 @@ class TestGenerateDesignBriefs:
         assert result["briefs_created"] == 0
         assert not llm.with_raw_response.create.called
 
+    def test_no_candidates_says_why_it_skipped(self) -> None:
+        # A bare zero used to look like a silent failure (issue #192).
+        db = self._mock_db()
+        llm = MagicMock()
+
+        result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["reason"] == "no briefable seeds"
+        assert result["briefable"] == 0
+
+    def test_reports_how_many_seeds_were_available(self) -> None:
+        candidates = [_briefable(42, "dad jokes shirt")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Test",
+                        "product_type": "dtf_apparel",
+                        "confidence": 50,
+                        "source_seed_ids": [42],
+                    }
+                ]
+            }
+        )
+
+        result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["briefable"] == 1
+
+    def test_warns_when_a_brief_has_no_usable_source_seed(self, caplog) -> None:
+        candidates = [_briefable(42, "dad jokes shirt")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Test",
+                        "product_type": "dtf_apparel",
+                        "confidence": 50,
+                        "source_seed_ids": [999],
+                    }
+                ]
+            }
+        )
+
+        with caplog.at_level("WARNING"):
+            generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert "999" in caplog.text
+        assert not db.insert_brief_source.called
+
     def test_generates_briefs_from_llm(self) -> None:
         candidates = [_briefable(42, "dad jokes shirt", source="amazon")]
         db = self._mock_db(candidates=candidates)

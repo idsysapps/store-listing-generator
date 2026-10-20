@@ -3,7 +3,12 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 from store_listing.ingest.trends.google_trends import DatabaseClient
-from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate
+from store_listing.orchestration.design_briefs import BriefableCandidate
+from store_listing.orchestration.promotion import (
+    BRIEF_SEED_COOLDOWN_DAYS,
+    ActiveSeed,
+    SeedCandidate,
+)
 
 
 class FakeCursor:
@@ -271,3 +276,52 @@ def test_list_active_seeds_by_tag_filters() -> None:
     sql, params = cursor.executed_params[0]
     assert "seed_product_tags" in sql
     assert params == ("dtf_apparel",)
+
+
+def test_list_briefable_seeds_skips_seeds_used_inside_the_cooldown() -> None:
+    # A seed that already produced a brief is offered again only after the
+    # cooldown, otherwise the brief pool drains to nothing (issue #192).
+    cursor = FakeCursor()
+    cursor.fetchall_value = [
+        (1, "halloween tote", "google", "rising", 0, 12000, 12000, ["dtf_apparel"]),
+    ]
+    with connected_db(cursor) as (db, _conn):
+        result = db.list_briefable_seeds()
+
+    assert result == [
+        BriefableCandidate(
+            active_seed_id=1,
+            query="halloween tote",
+            source="google",
+            query_type="rising",
+            score=0,
+            delta=12000,
+            promotion_score=12000,
+            product_tags=["dtf_apparel"],
+        )
+    ]
+    sql, params = cursor.executed_params[0]
+    assert "NOT EXISTS" in sql
+    assert "design_brief_sources" in sql
+    assert params == (BRIEF_SEED_COOLDOWN_DAYS,)
+
+
+def test_list_briefable_seeds_accepts_an_explicit_cooldown() -> None:
+    cursor = FakeCursor()
+    with connected_db(cursor) as (db, _conn):
+        db.list_briefable_seeds(cooldown_days=3)
+
+    _sql, params = cursor.executed_params[0]
+    assert params == (3,)
+
+
+def test_list_briefable_seed_ids_returns_only_the_ids() -> None:
+    cursor = FakeCursor()
+    cursor.fetchall_value = [
+        (1, "halloween tote", "google", "rising", 0, 12000, 12000, []),
+        (2, "pickleball", "google", "top", 80, 0, 8000, []),
+    ]
+    with connected_db(cursor) as (db, _conn):
+        result = db.list_briefable_seed_ids()
+
+    assert result == [1, 2]

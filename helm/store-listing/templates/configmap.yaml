@@ -21,6 +21,9 @@ data:
   LLM_DESIGN_BRIEFS_ENABLED: {{ .Values.config.llmDesignBriefsEnabled | default "false" | quote }}
   LLM_MAX_BRIEFS: {{ .Values.config.llmMaxBriefs | default "8" | quote }}
   LLM_MAX_BRIEF_SEEDS: {{ .Values.config.llmMaxBriefSeeds | default "20" | quote }}
+  LLM_MAX_ACTIVE_SEEDS: {{ .Values.config.llmMaxActiveSeeds | default "200" | quote }}
+  LLM_MIN_BRIEFABLE_SEEDS: {{ .Values.config.llmMinBriefableSeeds | default "30" | quote }}
+  LLM_BRIEF_SEED_COOLDOWN_DAYS: {{ .Values.config.llmBriefSeedCooldownDays | default "14" | quote }}
   LLM_CURATION_SCHEDULE: {{ .Values.config.llmCurationSchedule | default "50 2,6,10,14,18,22 * * *" | quote }}
   LLM_CURATION_MAX_CHAIN: {{ .Values.config.llmCurationMaxChain | default "10" | quote }}
   LLM_CURATION_CHAIN_DELAY: {{ .Values.config.llmCurationChainDelay | default "10" | quote }}

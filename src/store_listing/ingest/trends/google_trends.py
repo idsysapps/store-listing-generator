@@ -14,7 +14,12 @@ from pytrends.request import TrendReq
 
 from store_listing.orchestration.brief_reranking import RerankableBrief
 from store_listing.orchestration.design_briefs import BriefableCandidate
-from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate, compute_promotion_score
+from store_listing.orchestration.promotion import (
+    BRIEF_SEED_COOLDOWN_DAYS,
+    ActiveSeed,
+    SeedCandidate,
+    compute_promotion_score,
+)
 
 from .schemas import QueryType, TrendHarvestRequest, TrendResult
 
@@ -375,7 +380,15 @@ class DatabaseClient:
                 for row in cur.fetchall()
             ]
 
-    def list_briefable_seeds(self) -> list[BriefableCandidate]:
+    def list_briefable_seeds(self, cooldown_days: int | None = None) -> list[BriefableCandidate]:
+        """Seeds the brief task may use right now.
+
+        A seed that already produced a brief stays out of the pool for
+        `cooldown_days` days, then becomes available again. Excluding every
+        seed that ever produced a brief drained the pool to nothing
+        (issue #192).
+        """
+        days = BRIEF_SEED_COOLDOWN_DAYS if cooldown_days is None else cooldown_days
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -394,16 +407,20 @@ class DatabaseClient:
                 FROM active_seeds a
                 LEFT JOIN seed_candidates sc
                     ON sc.id = a.promoted_from_candidate_id
-                LEFT JOIN design_brief_sources dbs
-                    ON dbs.active_seed_id = a.id
                 LEFT JOIN seed_product_tags spt
                     ON spt.active_seed_id = a.id
                 WHERE a.archived_at IS NULL
-                  AND dbs.id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM design_brief_sources dbs
+                      WHERE dbs.active_seed_id = a.id
+                        AND dbs.created_at > now() - make_interval(days => %s)
+                  )
                 GROUP BY a.id, a.query, a.promotion_score,
                          sc.source, sc.query_type, sc.score, sc.delta
                 ORDER BY a.promotion_score DESC
-                """
+                """,
+                (days,),
             )
             return [
                 BriefableCandidate(
@@ -418,6 +435,10 @@ class DatabaseClient:
                 )
                 for row in cur.fetchall()
             ]
+
+    def list_briefable_seed_ids(self, cooldown_days: int | None = None) -> list[int]:
+        """Ids of the seeds the brief task may use right now."""
+        return [candidate.active_seed_id for candidate in self.list_briefable_seeds(cooldown_days)]
 
     def insert_design_brief(
         self,

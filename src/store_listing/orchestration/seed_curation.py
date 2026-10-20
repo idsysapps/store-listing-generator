@@ -15,7 +15,13 @@ from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
 from store_listing.orchestration.context_seeds import get_upcoming_events
-from store_listing.orchestration.promotion import ActiveSeed, SeedCandidate, enforce_cap
+from store_listing.orchestration.promotion import (
+    MAX_ACTIVE_SEEDS,
+    MIN_BRIEFABLE_SEEDS,
+    ActiveSeed,
+    SeedCandidate,
+    enforce_cap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +107,8 @@ class CurationDBClient(Protocol):
     def list_pending_candidates(self) -> list[SeedCandidate]: ...
 
     def list_active_seeds(self) -> list[ActiveSeed]: ...
+
+    def list_briefable_seed_ids(self) -> list[int]: ...
 
     def cross_seed_counts(self) -> dict[str, int]: ...
 
@@ -259,6 +267,7 @@ def curate_seeds(
             "pivots": 0,
             "event_seeds": 0,
             "remaining": 0,
+            "briefable": len(db_client.list_briefable_seed_ids()),
         }
 
     candidates = all_candidates[:MAX_CANDIDATES]
@@ -371,19 +380,29 @@ def curate_seeds(
             event_count += 1
 
     incoming = promoted + pivot_count + event_count
+    briefable_ids = db_client.list_briefable_seed_ids()
     if incoming > 0:
         active_seeds = db_client.list_active_seeds()
-        archives = enforce_cap(active_seeds, 0)
+        archives = enforce_cap(
+            active_seeds,
+            0,
+            max_active=MAX_ACTIVE_SEEDS,
+            briefable_ids=set(briefable_ids),
+            reserve=MIN_BRIEFABLE_SEEDS,
+        )
         for query in archives:
             db_client.archive_active_seed(query)
 
     logger.info(
-        "LLM curation: promoted=%d rejected=%d pivots=%d events=%d remaining=%d",
+        "LLM curation: promoted=%d rejected=%d pivots=%d events=%d remaining=%d "
+        "briefable=%d reserve=%d",
         promoted,
         rejected,
         pivot_count,
         event_count,
         remaining,
+        len(briefable_ids),
+        MIN_BRIEFABLE_SEEDS,
     )
 
     return {
@@ -393,4 +412,5 @@ def curate_seeds(
         "pivots": pivot_count,
         "event_seeds": event_count,
         "remaining": remaining,
+        "briefable": len(briefable_ids),
     }
