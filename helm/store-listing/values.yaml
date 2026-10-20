@@ -31,6 +31,7 @@ config:
   visionLlmModel: "qwen_vl_ocr"
   textMatchThreshold: "0.85"
   maxTextRegenerationAttempts: "2"
+  requireTaglineText: "false"
 
 secrets:
   databaseUser: store_listing

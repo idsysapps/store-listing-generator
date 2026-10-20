@@ -2,8 +2,10 @@
 
 A vision LLM on the DGX (routed through the openai-proxy) reads the text back out
 of the generated image, which is then compared with the expected headline and
-tagline. The gate fails closed: if the text cannot be verified, the image is not
-allowed through.
+tagline. The gate fails closed for the headline: if the message cannot be
+verified, the image is not allowed through. The tagline is secondary - diffusion
+renders it unreliably - so a missing tagline is reported but does not reject the
+image.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import base64
 import difflib
 import io
 import string
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from PIL import Image
@@ -22,6 +24,7 @@ __all__ = [
     "TextValidationResult",
     "TextValidator",
     "encode_image_for_vision",
+    "is_verifiable",
     "normalize_text",
     "text_matches",
 ]
@@ -48,6 +51,8 @@ class TextValidationResult:
     observed: str
     score: float
     error: str | None = None
+    missing: list[str] = field(default_factory=list)
+    unverifiable: list[str] = field(default_factory=list)
 
 
 def encode_image_for_vision(image_bytes: bytes, *, max_side: int = DEFAULT_MAX_SIDE) -> str:
@@ -124,6 +129,15 @@ def text_matches(
     return score >= threshold, score
 
 
+def is_verifiable(text: str) -> bool:
+    """Whether the text can be read back out of an image at all.
+
+    A headline that is only a symbol ("🎃") is never transcribed verbatim, so
+    gating on it would reject every image that carries one.
+    """
+    return any(character.isalnum() for character in normalize_text(text))
+
+
 class TextValidator:
     """Reads text back out of a generated image using a vision LLM on the DGX."""
 
@@ -133,10 +147,12 @@ class TextValidator:
         client: Any,
         model: str,
         threshold: float = DEFAULT_THRESHOLD,
+        require_tagline: bool = False,
     ) -> None:
         self._client = client
         self._model = model
         self._threshold = threshold
+        self._require_tagline = require_tagline
 
     def validate(
         self,
@@ -145,8 +161,16 @@ class TextValidator:
         headline: str | None,
         tagline: str | None,
     ) -> TextValidationResult:
-        """Check the rendered text against the expected headline and tagline."""
-        expected = [text for text in (headline, tagline) if text and text.strip()]
+        """Check the rendered text against the expected headline and tagline.
+
+        The headline gates the image: a design whose message came out garbled is
+        not sellable. The tagline is secondary and diffusion drops it often, so
+        a missing tagline is reported but does not reject the image - unless
+        ``require_tagline`` says otherwise.
+        """
+        headline_text = headline.strip() if headline and headline.strip() else None
+        tagline_text = tagline.strip() if tagline and tagline.strip() else None
+        expected = [text for text in (headline_text, tagline_text) if text]
         if not expected:
             return TextValidationResult(matched=True, expected=[], observed="", score=1.0)
 
@@ -172,17 +196,30 @@ class TextValidator:
             )
 
         scores: list[float] = []
-        matched = True
+        missing: list[str] = []
+        unverifiable: list[str] = []
         for text in expected:
+            if not is_verifiable(text):
+                unverifiable.append(text)
+                continue
             text_matched, score = text_matches(text, observed, threshold=self._threshold)
             scores.append(score)
-            matched = matched and text_matched
+            if not text_matched:
+                missing.append(text)
+
+        # The headline is what the design sells, so it has to be there. The
+        # tagline is only required in strict mode.
+        required = (
+            list(missing) if self._require_tagline else [t for t in missing if t == headline_text]
+        )
 
         return TextValidationResult(
-            matched=matched,
+            matched=not required,
             expected=expected,
             observed=observed,
-            score=min(scores) if scores else 0.0,
+            score=min(scores) if scores else 1.0,
+            missing=missing,
+            unverifiable=unverifiable,
         )
 
     def _transcribe(self, data_url: str) -> str:

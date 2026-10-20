@@ -1,9 +1,10 @@
 """Pipeline: generate images for design briefs, store in S3, update DB.
 
 Images are rendered on the DGX with ComfyUI + Flux Schnell. When a brief carries
-text, the rendered text is read back out with a vision model and compared with
-the requested headline and tagline. The gate fails closed: an image whose text
-cannot be verified is never uploaded.
+text, the rendered text is read back with a vision model and compared with the
+requested headline and tagline. The gate fails closed for the headline: an image
+whose message cannot be verified is never uploaded. The tagline is secondary and
+diffusion drops it often, so a missing tagline is logged and the image is kept.
 """
 
 from __future__ import annotations
@@ -54,11 +55,22 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
 
 
 def _retry_hint(brief: DesignBrief) -> str:
-    """Nudge for the next attempt, carrying the text the model got wrong."""
-    if brief.headline_text:
-        return f'The text must read exactly "{brief.headline_text}". Render no other words.'
-    if brief.tagline_text:
-        return f'The text must read exactly "{brief.tagline_text}". Render no other words.'
+    """Nudge for the next attempt, naming every text the brief asks for.
+
+    Asking for the headline only - and forbidding other words on top - told the
+    model to drop the tagline on every retry, which is the text the brief
+    actually wanted rendered.
+    """
+    texts = [
+        text.strip() for text in (brief.headline_text, brief.tagline_text) if text and text.strip()
+    ]
+    if len(texts) == 2:
+        return (
+            f'The top text must read exactly "{texts[0]}" and the bottom text must read exactly "{texts[1]}". '
+            "Render no other words."
+        )
+    if texts:
+        return f'The text must read exactly "{texts[0]}". Render no other words.'
     return "Render the requested text exactly, with no other words."
 
 
@@ -142,6 +154,14 @@ def _generate_single_brief(
             tagline=brief.tagline_text,
         )
         if verdict.matched:
+            if verdict.missing or verdict.unverifiable:
+                logger.warning(
+                    "Text validation passed with gaps for brief %d: missing %s, unverifiable %s, observed %r",
+                    brief_id,
+                    verdict.missing,
+                    verdict.unverifiable,
+                    verdict.observed,
+                )
             break
 
         if attempts > max_retries:

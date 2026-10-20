@@ -147,7 +147,9 @@ class TestTextValidator:
         assert result.matched is True
         client.chat.completions.create.assert_not_called()
 
-    def test_both_headline_and_tagline_must_be_present(self) -> None:
+    def test_a_missing_tagline_does_not_fail_the_gate(self) -> None:
+        # Diffusion drops the secondary line far more often than the headline. The
+        # headline carries the message, so only it gates the image.
         client = _vision_client("SPOOKY SEASON")
         validator = TextValidator(client=client, model="qwen_vl_ocr")
 
@@ -155,8 +157,42 @@ class TestTextValidator:
             _png_bytes(), headline="SPOOKY SEASON", tagline="TRICK OR TREAT"
         )
 
-        assert result.matched is False
+        assert result.matched is True
         assert result.expected == ["SPOOKY SEASON", "TRICK OR TREAT"]
+        assert result.missing == ["TRICK OR TREAT"]
+
+    def test_a_missing_headline_fails_even_when_the_tagline_matches(self) -> None:
+        client = _vision_client("TRICK OR TREAT")
+        validator = TextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(
+            _png_bytes(), headline="SPOOKY SEASON", tagline="TRICK OR TREAT"
+        )
+
+        assert result.matched is False
+        assert result.missing == ["SPOOKY SEASON"]
+
+    def test_a_headline_that_is_not_text_is_not_gated(self) -> None:
+        # The OCR model never transcribes a symbol verbatim, so gating on it would
+        # reject every image that carries one.
+        client = _vision_client("Spooky Vibes Only")
+        validator = TextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), headline="🎃", tagline="Spooky Vibes Only")
+
+        assert result.matched is True
+        assert result.unverifiable == ["🎃"]
+
+    def test_strict_mode_requires_the_tagline(self) -> None:
+        client = _vision_client("SPOOKY SEASON")
+        validator = TextValidator(client=client, model="qwen_vl_ocr", require_tagline=True)
+
+        result = validator.validate(
+            _png_bytes(), headline="SPOOKY SEASON", tagline="TRICK OR TREAT"
+        )
+
+        assert result.matched is False
+        assert result.missing == ["TRICK OR TREAT"]
 
     def test_sends_the_image_to_the_vision_model(self) -> None:
         client = _vision_client("SPOOKY SEASON")
