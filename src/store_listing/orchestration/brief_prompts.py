@@ -6,6 +6,11 @@ be print artwork and the custom prompt never did, so a custom brief for a bag
 design produced an image of a bag (issue #195).
 
 The rules live here so that both prompts say the same thing.
+
+The rules are also free of any seasonal example. The rules used to teach the
+design-vs-product rule with a holiday example, and the example anchored
+every prompt that used the rules, so a brief batch kept coming back
+seasonal no matter what the trends said (issue #200).
 """
 
 from __future__ import annotations
@@ -14,8 +19,10 @@ from typing import Final
 
 __all__ = [
     "DESIGN_ONLY_RULES",
+    "DIVERSITY_RULES",
     "LAYOUT_RULES",
     "PRODUCT_CATALOG",
+    "SEASONAL_WORDS",
 ]
 
 PRODUCT_CATALOG: Final[str] = (
@@ -51,16 +58,56 @@ LAYOUT_RULES: Final[str] = (
 
 DESIGN_ONLY_RULES: Final[str] = (
     "DESIGN vs PRODUCT - the design is the artwork, never the product it is printed on:\n"
-    "- concept: the design idea, NOT the product. Bad: 'Trick or Treat Bag with Candy "
-    "Scatter'. Good: 'Candy Scatter' - the bag itself belongs in specific_products.\n"
+    "- concept: the design idea, NOT the product. Bad: 'Weekend Tote with Coffee Beans'. "
+    "Good: 'Coffee Beans' - the bag itself belongs in specific_products.\n"
     "- scene_description: a concise visual description of ONLY the illustration to draw "
     "(no text, no slogans, no words - just the visual scene). Under 20 words. It is what "
     "the image generator sees, so it has to be the print artwork itself, not a photo of a "
-    "product. Bad: 'a trick-or-treat bag full of candy'. Good: 'scattered wrapped "
-    "Halloween candy in a flat graphic'. Never mention a bag, tote, pouch, shirt, "
+    "product. Bad: 'a tote bag full of coffee beans'. Good: 'scattered roasted coffee "
+    "beans in a flat graphic'. Never mention a bag, tote, pouch, shirt, "
     "hoodie, mug, tumbler, phone case, pillow, blanket, sticker sheet, mockup or blank - "
     "if the design is for a bag, describe the graphic printed on it, not the bag. "
     "A mockup cannot be printed.\n"
     "- For layout_type 'text_only' there is no illustration and no scene_description: the "
     "design is the text.\n"
+)
+
+DIVERSITY_RULES: Final[str] = (
+    "DIVERSITY - a batch is not a season:\n"
+    "- The calendar events above are an opportunity, not the default. Most briefs in a "
+    "batch must be evergreen: a design someone buys in any month of the year.\n"
+    "- At most {max_per_theme} briefs may be tied to the same event.\n"
+    "- At least {min_evergreen} briefs in the batch must NOT be tied to any event.\n"
+    "- If the signals are mostly seasonal, build the evergreen briefs out of the "
+    "standing themes in the signals (occupations, hobbies, pets, food, home, sports).\n"
+)
+
+# The words that must not appear in the shared rules. A rule that mentions a
+# holiday is a rule that pulls every brief towards that holiday.
+SEASONAL_WORDS: Final[tuple[str, ...]] = (
+    "halloween",
+    "christmas",
+    "xmas",
+    "valentine",
+    "easter",
+    "thanksgiving",
+    "mother",
+    "father",
+    "graduation",
+    "trick or treat",
+    "pumpkin",
+    "spooky",
+    "santa",
+    "elf",
+    "witch",
+    "skeleton",
+    "reindeer",
+    "turkey",
+    "pumpkin",
+    "holiday",
+    "super bowl",
+    "football",
+    "back to school",
+    "teacher",
+    "candy",
 )

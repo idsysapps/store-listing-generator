@@ -71,7 +71,7 @@ class TestBuildBriefPrompt:
 
         system = messages[0]["content"].lower()
         assert "not the product" in system
-        assert "trick or treat bag" in system
+        assert "weekend tote with coffee beans" in system
 
     def test_the_prompt_says_the_scene_never_names_the_product(self) -> None:
         messages = build_brief_prompt(
@@ -513,14 +513,17 @@ class TestGenerateDesignBriefs:
 
     def _mock_llm(self, response_json: dict) -> MagicMock:
         llm = MagicMock()
+        llm.with_raw_response.create.return_value = self._raw(response_json)
+        return llm
+
+    def _raw(self, response_json: dict) -> MagicMock:
         choice = MagicMock()
         choice.message.content = json.dumps(response_json)
         parsed = MagicMock(choices=[choice])
         raw = MagicMock()
         raw.headers = {}
         raw.parse.return_value = parsed
-        llm.with_raw_response.create.return_value = raw
-        return llm
+        return raw
 
     def test_no_candidates_returns_early(self) -> None:
         db = self._mock_db()
@@ -561,6 +564,95 @@ class TestGenerateDesignBriefs:
         result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
 
         assert result["briefable"] == 1
+
+    def test_the_briefs_past_the_event_quota_are_not_created(self) -> None:
+        # Three briefs for the same event is a season taking the batch
+        # (issue #200): only the quota is kept.
+        candidates = [_briefable(1, "halloween costume shirt")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": f"Pumpkin {index}",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80 - index,
+                        "source_seed_ids": [1],
+                    }
+                    for index in range(3)
+                ]
+            }
+        )
+
+        result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["briefs_created"] == 2
+        assert result["dropped"] == 1
+        assert db.insert_design_brief.call_count == 2
+
+    def test_a_seasonal_batch_is_asked_for_once_more(self) -> None:
+        candidates = [_briefable(1, "halloween costume shirt"), _briefable(2, "cat lover mug")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Pumpkin Party",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                    }
+                ]
+            }
+        )
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert llm.with_raw_response.create.call_count == 2
+
+    def test_the_second_answer_is_used_when_it_has_more_evergreen_briefs(self) -> None:
+        candidates = [_briefable(1, "halloween costume shirt"), _briefable(2, "cat lover mug")]
+        db = self._mock_db(candidates=candidates)
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Pumpkin Party",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                        }
+                    ]
+                }
+            ),
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Coffee Cat",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [2],
+                        },
+                        {
+                            "concept": "Garden Gnome",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [2],
+                        },
+                    ]
+                }
+            ),
+        ]
+
+        result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["briefs_created"] == 2
+        assert result["evergreen"] == 2
+        concepts = [call.kwargs["concept"] for call in db.insert_design_brief.call_args_list]
+        assert concepts == ["Coffee Cat", "Garden Gnome"]
 
     def test_warns_when_a_brief_has_no_usable_source_seed(self, caplog) -> None:
         candidates = [_briefable(42, "dad jokes shirt")]
