@@ -60,6 +60,38 @@ class TestBuildBriefPrompt:
 
         assert "no emoji" in messages[0]["content"].lower()
 
+    def test_the_prompt_says_the_concept_is_not_the_product(self) -> None:
+        # A concept that names the product ends up in the image prompt and the
+        # model draws the product instead of the design (issue #195).
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "halloween tote")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        system = messages[0]["content"].lower()
+        assert "not the product" in system
+        assert "trick or treat bag" in system
+
+    def test_the_prompt_says_the_scene_never_names_the_product(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "halloween tote")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        system = messages[0]["content"].lower()
+        assert "never mention a bag" in system
+
+    def test_the_prompt_offers_a_typography_only_layout(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        assert "text_only" in messages[0]["content"]
+
     def test_returns_system_and_user_messages(self) -> None:
         messages = build_brief_prompt(
             candidates=[_briefable(1, "dad jokes shirt")],
@@ -389,6 +421,85 @@ class TestParseBriefResponse:
         result = parse_brief_response(response)
 
         assert result[0].layout_type == "full_bleed"
+
+    def test_parses_a_typography_only_brief(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Candy Scatter",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_only",
+                        "headline_text": "Candy Scatter",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].layout_type == "text_only"
+        assert result[0].headline_text == "Candy Scatter"
+
+    def test_a_typography_only_brief_needs_no_scene(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Candy Scatter",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_only",
+                        "headline_text": "Candy Scatter",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].scene_description is None
+
+    def test_a_typography_only_brief_falls_back_to_a_short_concept(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Candy Scatter",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_only",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].headline_text == "Candy Scatter"
+
+    def test_a_typography_only_brief_without_a_usable_headline_is_dropped(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "A concept that is far too long to be a headline for a shirt",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_only",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result == []
 
 
 class TestGenerateDesignBriefs:

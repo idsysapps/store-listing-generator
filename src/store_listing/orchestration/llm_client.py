@@ -52,3 +52,12 @@ def get_vision_client() -> OpenAI:
 
 def get_vision_model() -> str:
     return os.environ.get("VISION_LLM_MODEL", DEFAULT_VISION_MODEL)
+
+
+def get_artwork_vision_model() -> str:
+    """The model that judges whether a render is artwork or a product.
+
+    The OCR model reads text well, but judging a picture is a different job,
+    so the model can be pointed at a general vision model instead.
+    """
+    return os.environ.get("ARTWORK_VISION_MODEL", get_vision_model())

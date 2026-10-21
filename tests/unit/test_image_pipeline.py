@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from PIL import Image
 
+from store_listing.orchestration.artwork_validation import ArtworkValidationResult
 from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.image_pipeline import (
     generate_image_for_brief,
@@ -88,6 +89,7 @@ def _brief(**overrides: Any) -> dict[str, Any]:
         "headline_text": None,
         "tagline_text": None,
         "font_color": None,
+        "scene_description": "a skeleton doing yoga on a beach towel",
     }
     row.update(overrides)
     return row
@@ -459,3 +461,277 @@ class TestGenerateImageForBrief:
 
         prompt = comfyui.generate_image.call_args.kwargs["prompt"]
         assert "more vibrant colors" in prompt
+
+
+class TestTypographyOnlyDesigns:
+    def test_a_typography_only_brief_never_reaches_the_image_model(self) -> None:
+        db = _mock_db_client(
+            briefs=[_brief(layout_type="text_only", headline_text="SPOOKY SEASON")]
+        )
+        comfyui = _comfyui_client()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+        )
+
+        assert result["images_generated"] == 1
+        comfyui.generate_image.assert_not_called()
+
+    def test_a_typography_only_dtf_design_uploads_a_raw_and_a_transparent_file(self) -> None:
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    product_type="dtf_apparel",
+                    layout_type="text_only",
+                    headline_text="SPOOKY SEASON",
+                )
+            ]
+        )
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        assert result["images_generated"] == 1
+        assert s3.put_object.call_count == 2
+        call_kwargs = db.update_brief_image_keys.call_args.kwargs
+        assert "transparent" in call_kwargs["image_key_transparent"]
+
+    def test_the_typography_only_dtf_raw_is_the_key_colour(self) -> None:
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    product_type="dtf_apparel",
+                    layout_type="text_only",
+                    headline_text="SPOOKY SEASON",
+                )
+            ]
+        )
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        body = s3.put_object.call_args_list[0].kwargs["Body"]
+        image = Image.open(BytesIO(body)).convert("RGB")
+        assert image.getpixel((0, 0)) == (255, 0, 255)
+
+    def test_the_typography_only_print_file_carries_the_headline(self) -> None:
+        db = _mock_db_client(
+            briefs=[_brief(layout_type="text_only", headline_text="SPOOKY SEASON")]
+        )
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        body = s3.put_object.call_args.kwargs["Body"]
+        image = Image.open(BytesIO(body)).convert("RGB")
+        width, height = image.size
+        drawn = [
+            (x, y)
+            for y in range(height)
+            for x in range(width)
+            if image.getpixel((x, y)) != (255, 255, 255)
+        ]
+        assert drawn, "the headline should have been drawn on the canvas"
+
+    def test_a_typography_only_design_still_goes_through_the_text_gate(self) -> None:
+        db = _mock_db_client(
+            briefs=[_brief(layout_type="text_only", headline_text="SPOOKY SEASON")]
+        )
+        validator = _validator(True)
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            text_validator=validator,
+        )
+
+        validator.validate.assert_called_once()
+
+    def test_a_typography_only_design_that_fails_the_text_gate_is_not_uploaded(self) -> None:
+        db = _mock_db_client(
+            briefs=[_brief(layout_type="text_only", headline_text="SPOOKY SEASON")]
+        )
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+            text_validator=_validator(False),
+        )
+
+        assert result["images_generated"] == 0
+        s3.put_object.assert_not_called()
+
+    def test_a_brief_without_a_scene_is_rendered_as_typography_only(self) -> None:
+        # The concept may name the product, so it is never used as the visual
+        # prompt. Without a scene the brief has no artwork - the typography is
+        # still worth printing (issue #195).
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    concept="Trick or Treat Bag with Candy Scatter",
+                    scene_description=None,
+                    layout_type="text_top",
+                    headline_text="Trick or Treat",
+                )
+            ]
+        )
+        comfyui = _comfyui_client()
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        assert result["images_generated"] == 1
+        comfyui.generate_image.assert_not_called()
+        s3.put_object.assert_called()
+
+    def test_a_full_bleed_brief_without_a_scene_is_left_pending(self) -> None:
+        db = _mock_db_client(briefs=[_brief(scene_description=None)])
+        comfyui = _comfyui_client()
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        comfyui.generate_image.assert_not_called()
+        s3.put_object.assert_not_called()
+
+
+def _artwork_validator(*verdicts: str) -> MagicMock:
+    """A validator that reports the given artwork verdicts in order."""
+    validator = MagicMock()
+    validator.validate.side_effect = [
+        ArtworkValidationResult(is_product=verdict == "product", verdict=verdict)
+        for verdict in verdicts
+    ]
+    return validator
+
+
+class TestArtworkGate:
+    def test_a_product_artwork_is_retried(self) -> None:
+        db = _mock_db_client(briefs=[_brief()])
+        comfyui = _comfyui_client()
+        validator = _artwork_validator("product", "artwork")
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_validator=validator,
+        )
+
+        assert result["images_generated"] == 1
+        assert comfyui.generate_image.call_count == 2
+
+    def test_the_retry_asks_for_the_flat_graphic_only(self) -> None:
+        db = _mock_db_client(briefs=[_brief()])
+        comfyui = _comfyui_client()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_validator=_artwork_validator("product", "artwork"),
+        )
+
+        second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"]
+        assert "no bag" in second_prompt.lower()
+
+    def test_a_product_artwork_is_never_uploaded(self) -> None:
+        db = _mock_db_client(briefs=[_brief()])
+        comfyui = _comfyui_client()
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_validator=_artwork_validator("product", "product", "product"),
+        )
+
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        s3.put_object.assert_not_called()
+
+    def test_a_product_artwork_falls_back_to_the_typography_only_design(self) -> None:
+        db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
+        comfyui = _comfyui_client()
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_validator=_artwork_validator("product", "product", "product"),
+        )
+
+        assert result["images_generated"] == 1
+        s3.put_object.assert_called()
+
+    def test_an_unknown_verdict_keeps_the_image(self) -> None:
+        db = _mock_db_client(briefs=[_brief()])
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_validator=_artwork_validator("unknown"),
+        )
+
+        assert result["images_generated"] == 1
+        s3.put_object.assert_called()
+
+    def test_the_artwork_gate_is_not_run_for_a_typography_only_design(self) -> None:
+        db = _mock_db_client(
+            briefs=[_brief(layout_type="text_only", headline_text="SPOOKY SEASON")]
+        )
+        validator = _artwork_validator()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_validator=validator,
+        )
+
+        validator.validate.assert_not_called()

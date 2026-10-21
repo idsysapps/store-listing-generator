@@ -43,6 +43,35 @@ An automated pipeline that monitors real-time search and social media trends (Go
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Design Image Pipeline
+
+Design briefs are rendered on the DGX with ComfyUI + Flux Schnell, and the
+headline and the tagline are drawn on top of the artwork with a font - the
+model cannot spell, so it is never asked to.
+
+| Layout | What is drawn |
+|--------|---------------|
+| `full_bleed` | The illustration only, no text |
+| `text_top` | The illustration with a headline at the top |
+| `text_top_bottom` | The illustration with a headline at the top and a tagline at the bottom |
+| `text_only` | The text alone on a blank canvas - the image model is never called |
+
+Two gates stand between a render and the print file:
+
+- **The artwork gate** reads the render back and rejects it when it shows the
+  product instead of the design (a bag, a hoodie, a mug). A brief whose scene
+  is unusable is rendered as a typography-only design when it has text, and
+  left without an image when it has none. The `concept` is never used as the
+  visual prompt: a concept names the design idea, and a concept that names
+  the product draws the product.
+- **The text gate** reads the composited text back and rejects the image when
+  the headline cannot be verified. A missing tagline is reported but does not
+  reject the image.
+
+Both gates can be tuned with `ARTWORK_VALIDATION_ENABLED`,
+`MAX_ARTWORK_REGENERATION_ATTEMPTS`, `MAX_TEXT_REGENERATION_ATTEMPTS` and
+`REQUIRE_TAGLINE_TEXT` in the Helm chart.
+
 ## Prerequisites
 
 | Requirement | Version | Description |

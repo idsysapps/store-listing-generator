@@ -1,5 +1,6 @@
 import os
 from collections.abc import Sequence
+from typing import Any
 
 from celery import Celery
 from celery.schedules import crontab
@@ -61,6 +62,26 @@ def _require_tagline_text() -> bool:
     whole design over it costs more than shipping it without the tagline.
     """
     return os.environ.get("REQUIRE_TAGLINE_TEXT", "false").lower() in ("1", "true", "yes")
+
+
+def _artwork_validation_enabled() -> bool:
+    """Whether the artwork gate runs.
+
+    On by default: an image that shows the product instead of the design
+    cannot be printed (issue #195).
+    """
+    return os.environ.get("ARTWORK_VALIDATION_ENABLED", "true").lower() in ("1", "true", "yes")
+
+
+def _build_artwork_validator() -> Any:
+    """The validator that judges the generated artwork, or None when it is off."""
+    if not _artwork_validation_enabled():
+        return None
+
+    from store_listing.orchestration.artwork_validation import ArtworkValidator
+    from store_listing.orchestration.llm_client import get_artwork_vision_model, get_vision_client
+
+    return ArtworkValidator(client=get_vision_client(), model=get_artwork_vision_model())
 
 
 celery_app.conf.beat_schedule = {
@@ -486,6 +507,7 @@ def generate_design_images_task() -> dict:
         bucket=S3_BUCKET,
         endpoint_url=S3_ENDPOINT_URL,
         text_validator=text_validator,
+        artwork_validator=_build_artwork_validator(),
     )
 
 
@@ -533,4 +555,5 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         bucket=S3_BUCKET,
         endpoint_url=S3_ENDPOINT_URL,
         text_validator=text_validator,
+        artwork_validator=_build_artwork_validator(),
     )

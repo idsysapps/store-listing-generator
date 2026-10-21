@@ -8,6 +8,9 @@ comes from a font.
 
 The text is drawn with a halo so it stays readable over busy artwork - and so
 the OCR gate can read it back.
+
+A typography-only design has no artwork at all: the canvas is blank and only
+the text is drawn on it (issue #196).
 """
 
 from __future__ import annotations
@@ -37,6 +40,22 @@ HALO_RATIO = 0.06
 # Share of the zone that stays empty around the text.
 ZONE_PADDING = 0.2
 
+# A typography-only design has no artwork to make room for, so the text sits
+# in the middle of the canvas instead of at its edges.
+TEXT_ONLY_HEADLINE_TOP = 0.25
+TEXT_ONLY_HEADLINE_HEIGHT = 0.30
+TEXT_ONLY_TAGLINE_TOP = 0.55
+TEXT_ONLY_TAGLINE_HEIGHT = 0.20
+
+# The size of a render, and the colours a blank canvas comes in.
+CANVAS_SIZE = (1024, 1024)
+# The DTF renders are keyed out of this colour, so the blank DTF canvas uses
+# it too.
+DTF_KEY_COLOUR = (255, 0, 255)
+# The print-through products print the background as-is, so their canvas is
+# the white of the paper.
+PAPER_COLOUR = (255, 255, 255)
+
 
 def resolve_layout(layout_type: str, headline_text: str | None, tagline_text: str | None) -> str:
     """The layout that is actually drawn.
@@ -48,6 +67,8 @@ def resolve_layout(layout_type: str, headline_text: str | None, tagline_text: st
     """
     if layout_type == "full_bleed":
         return "full_bleed"
+    if layout_type == "text_only":
+        return "text_only"
     if tagline_text and tagline_text.strip():
         return "text_top_bottom"
     return "text_top"
@@ -58,13 +79,14 @@ class LayoutSpec:
     """What has to be drawn, and where.
 
     The layout decides what is drawn: a ``text_top`` brief has a headline at
-    the top and nothing else, a ``text_top_bottom`` brief has both. The
-    specification is normalised so that it is the single source of truth for
-    the pipeline - the text that is drawn and the text that is validated have
-    to be the same text.
+    the top and nothing else, a ``text_top_bottom`` brief has both. A
+    ``text_only`` brief is typography and nothing else, so it is drawn in the
+    middle of the canvas. The specification is normalised so that it is the
+    single source of truth for the pipeline - the text that is drawn and the
+    text that is validated have to be the same text.
     """
 
-    layout_type: str  # "full_bleed", "text_top", "text_top_bottom"
+    layout_type: str  # "full_bleed", "text_top", "text_top_bottom", "text_only"
     headline_text: str | None = None
     tagline_text: str | None = None
     font_color: str = "#000000"
@@ -80,6 +102,32 @@ class LayoutSpec:
     @property
     def needs_text(self) -> bool:
         return bool(self.headline_text or self.tagline_text)
+
+
+def blank_canvas(
+    product_type: str,
+    *,
+    transparent: bool = False,
+    size: tuple[int, int] = CANVAS_SIZE,
+) -> bytes:
+    """A blank canvas to draw a typography-only design on.
+
+    The DTF design is keyed out of a magenta background, so its canvas is
+    magenta; the print-through products print the background as the paper, so
+    theirs is white. The transparent canvas is what the DTF print file is
+    made of.
+    """
+    if transparent:
+        colour = (0, 0, 0, 0)
+    elif product_type == "dtf_apparel":
+        colour = (*DTF_KEY_COLOUR, 255)
+    else:
+        colour = (*PAPER_COLOUR, 255)
+
+    image = Image.new("RGBA", size, colour)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
@@ -248,12 +296,59 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
     margin_x = int(width * MARGIN_X)
     text_width = width - 2 * margin_x
 
+    if layout.layout_type == "text_only":
+        _draw_text_only(draw, layout, margin_x=margin_x, text_width=text_width, height=height)
+    else:
+        if layout.headline_text:
+            _draw_text(
+                draw,
+                layout.headline_text,
+                color=layout.font_color,
+                box=(margin_x, 0, text_width, int(height * HEADLINE_ZONE)),
+            )
+        if layout.tagline_text:
+            _draw_text(
+                draw,
+                layout.tagline_text,
+                color=layout.font_color,
+                box=(
+                    margin_x,
+                    int(height * (1 - TAGLINE_ZONE)),
+                    text_width,
+                    int(height * TAGLINE_ZONE),
+                ),
+            )
+
+    result = Image.alpha_composite(image, overlay)
+    buffer = BytesIO()
+    result.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _draw_text_only(
+    draw: ImageDraw.ImageDraw,
+    layout: LayoutSpec,
+    *,
+    margin_x: int,
+    text_width: int,
+    height: int,
+) -> None:
+    """Draw a typography-only design in the middle of the canvas.
+
+    There is no artwork to leave room for, so the headline sits above the
+    middle of the canvas and the tagline below it.
+    """
     if layout.headline_text:
         _draw_text(
             draw,
             layout.headline_text,
             color=layout.font_color,
-            box=(margin_x, 0, text_width, int(height * HEADLINE_ZONE)),
+            box=(
+                margin_x,
+                int(height * TEXT_ONLY_HEADLINE_TOP),
+                text_width,
+                int(height * TEXT_ONLY_HEADLINE_HEIGHT),
+            ),
         )
     if layout.tagline_text:
         _draw_text(
@@ -262,13 +357,8 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
             color=layout.font_color,
             box=(
                 margin_x,
-                int(height * (1 - TAGLINE_ZONE)),
+                int(height * TEXT_ONLY_TAGLINE_TOP),
                 text_width,
-                int(height * TAGLINE_ZONE),
+                int(height * TEXT_ONLY_TAGLINE_HEIGHT),
             ),
         )
-
-    result = Image.alpha_composite(image, overlay)
-    buffer = BytesIO()
-    result.save(buffer, format="PNG")
-    return buffer.getvalue()

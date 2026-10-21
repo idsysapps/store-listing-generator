@@ -5,6 +5,11 @@ text, the rendered text is read back with a vision model and compared with the
 requested headline and tagline. The gate fails closed for the headline: an image
 whose message cannot be verified is never uploaded. The tagline is secondary and
 diffusion drops it often, so a missing tagline is logged and the image is kept.
+
+The artwork itself is checked too: an image that shows the product instead of
+the design - a bag, a hoodie, a mug - is never uploaded (issue #195). A brief
+that has no usable artwork is rendered as a typography-only design when it has
+text, and left pending when it has none (issue #196).
 """
 
 from __future__ import annotations
@@ -14,16 +19,26 @@ import os
 import random
 from typing import Any
 
+from store_listing.orchestration.artwork_validation import ArtworkValidator
 from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.design_briefs import DesignBrief
-from store_listing.orchestration.image_generation import font_colour, generate_image
+from store_listing.orchestration.image_generation import (
+    ARTWORK_RETRY_HINT,
+    font_colour,
+    generate_image,
+)
 from store_listing.orchestration.image_storage import ImageStorageClient
-from store_listing.orchestration.text_compositor import LayoutSpec, composite_text
+from store_listing.orchestration.text_compositor import (
+    LayoutSpec,
+    blank_canvas,
+    composite_text,
+)
 from store_listing.orchestration.text_validation import TextValidator
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_TEXT_RETRIES = 2
+DEFAULT_MAX_ARTWORK_RETRIES = 1
 
 
 def _max_text_retries() -> int:
@@ -34,6 +49,16 @@ def _max_text_retries() -> int:
     except ValueError:
         logger.warning("Invalid MAX_TEXT_REGENERATION_ATTEMPTS=%r, using the default", raw)
         return DEFAULT_MAX_TEXT_RETRIES
+
+
+def _max_artwork_retries() -> int:
+    """Retries allowed after the artwork came back as a product."""
+    raw = os.environ.get("MAX_ARTWORK_REGENERATION_ATTEMPTS", str(DEFAULT_MAX_ARTWORK_RETRIES))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("Invalid MAX_ARTWORK_REGENERATION_ATTEMPTS=%r, using the default", raw)
+        return DEFAULT_MAX_ARTWORK_RETRIES
 
 
 def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
@@ -78,6 +103,7 @@ def generate_images_for_briefs(
     endpoint_url: str | None = None,
     limit: int = 20,
     text_validator: TextValidator | None = None,
+    artwork_validator: ArtworkValidator | None = None,
 ) -> dict[str, Any]:
     briefs = db_client.list_briefs_without_images(limit)
     if not briefs:
@@ -94,6 +120,7 @@ def generate_images_for_briefs(
             storage=storage,
             comfyui_client=comfyui_client,
             text_validator=text_validator,
+            artwork_validator=artwork_validator,
             db_client=db_client,
         )
         if success:
@@ -105,6 +132,56 @@ def generate_images_for_briefs(
     return {"status": "success", "images_generated": generated, "errors": errors}
 
 
+def _upload_text_only(
+    brief_row: dict[str, Any],
+    layout: LayoutSpec,
+    *,
+    storage: ImageStorageClient,
+    db_client: Any,
+    text_validator: TextValidator | None,
+) -> tuple[bool, str | None]:
+    """Render a typography-only design and upload it.
+
+    There is no artwork: the design is the text, drawn on a blank canvas. The
+    DTF print file is the same drawing on a transparent canvas.
+    """
+    brief_id = brief_row["id"]
+    product_type = brief_row["product_type"]
+
+    if not layout.needs_text:
+        return False, "a typography-only design needs a headline or a tagline"
+
+    raw_bytes = composite_text(blank_canvas(product_type), layout)
+    transparent_bytes: bytes | None = None
+    if product_type == "dtf_apparel":
+        transparent_bytes = composite_text(blank_canvas(product_type, transparent=True), layout)
+
+    if text_validator is not None:
+        verdict = text_validator.validate(
+            raw_bytes,
+            headline=layout.headline_text,
+            tagline=layout.tagline_text,
+        )
+        if not verdict.matched:
+            return False, (
+                f"text validation failed: expected {verdict.expected}, "
+                f"observed {verdict.observed!r}"
+            )
+
+    keys = storage.upload_design(
+        raw_bytes=raw_bytes,
+        transparent_bytes=transparent_bytes,
+        brief_id=brief_id,
+        product_type=product_type,
+    )
+    db_client.update_brief_image_keys(
+        brief_id=brief_id,
+        image_key_raw=keys["raw"],
+        image_key_transparent=keys.get("transparent"),
+    )
+    return True, None
+
+
 def _generate_single_brief(
     brief_row: dict[str, Any],
     *,
@@ -112,6 +189,7 @@ def _generate_single_brief(
     comfyui_client: ComfyUIClient,
     text_validator: TextValidator | None,
     db_client: Any,
+    artwork_validator: ArtworkValidator | None = None,
 ) -> tuple[bool, str | None]:
     brief = _brief_from_row(brief_row)
     brief_id = brief_row["id"]
@@ -124,10 +202,39 @@ def _generate_single_brief(
     )
     needs_text_check = layout.needs_text
     max_retries = _max_text_retries()
+    max_artwork_retries = _max_artwork_retries()
+
+    # A typography-only design is the text and nothing else: the image model
+    # is never asked for an illustration (issue #196).
+    if layout.layout_type == "text_only":
+        return _upload_text_only(
+            brief_row,
+            layout,
+            storage=storage,
+            db_client=db_client,
+            text_validator=text_validator,
+        )
+
+    # The concept is never used as the visual prompt: it names the design
+    # idea, and a concept that names the product draws the product
+    # (issue #195). A brief without a scene has no artwork.
+    if not (brief.scene_description or "").strip():
+        logger.warning("Brief %d has no scene_description", brief_id)
+        if needs_text_check:
+            return _upload_text_only(
+                brief_row,
+                layout,
+                storage=storage,
+                db_client=db_client,
+                text_validator=text_validator,
+            )
+        return False, "the brief has no scene_description"
 
     base_seed = random.randint(0, 2**31 - 1)
     retry_hint = ""
     attempts = 0
+    artwork_attempts = 0
+    text_attempts = 0
 
     while True:
         attempts += 1
@@ -145,6 +252,39 @@ def _generate_single_brief(
                 result.error,
             )
             return False, result.error or "image generation failed"
+
+        # The artwork gate: the picture has to be the design, not the product
+        # it is printed on (issue #195).
+        if artwork_validator is not None:
+            artwork = artwork_validator.validate(result.raw_bytes or result.image_bytes)
+            if artwork.is_product:
+                artwork_attempts += 1
+                if artwork_attempts <= max_artwork_retries:
+                    logger.warning(
+                        "Brief %d: the artwork came back as a product, retrying", brief_id
+                    )
+                    retry_hint = ARTWORK_RETRY_HINT
+                    continue
+                if needs_text_check:
+                    logger.warning(
+                        "Brief %d: the artwork is a product, falling back to the "
+                        "typography-only design",
+                        brief_id,
+                    )
+                    return _upload_text_only(
+                        brief_row,
+                        layout,
+                        storage=storage,
+                        db_client=db_client,
+                        text_validator=text_validator,
+                    )
+                return False, "the artwork came back as a product and cannot be printed"
+            if artwork.verdict == "unknown":
+                logger.warning(
+                    "Brief %d: the artwork could not be judged (%s), keeping the image",
+                    brief_id,
+                    artwork.error or "unknown verdict",
+                )
 
         # The text is drawn onto the artwork, not asked of the model: it cannot
         # spell, and a colour in a prompt is not a colour (issue #187).
@@ -171,16 +311,17 @@ def _generate_single_brief(
                 )
             break
 
-        if attempts > max_retries:
+        text_attempts += 1
+        if text_attempts > max_retries:
             logger.error(
                 "Text validation failed after %d attempt(s) for brief %d: expected %s, observed %r",
-                attempts,
+                text_attempts,
                 brief_id,
                 verdict.expected,
                 verdict.observed,
             )
             return False, (
-                f"text validation failed after {attempts} attempt(s): "
+                f"text validation failed after {text_attempts} attempt(s): "
                 f"expected {verdict.expected}, observed {verdict.observed!r}"
             )
 
@@ -214,6 +355,7 @@ def generate_image_for_brief(
     bucket: str = "store-listing-designs",
     endpoint_url: str | None = None,
     text_validator: TextValidator | None = None,
+    artwork_validator: ArtworkValidator | None = None,
 ) -> dict[str, Any]:
     brief_row = db_client.get_brief_by_id(brief_id)
     if brief_row is None:
@@ -225,6 +367,7 @@ def generate_image_for_brief(
         storage=storage,
         comfyui_client=comfyui_client,
         text_validator=text_validator,
+        artwork_validator=artwork_validator,
         db_client=db_client,
     )
     if success:

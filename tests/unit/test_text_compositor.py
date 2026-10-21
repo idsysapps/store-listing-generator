@@ -8,13 +8,17 @@ duplicated or dropped (issue #187).
 from __future__ import annotations
 
 import io
+from typing import Any
 
 from PIL import Image
 
 from store_listing.orchestration.text_compositor import (
     HEADLINE_ZONE,
     TAGLINE_ZONE,
+    TEXT_ONLY_HEADLINE_HEIGHT,
+    TEXT_ONLY_HEADLINE_TOP,
     LayoutSpec,
+    blank_canvas,
     composite_text,
 )
 
@@ -183,3 +187,93 @@ class TestUnsupportedGlyphs:
         result = composite_text(_canvas(), LayoutSpec(layout_type="text_top", headline_text="🎃"))
 
         assert all(colour == (255, 255, 255) for colour in _zone_colours(result, top=True))
+
+
+class TestTextOnly:
+    def _text_only(self, **overrides: Any) -> LayoutSpec:
+        defaults: dict[str, Any] = {
+            "layout_type": "text_only",
+            "headline_text": "SPOOKY SEASON",
+            "tagline_text": None,
+        }
+        defaults.update(overrides)
+        return LayoutSpec(**defaults)
+
+    def test_the_layout_is_kept(self) -> None:
+        assert self._text_only().layout_type == "text_only"
+
+    def test_the_headline_is_drawn_in_the_middle_of_the_canvas(self) -> None:
+        result = composite_text(_canvas(), self._text_only())
+
+        image = _image(result)
+        width, height = image.size
+        drawn = [
+            (x, y)
+            for y in range(height)
+            for x in range(width)
+            if image.getpixel((x, y)) != (255, 255, 255)
+        ]
+        assert drawn, "the headline should have been drawn"
+        top = min(y for _, y in drawn)
+        bottom = max(y for _, y in drawn)
+        assert top >= int(height * TEXT_ONLY_HEADLINE_TOP)
+        assert bottom <= int(height * (TEXT_ONLY_HEADLINE_TOP + TEXT_ONLY_HEADLINE_HEIGHT))
+
+    def test_the_tagline_is_drawn_below_the_headline(self) -> None:
+        result = composite_text(_canvas(), self._text_only(tagline_text="TRICK OR TREAT"))
+
+        image = _image(result)
+        width, height = image.size
+        rows = [
+            y
+            for y in range(height)
+            if any(image.getpixel((x, y)) != (255, 255, 255) for x in range(width))
+        ]
+        assert rows, "the text should have been drawn"
+        headline_bottom = int(height * (TEXT_ONLY_HEADLINE_TOP + TEXT_ONLY_HEADLINE_HEIGHT))
+        assert max(rows) > headline_bottom
+
+    def test_the_font_colour_is_used(self) -> None:
+        result = composite_text(_canvas(), self._text_only(font_color="#FF0000"))
+
+        image = _image(result)
+        width, height = image.size
+        colours = {
+            image.getpixel((x, y))
+            for y in range(height)
+            for x in range(width)
+            if image.getpixel((x, y)) != (255, 255, 255)
+        }
+        assert (255, 0, 0) in colours
+
+    def test_a_text_only_design_without_text_is_returned_untouched(self) -> None:
+        canvas = _canvas()
+
+        result = composite_text(canvas, self._text_only(headline_text=None, tagline_text=None))
+
+        assert result == canvas
+
+
+class TestBlankCanvas:
+    def test_a_dtf_canvas_is_the_key_colour(self) -> None:
+        # The magenta background is the one the DTF render is keyed out from.
+        image = Image.open(io.BytesIO(blank_canvas("dtf_apparel"))).convert("RGB")
+
+        assert image.getpixel((0, 0)) == (255, 0, 255)
+
+    def test_a_print_through_canvas_is_white_paper(self) -> None:
+        image = Image.open(io.BytesIO(blank_canvas("sublimation"))).convert("RGB")
+
+        assert image.getpixel((0, 0)) == (255, 255, 255)
+
+    def test_a_transparent_canvas_is_transparent(self) -> None:
+        image = Image.open(io.BytesIO(blank_canvas("dtf_apparel", transparent=True))).convert(
+            "RGBA"
+        )
+
+        assert image.getpixel((0, 0)) == (0, 0, 0, 0)
+
+    def test_the_canvas_has_the_size_of_a_render(self) -> None:
+        image = Image.open(io.BytesIO(blank_canvas("dtf_apparel")))
+
+        assert image.size == (1024, 1024)

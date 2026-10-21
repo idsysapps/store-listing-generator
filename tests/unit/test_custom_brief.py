@@ -68,6 +68,26 @@ class TestBuildCustomBriefPrompt:
         assert "scene_description" in system_msg
         assert "layout_type" in system_msg
 
+    def test_system_prompt_asks_for_print_artwork_not_a_product(self) -> None:
+        # The custom brief prompt never had the print-artwork rule, so a
+        # description of a bag design produced an image of a bag (issue #195).
+        messages = build_custom_brief_prompt("a bag for halloween", "dtf_apparel")
+        system_msg = messages[0]["content"].lower()
+
+        assert "not a photo of a product" in system_msg
+        assert "never mention a bag" in system_msg
+
+    def test_system_prompt_says_the_concept_is_not_the_product(self) -> None:
+        messages = build_custom_brief_prompt("a bag for halloween", "dtf_apparel")
+        system_msg = messages[0]["content"].lower()
+
+        assert "not the product" in system_msg
+
+    def test_system_prompt_offers_a_typography_only_layout(self) -> None:
+        messages = build_custom_brief_prompt("just a slogan", "dtf_apparel")
+
+        assert "text_only" in messages[0]["content"]
+
     def test_returns_system_and_user_messages(self) -> None:
         messages = build_custom_brief_prompt("test", "dtf_apparel")
         assert len(messages) == 2
@@ -139,6 +159,42 @@ class TestParseCustomBriefResponse:
         )
         assert brief is not None
         assert brief.tagline_text == "Her first swing"
+
+    def test_parses_a_typography_only_brief(self) -> None:
+        brief = parse_custom_brief_response(
+            _brief_response(
+                concept="First Game Day",
+                layout_type="text_only",
+                headline_text="First Game Day",
+                scene_description=None,
+            )
+        )
+        assert brief is not None
+        assert brief.layout_type == "text_only"
+        assert brief.scene_description is None
+
+    def test_a_typography_only_brief_falls_back_to_a_short_concept(self) -> None:
+        brief = parse_custom_brief_response(
+            _brief_response(
+                concept="First Game Day",
+                layout_type="text_only",
+                headline_text=None,
+                scene_description=None,
+            )
+        )
+        assert brief is not None
+        assert brief.headline_text == "First Game Day"
+
+    def test_a_typography_only_brief_without_a_usable_headline_is_rejected(self) -> None:
+        brief = parse_custom_brief_response(
+            _brief_response(
+                concept="A concept that is far too long to be a headline for a shirt",
+                layout_type="text_only",
+                headline_text=None,
+                scene_description=None,
+            )
+        )
+        assert brief is None
 
 
 class TestCreateCustomBrief:

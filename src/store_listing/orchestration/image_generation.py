@@ -44,7 +44,21 @@ BACKGROUND_INSTRUCTIONS: dict[str, str] = {
 }
 
 # Every product is printed as artwork, never as a photo of a printed product.
-NO_MOCKUP = "flat print artwork, no product mockup, no garment, no photo of a printed item"
+NO_MOCKUP = (
+    "no product mockup, no garment, no bag, no tote bag, no pouch, no shirt, no hoodie, "
+    "no mug, no tumbler, no phone case, no pillow, no blanket, no sticker sheet, "
+    "no photo of a printed item"
+)
+
+# The image is the graphic that gets printed, not the thing it is printed on.
+# A scene that names the product - a trick-or-treat bag, a hoodie - makes the
+# model draw the product (issue #195).
+DESIGN_ONLY = "print artwork only, the graphic that gets printed, not the object it is printed on"
+
+# What the retry asks for when the artwork came back as a product.
+ARTWORK_RETRY_HINT = (
+    "Only the flat graphic: no bag, no tote, no pouch, no garment, no product, no object."
+)
 
 # The product types whose background is printed as-is and is therefore white.
 WHITE_BACKGROUND_PRODUCTS = frozenset({"sublimation", "sticker_vinyl"})
@@ -61,42 +75,25 @@ class ImageResult:
     background_removed: bool = False
 
 
-def _split_concept(concept: str) -> tuple[str, str | None]:
-    """Split concept into scene description and short text to render.
+class PromptBuildError(ValueError):
+    """The brief cannot be turned into an image prompt."""
 
-    Handles patterns like 'Concept Name - Subtitle' or 'Title: Description'.
-    Returns (scene_description, short_text_or_none).
+
+def _scene_for_prompt(brief: DesignBrief) -> str | None:
+    """The visual scene description of the brief, or None when it has none.
+
+    The concept is deliberately not used as a fallback. A concept names the
+    design idea - "Trick or Treat Bag with Candy Scatter" - and sending it
+    to the image model draws the bag instead of the design (issue #195).
     """
-    for sep in (" - ", ": ", " — "):
-        if sep in concept:
-            parts = concept.split(sep, 1)
-            shorter = min(parts, key=len)
-            longer = max(parts, key=len)
-            if len(shorter.split()) <= 6:
-                return longer, shorter
-            return concept, None
-    if len(concept.split()) <= 5:
-        return concept, concept
-    return concept, None
-
-
-def _scene_for_prompt(brief: DesignBrief) -> str:
-    """Return the visual scene description, preferring the dedicated field."""
-    if brief.scene_description:
-        return brief.scene_description
-    if brief.headline_text:
-        return brief.concept
-    scene, _ = _split_concept(brief.concept)
-    return scene
+    scene = (brief.scene_description or "").strip()
+    return scene or None
 
 
 def _feedback_section(brief: DesignBrief) -> str:
     if not brief.regeneration_feedback:
         return ""
     return f" {brief.regeneration_feedback}."
-
-
-DEFAULT_FONT_COLOR = "#000000"
 
 
 def _is_near_white(colour: str) -> bool:
@@ -137,14 +134,22 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     text_top         -> the scene, with room for a headline at the top
     text_top_bottom  -> the scene, with room for a headline at the top and a
                         tagline at the bottom
+    text_only        -> not an image at all: the design is the text, and it is
+                        drawn on a blank canvas without the image model
     """
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
     background = BACKGROUND_INSTRUCTIONS.get(brief.product_type, "plain background")
-    scene = _scene_for_prompt(brief)
     feedback = _feedback_section(brief)
     layout_type = resolve_layout(
         brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
     )
+
+    if layout_type == "text_only":
+        raise PromptBuildError("a text_only brief is drawn without the image model")
+
+    scene = _scene_for_prompt(brief)
+    if not scene:
+        raise PromptBuildError("the brief has no scene_description")
 
     if layout_type == "full_bleed" and brief.headline_text:
         logger.warning(
@@ -154,7 +159,8 @@ def build_flux_prompt(brief: DesignBrief) -> str:
 
     parts: list[str] = []
 
-    parts.append(f"{scene}, {brief.visual_style}, {product_context}, {NO_MOCKUP}.")
+    parts.append(f"{DESIGN_ONLY}: {scene}.")
+    parts.append(f"{brief.visual_style}, {product_context}, {NO_MOCKUP}.")
 
     if layout_type == "full_bleed":
         parts.append("Do not include any text or lettering.")
@@ -195,10 +201,14 @@ def generate_image(
     the original render is kept in ``raw_bytes``. Failures never raise - they are
     reported through ``ImageResult.error``.
     """
-    prompt = build_flux_prompt(brief)
+    try:
+        prompt = build_flux_prompt(brief)
+    except PromptBuildError as error:
+        logger.warning("Cannot build an image prompt for the brief: %s", error)
+        return ImageResult(image_bytes=None, prompt="", error=str(error))
+
     if extra_prompt:
         prompt = f"{prompt} {extra_prompt}"
-
     try:
         result = comfyui_client.generate_image(prompt=prompt, seed=seed)
     except ComfyUIError as e:
