@@ -16,8 +16,10 @@ from typing import Any, Final, Protocol
 
 from store_listing.orchestration.context_seeds import SEASONAL_EVENT_THEME, get_upcoming_events
 from store_listing.orchestration.promotion import (
+    DISCOVERY_SOURCE,
     MAX_ACTIVE_SEEDS,
     MIN_BRIEFABLE_SEEDS,
+    ORIGIN_DISCOVERY,
     ORIGIN_EVENT,
     ORIGIN_PIVOT,
     ORIGIN_TREND,
@@ -332,7 +334,7 @@ def curate_seeds(
                 query=candidate.query,
                 promotion_score=candidate.promotion_score,
                 candidate_id=ev.id,
-                origin=ORIGIN_TREND,
+                origin=(ORIGIN_DISCOVERY if candidate.source == DISCOVERY_SOURCE else ORIGIN_TREND),
             )
             db_client.promote_candidate(ev.id)
             db_client.insert_curation_log(

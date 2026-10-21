@@ -19,6 +19,7 @@ from store_listing.ingest.trends import (
 )
 from store_listing.orchestration import celery_redis_url
 from store_listing.orchestration.promotion import (
+    ORIGIN_DISCOVERY,
     STARTER_SEEDS,
     compute_promotion_score,
 )
@@ -113,6 +114,10 @@ celery_app.conf.beat_schedule = {
         "task": "store_listing.orchestration.tasks.fetch_youtube_trends",
         "schedule": crontab(hour=6, minute=35),
     },
+    "trend-discovery": {
+        "task": "store_listing.orchestration.tasks.fetch_discovery_trends",
+        "schedule": crontab(hour="*/6", minute=45),
+    },
 }
 
 if _tiktok_enabled():
@@ -172,7 +177,12 @@ if _llm_design_briefs_enabled():
 
 
 def _active_seed_keywords(db_client: DatabaseClient) -> list[str]:
-    return [seed.query for seed in db_client.list_active_seeds()]
+    """The seeds the harvesters expand.
+
+    A discovery is left out: it was found without a seed to start from, so
+    expanding it again is the pool talking to itself (issue #201).
+    """
+    return [seed.query for seed in db_client.list_active_seeds() if seed.origin != ORIGIN_DISCOVERY]
 
 
 def _harvest_status(results_count: int, failed_seeds: list[str], seeds: list[str]) -> dict:
@@ -349,6 +359,40 @@ def inject_context_seeds_task() -> dict:
     from store_listing.orchestration.context_seeds import inject_context_seeds
 
     return inject_context_seeds(DatabaseClient())
+
+
+@celery_app.task
+def fetch_discovery_trends() -> dict:
+    """Find trends that do not come from the seed pool (issue #201)."""
+    from datetime import UTC, datetime
+
+    from store_listing.ingest.trends.autocomplete import AmazonSuggestionClient
+    from store_listing.ingest.trends.discovery import (
+        DISCOVERY_CATEGORIES,
+        DiscoveryHarvester,
+        DiscoveryRequest,
+        discovery_categories_per_run,
+        rotate_categories,
+    )
+
+    today = datetime.now(tz=UTC).date()
+    categories = rotate_categories(
+        tuple(DISCOVERY_CATEGORIES),
+        today.toordinal(),
+        discovery_categories_per_run(),
+    )
+    harvester = DiscoveryHarvester(
+        db_client=DatabaseClient(),
+        amazon=AmazonSuggestionClient(),
+    )
+    results, failed = harvester.harvest_and_store(DiscoveryRequest(categories=categories))
+
+    return {
+        "status": "failed" if failed and not results else ("partial" if failed else "success"),
+        "results_count": len(results),
+        "failed_sources": failed,
+        "categories": list(categories),
+    }
 
 
 _CURATION_MAX_CHAIN = int(os.environ.get("LLM_CURATION_MAX_CHAIN", "10"))

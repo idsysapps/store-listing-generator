@@ -24,7 +24,7 @@ from typing import Any, Final, Protocol, runtime_checkable
 
 import httpx
 
-from store_listing.orchestration.promotion import compute_promotion_score
+from store_listing.orchestration.promotion import compute_novelty_score
 
 from .google_trends import DatabaseClient
 from .schemas import TrendHarvestRequest, TrendResult
@@ -324,8 +324,13 @@ class RedditClient:
             return
         if result.query.lower() == seed.lower():
             return
-        promotion_score = compute_promotion_score(
-            result.source, result.query_type, result.score, result.delta
+        promotion_score = compute_novelty_score(
+            result.source,
+            result.query_type,
+            result.score,
+            result.delta,
+            query=result.query,
+            seed=seed,
         )
         self.db_client.upsert_seed_candidate(
             source_seed=seed,
