@@ -78,6 +78,12 @@ CREATE TABLE active_seeds (
 
 CREATE INDEX IF NOT EXISTS idx_active_seeds_origin ON active_seeds(origin);
 
+-- An existing table keeps its shape here, so the columns are added before
+-- anything writes to them.
+ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS origin VARCHAR(20) NOT NULL DEFAULT 'trend';
+ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS theme VARCHAR(50);
+ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS seasonal_window_end DATE;
+
 -- Starter seeds (fallback seed set for a fresh database)
 INSERT INTO active_seeds (query, promotion_score, origin) VALUES
     ('funny t-shirt', 0, 'evergreen'),

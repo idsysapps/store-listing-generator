@@ -17,6 +17,43 @@ spec:
         {{- include "store-listing.labels" . | nindent 8 }}
         {{- include "store-listing.app.selectorLabels" . | nindent 8 }}
     spec:
+      initContainers:
+        # The schema migration runs as a post-upgrade hook, so a new pod can
+        # start before the columns are there. The pod waits for them instead
+        # of failing its first query, and it never waits longer than the
+        # timeout inside the script.
+        - name: wait-for-schema
+          image: {{ .Values.app.image }}
+          imagePullPolicy: Always
+          command: ["python", "-m", "store_listing.db.wait_for_schema"]
+          env:
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: DATABASE_HOST
+            - name: DATABASE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: DATABASE_PORT
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: DATABASE_NAME
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: DATABASE_PASSWORD
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
       containers:
         - name: celery-worker
           image: {{ .Values.app.image }}
