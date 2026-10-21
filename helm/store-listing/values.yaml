@@ -32,8 +32,11 @@ config:
   comfyuiBgErodePixels: "1"
   visionLlmBaseUrl: ""
   visionLlmModel: "qwen_vl_ocr"
+  artworkVisionModel: ""
   textMatchThreshold: "0.85"
   maxTextRegenerationAttempts: "2"
+  maxArtworkRegenerationAttempts: "1"
+  artworkValidationEnabled: "true"
   requireTaglineText: "false"
 
 secrets:

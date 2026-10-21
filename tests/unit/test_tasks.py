@@ -64,6 +64,18 @@ class TestGenerateDesignImagesTask:
 
         assert pipeline.call_args.kwargs["text_validator"] is not None
 
+    def test_passes_an_artwork_validator_to_the_pipeline(self, tasks) -> None:
+        pipeline, _ = _run_task(tasks, "generate_design_images_task", {})
+
+        assert pipeline.call_args.kwargs["artwork_validator"] is not None
+
+    def test_the_artwork_validator_can_be_switched_off(self, tasks) -> None:
+        pipeline, _ = _run_task(
+            tasks, "generate_design_images_task", {"ARTWORK_VALIDATION_ENABLED": "false"}
+        )
+
+        assert pipeline.call_args.kwargs["artwork_validator"] is None
+
     def test_does_not_create_a_bedrock_runtime_client(self, tasks) -> None:
         _, boto_client = _run_task(tasks, "generate_design_images_task", {})
 
@@ -94,6 +106,11 @@ class TestGenerateSingleBriefImageTask:
         pipeline, _ = _run_task(tasks, "generate_single_brief_image_task", {}, args=(7,))
 
         assert pipeline.call_args.kwargs["text_validator"] is not None
+
+    def test_passes_an_artwork_validator_to_the_pipeline(self, tasks) -> None:
+        pipeline, _ = _run_task(tasks, "generate_single_brief_image_task", {}, args=(7,))
+
+        assert pipeline.call_args.kwargs["artwork_validator"] is not None
 
     def test_does_not_create_a_bedrock_runtime_client(self, tasks) -> None:
         _, boto_client = _run_task(tasks, "generate_single_brief_image_task", {}, args=(7,))

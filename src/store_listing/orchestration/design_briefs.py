@@ -14,6 +14,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
+from store_listing.orchestration.brief_prompts import (
+    DESIGN_ONLY_RULES,
+    LAYOUT_RULES,
+    PRODUCT_CATALOG,
+)
 from store_listing.orchestration.context_seeds import get_upcoming_events
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
@@ -26,13 +31,7 @@ SYSTEM_PROMPT: Final[str] = (
     "You are a print-on-demand design strategist. Your job is to synthesize trend "
     "signals into actionable design briefs that a graphic designer can immediately "
     "execute.\n\n"
-    "We produce designs for these products ONLY:\n"
-    "- DTF printing (product_type='dtf_apparel'): t-shirts, hoodies, sweatshirts, "
-    "tank tops, hats/caps, tote bags, baby onesies\n"
-    "- Sublimation (product_type='sublimation'): mugs, tumblers, phone cases, "
-    "mouse pads, coasters, jigsaw puzzles, ornaments, canvas/metal/poster wall art, "
-    "polyester pillows, blankets, socks\n"
-    "- Stickers and vinyl decals (product_type='sticker_vinyl')\n\n"
+    f"{PRODUCT_CATALOG}\n"
     "For each brief:\n"
     "- concept: A specific, design-ready phrase or visual idea (not a category)\n"
     "- product_type: exactly one of 'dtf_apparel', 'sublimation', 'sticker_vinyl'\n"
@@ -44,29 +43,8 @@ SYSTEM_PROMPT: Final[str] = (
     "- confidence: 0-100, how confident you are this will sell\n"
     "- reasoning: why this concept is timely and marketable (cite the trend signals)\n"
     "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
-    "TEXT LAYOUT — controls how text is composited onto the design:\n"
-    "- layout_type: one of 'full_bleed' (no text, illustration fills canvas), "
-    "'text_top' (headline at top, art below), 'text_top_bottom' (headline top, "
-    "tagline bottom, art in center). Use 'full_bleed' for purely visual designs "
-    "with no slogan. Use text layouts when a catchphrase or slogan strengthens the product.\n"
-    "- headline_text: (required if layout_type is not 'full_bleed') the main text "
-    "line, short and punchy (1-6 words). Words only — no emoji, no symbols, no "
-    "punctuation-only text.\n"
-    "- tagline_text: (optional, only for 'text_top_bottom') secondary text line\n"
-    "- font_color: hex color for text (e.g. '#000000' for black, '#FF8C42' for orange). "
-    "For 'dtf_apparel' the design is rendered on a magenta background that is removed "
-    "before printing, so white text is fine. For 'sublimation' and 'sticker_vinyl' the "
-    "background is printed as white paper, so the text must not be white or near-white "
-    "or it would be invisible - pick a saturated colour that stands out against the "
-    "illustration.\n\n"
-    "SCENE DESCRIPTION — for image generation:\n"
-    "- scene_description: A concise visual description of ONLY the illustration to draw "
-    "(no text, no slogans, no words — just the visual scene). Under 20 words. "
-    "Example: 'a skeleton sitting at an office desk holding a coffee mug, looking exasperated'. "
-    "This is what the image generator sees, so describe the artwork, not the product concept. "
-    "The scene is the print artwork itself, not a photo of a product: describe the illustration "
-    "that gets printed (a pumpkin with a carved face, a cat curled up asleep), never a garment, "
-    "mug, tote bag or blank with the design on it - a mockup cannot be printed.\n\n"
+    f"{LAYOUT_RULES}\n"
+    f"{DESIGN_ONLY_RULES}\n"
     "MATERIALS — picking the right substrate:\n"
     "- recommended_materials: array of objects from the available_materials list, each with "
     "{external_id, name, color, substrate_type, unit_cost}. Pick 1-3 materials that best "
@@ -99,7 +77,25 @@ class BriefableCandidate:
     product_tags: list[str] = field(default_factory=list)
 
 
-VALID_LAYOUT_TYPES: set[str] = {"full_bleed", "text_top", "text_top_bottom"}
+VALID_LAYOUT_TYPES: set[str] = {"full_bleed", "text_top", "text_top_bottom", "text_only"}
+
+# The most words a headline may have. A typography-only design without a
+# headline falls back to its concept, and a long concept is not a headline.
+MAX_HEADLINE_WORDS = 6
+
+
+def headline_for_text_only(concept: str, headline_text: str | None) -> str | None:
+    """The headline of a typography-only design.
+
+    A typography-only design is nothing but its text, so it needs a headline.
+    A short concept makes a fine headline, a long one does not.
+    """
+    if headline_text and headline_text.strip():
+        return headline_text
+    words = concept.split()
+    if 1 <= len(words) <= MAX_HEADLINE_WORDS:
+        return concept
+    return None
 
 
 @dataclass(frozen=True)
@@ -256,6 +252,12 @@ def parse_brief_response(text: str) -> list[DesignBrief]:
         scene_description = b.get("scene_description")
         if scene_description is not None and not isinstance(scene_description, str):
             scene_description = None
+
+        if layout_type == "text_only":
+            headline_text = headline_for_text_only(concept, headline_text)
+            if headline_text is None:
+                logger.warning("Skipping brief %r: a text_only design needs a headline", concept)
+                continue
 
         recommended_materials = b.get("recommended_materials")
         if recommended_materials is not None and not isinstance(recommended_materials, list):

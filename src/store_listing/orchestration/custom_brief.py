@@ -7,10 +7,16 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Final
 
+from store_listing.orchestration.brief_prompts import (
+    DESIGN_ONLY_RULES,
+    LAYOUT_RULES,
+    PRODUCT_CATALOG,
+)
 from store_listing.orchestration.design_briefs import (
     VALID_LAYOUT_TYPES,
     DesignBrief,
     DesignBriefDBClient,
+    headline_for_text_only,
 )
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
@@ -20,13 +26,7 @@ SYSTEM_PROMPT: Final[str] = (
     "You are a print-on-demand design strategist. A customer has described a design "
     "idea. Turn it into one actionable design brief that a graphic designer can "
     "immediately execute.\n\n"
-    "Products we offer:\n"
-    "- DTF printing (product_type='dtf_apparel'): t-shirts, hoodies, sweatshirts, "
-    "tank tops, hats/caps, tote bags, baby onesies\n"
-    "- Sublimation (product_type='sublimation'): mugs, tumblers, phone cases, "
-    "mouse pads, coasters, jigsaw puzzles, ornaments, wall art, pillows, blankets, "
-    "socks\n"
-    "- Stickers and vinyl decals (product_type='sticker_vinyl')\n\n"
+    f"{PRODUCT_CATALOG}\n"
     "Return a single JSON object with this structure:\n"
     '{"brief": {\n'
     '  "concept": "design-ready phrase or visual idea",\n'
@@ -36,7 +36,7 @@ SYSTEM_PROMPT: Final[str] = (
     '  "visual_style": "art direction (colors, style, typography). No text/slogans here.",\n'
     '  "confidence": 0-100,\n'
     '  "reasoning": "why this design works",\n'
-    '  "layout_type": "full_bleed | text_top | text_top_bottom",\n'
+    '  "layout_type": "full_bleed | text_top | text_top_bottom | text_only",\n'
     '  "headline_text": "short punchy text (1-6 words, words only, no emoji) '
     'or null if full_bleed",\n'
     '  "tagline_text": "secondary text or null",\n'
@@ -44,6 +44,8 @@ SYSTEM_PROMPT: Final[str] = (
     '  "scene_description": "concise visual description of the illustration only, '
     'no text. Under 20 words."\n'
     "}}\n\n"
+    f"{LAYOUT_RULES}\n"
+    f"{DESIGN_ONLY_RULES}\n"
     "IMPORTANT: Do not use licensed IP (movie characters, team logos, brand names). "
     "Create original concepts. Respond ONLY with valid JSON."
 )
@@ -55,13 +57,7 @@ PERSONAL_USE_SYSTEM_PROMPT: Final[str] = (
     "Since this is for personal use only, you MAY reference specific franchises, "
     "characters, brands, team logos, or other IP in the design concept. The customer "
     "wants a design inspired by or featuring these elements for their own private use.\n\n"
-    "Products we offer:\n"
-    "- DTF printing (product_type='dtf_apparel'): t-shirts, hoodies, sweatshirts, "
-    "tank tops, hats/caps, tote bags, baby onesies\n"
-    "- Sublimation (product_type='sublimation'): mugs, tumblers, phone cases, "
-    "mouse pads, coasters, jigsaw puzzles, ornaments, wall art, pillows, blankets, "
-    "socks\n"
-    "- Stickers and vinyl decals (product_type='sticker_vinyl')\n\n"
+    f"{PRODUCT_CATALOG}\n"
     "Return a single JSON object with this structure:\n"
     '{"brief": {\n'
     '  "concept": "design-ready phrase or visual idea",\n'
@@ -71,7 +67,7 @@ PERSONAL_USE_SYSTEM_PROMPT: Final[str] = (
     '  "visual_style": "art direction (colors, style, typography). No text/slogans here.",\n'
     '  "confidence": 0-100,\n'
     '  "reasoning": "why this design works",\n'
-    '  "layout_type": "full_bleed | text_top | text_top_bottom",\n'
+    '  "layout_type": "full_bleed | text_top | text_top_bottom | text_only",\n'
     '  "headline_text": "short punchy text (1-6 words, words only, no emoji) '
     'or null if full_bleed",\n'
     '  "tagline_text": "secondary text or null",\n'
@@ -79,6 +75,8 @@ PERSONAL_USE_SYSTEM_PROMPT: Final[str] = (
     '  "scene_description": "concise visual description of the illustration only, '
     'no text. Under 20 words."\n'
     "}}\n\n"
+    f"{LAYOUT_RULES}\n"
+    f"{DESIGN_ONLY_RULES}\n"
     "Respond ONLY with valid JSON."
 )
 
@@ -151,6 +149,12 @@ def parse_custom_brief_response(text: str) -> DesignBrief | None:
     scene_description = b.get("scene_description")
     if scene_description is not None and not isinstance(scene_description, str):
         scene_description = None
+
+    if layout_type == "text_only":
+        headline_text = headline_for_text_only(concept, headline_text)
+        if headline_text is None:
+            logger.warning("A text_only design needs a headline: %r", concept)
+            return None
 
     return DesignBrief(
         concept=concept,

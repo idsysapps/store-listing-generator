@@ -200,6 +200,8 @@ spec:
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL
               value: {{ .Values.config.visionLlmModel | default "qwen_vl_ocr" | quote }}
+            - name: ARTWORK_VISION_MODEL
+              value: {{ .Values.config.artworkVisionModel | default "" | quote }}
             - name: VISION_LLM_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -209,6 +211,10 @@ spec:
               value: {{ .Values.config.textMatchThreshold | default "0.85" | quote }}
             - name: MAX_TEXT_REGENERATION_ATTEMPTS
               value: {{ .Values.config.maxTextRegenerationAttempts | default "2" | quote }}
+            - name: MAX_ARTWORK_REGENERATION_ATTEMPTS
+              value: {{ .Values.config.maxArtworkRegenerationAttempts | default "1" | quote }}
+            - name: ARTWORK_VALIDATION_ENABLED
+              value: {{ .Values.config.artworkValidationEnabled | default "true" | quote }}
             - name: REQUIRE_TAGLINE_TEXT
               value: {{ .Values.config.requireTaglineText | default "false" | quote }}
             - name: DESIGN_S3_BUCKET
@@ -402,6 +408,8 @@ spec:
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL
               value: {{ .Values.config.visionLlmModel | default "qwen_vl_ocr" | quote }}
+            - name: ARTWORK_VISION_MODEL
+              value: {{ .Values.config.artworkVisionModel | default "" | quote }}
             - name: VISION_LLM_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -411,6 +419,10 @@ spec:
               value: {{ .Values.config.textMatchThreshold | default "0.85" | quote }}
             - name: MAX_TEXT_REGENERATION_ATTEMPTS
               value: {{ .Values.config.maxTextRegenerationAttempts | default "2" | quote }}
+            - name: MAX_ARTWORK_REGENERATION_ATTEMPTS
+              value: {{ .Values.config.maxArtworkRegenerationAttempts | default "1" | quote }}
+            - name: ARTWORK_VALIDATION_ENABLED
+              value: {{ .Values.config.artworkValidationEnabled | default "true" | quote }}
             - name: REQUIRE_TAGLINE_TEXT
               value: {{ .Values.config.requireTaglineText | default "false" | quote }}
             - name: DESIGN_S3_BUCKET

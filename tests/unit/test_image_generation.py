@@ -5,9 +5,12 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.image_generation import (
+    PromptBuildError,
     build_flux_prompt,
     font_colour,
     generate_image,
@@ -24,6 +27,7 @@ def _make_brief(**overrides: Any) -> DesignBrief:
         "confidence": 85,
         "reasoning": "Skeleton yoga trending on social media",
         "source_seed_ids": [1, 2],
+        "scene_description": "a skeleton doing yoga poses on a beach towel",
     }
     defaults.update(overrides)
     return DesignBrief(**defaults)
@@ -121,6 +125,52 @@ class TestBuildFluxPrompt:
         prompt = build_flux_prompt(brief).lower()
 
         assert "mockup" in prompt
+
+    def test_the_prompt_says_the_artwork_is_not_the_object_it_is_printed_on(self) -> None:
+        # A scene that names the product makes the model draw the product
+        # (issue #195).
+        brief = _make_brief(product_type="dtf_apparel", layout_type="full_bleed")
+        prompt = build_flux_prompt(brief).lower()
+
+        assert "print artwork" in prompt
+        assert "not the object it is printed on" in prompt
+
+    def test_the_prompt_names_the_products_that_must_not_be_drawn(self) -> None:
+        brief = _make_brief(product_type="dtf_apparel", layout_type="full_bleed")
+        prompt = build_flux_prompt(brief).lower()
+
+        for product in ("bag", "tote", "mug", "shirt"):
+            assert f"no {product}" in prompt
+
+    def test_a_brief_without_a_scene_does_not_fall_back_to_the_concept(self) -> None:
+        # The concept names the design idea - "Trick or Treat Bag with Candy
+        # Scatter" - and sending it to the model draws the bag (issue #195).
+        brief = _make_brief(
+            concept="Trick or Treat Bag with Candy Scatter",
+            scene_description=None,
+            layout_type="text_top",
+            headline_text="Trick or Treat",
+        )
+
+        with pytest.raises(PromptBuildError):
+            build_flux_prompt(brief)
+
+    def test_a_text_only_brief_is_not_sent_to_the_image_model(self) -> None:
+        brief = _make_brief(layout_type="text_only", headline_text="SPOOKY SEASON")
+
+        with pytest.raises(PromptBuildError):
+            build_flux_prompt(brief)
+
+    def test_a_brief_without_a_scene_reports_an_error_instead_of_raising(self) -> None:
+        client = _client()
+        brief = _make_brief(scene_description=None, layout_type="full_bleed")
+
+        result = generate_image(brief, comfyui_client=client)
+
+        assert result.image_bytes is None
+        assert result.error is not None
+        assert "scene" in result.error
+        client.generate_image.assert_not_called()
 
     def test_font_colour_defaults_to_black(self) -> None:
         brief = _make_brief(
