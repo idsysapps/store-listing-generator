@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
 from store_listing.orchestration.design_briefs import DesignBrief
+from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.text_compositor import resolve_layout
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,10 @@ ARTWORK_RETRY_HINT = (
     "Only the flat graphic: no bag, no tote, no pouch, no garment, no product, no object."
 )
 
+# The artwork must not carry words: the text of the design is drawn on it
+# afterwards, with a font (issue #208).
+NO_LETTERING_RETRY_HINT = "No lettering, no text, no words and no numbers in the artwork."
+
 # The product types whose background is printed as-is and is therefore white.
 WHITE_BACKGROUND_PRODUCTS = frozenset({"sublimation", "sticker_vinyl"})
 
@@ -85,8 +90,12 @@ def _scene_for_prompt(brief: DesignBrief) -> str | None:
     The concept is deliberately not used as a fallback. A concept names the
     design idea - "Trick or Treat Bag with Candy Scatter" - and sending it
     to the image model draws the bag instead of the design (issue #195).
+
+    The scene is stripped of any words it asks the model to spell: the image
+    model cannot spell, so a quoted punchline comes back misspelled (issue
+    #208). The text of the design is drawn on the artwork afterwards.
     """
-    scene = (brief.scene_description or "").strip()
+    scene = strip_lettering((brief.scene_description or "").strip())
     return scene or None
 
 

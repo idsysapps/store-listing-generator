@@ -68,6 +68,11 @@ DESIGN_ONLY_RULES: Final[str] = (
     "hoodie, mug, tumbler, phone case, pillow, blanket, sticker sheet, mockup or blank - "
     "if the design is for a bag, describe the graphic printed on it, not the bag. "
     "A mockup cannot be printed.\n"
+    "- Never put words in the scene: no quoted text, no speech bubble, no sign, banner or "
+    "label that carries writing, and no 'saying' or 'reading' clauses. The image model "
+    "cannot spell - a scene that asks it to draw the punchline comes back misspelled "
+    "(issue #208). The punchline belongs in headline_text and tagline_text, which are "
+    "drawn on the artwork afterwards with a font.\n"
     "- For layout_type 'text_only' there is no illustration and no scene_description: the "
     "design is the text.\n"
 )

@@ -14,6 +14,7 @@ import base64
 import difflib
 import io
 import string
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,6 +26,7 @@ __all__ = [
     "TextValidator",
     "encode_image_for_vision",
     "is_verifiable",
+    "missing_words",
     "normalize_text",
     "text_matches",
 ]
@@ -41,6 +43,16 @@ DEFAULT_THRESHOLD = 0.85
 DEFAULT_MAX_SIDE = 1024
 JPEG_QUALITY = 80
 
+# A word of this length or longer may be one character off. The text is drawn
+# with a font, so a long word that is nearly right is the vision model
+# misreading it, not a typo in the design. A short word has to be right: the
+# bubble on the image of brief #100 read "To get to the onthe sid", and a
+# character score of 0.94 let it through (issue #208).
+TOLERATED_WORD_LENGTH = 6
+
+# Words this short are noise: the font can drop them and the text still reads.
+IGNORED_WORD_LENGTH = 2
+
 
 @dataclass
 class TextValidationResult:
@@ -54,6 +66,7 @@ class TextValidationResult:
     missing: list[str] = field(default_factory=list)
     unverifiable: list[str] = field(default_factory=list)
     duplicated: list[str] = field(default_factory=list)
+    wrong_words: list[str] = field(default_factory=list)
 
 
 def encode_image_for_vision(image_bytes: bytes, *, max_side: int = DEFAULT_MAX_SIDE) -> str:
@@ -111,13 +124,73 @@ def _best_window_ratio(expected: str, observed: str) -> float:
     return best
 
 
+def _edit_distance(first: str, second: str) -> int:
+    """How many single-character edits turn ``first`` into ``second``."""
+    if first == second:
+        return 0
+    if not first:
+        return len(second)
+    if not second:
+        return len(first)
+
+    previous = list(range(len(second) + 1))
+    for index, left in enumerate(first, start=1):
+        current = [index]
+        for offset, right in enumerate(second, start=1):
+            current.append(
+                min(
+                    previous[offset] + 1,
+                    current[offset - 1] + 1,
+                    previous[offset - 1] + (left != right),
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def _word_is_covered(expected_word: str, observed_words: Sequence[str]) -> bool:
+    """Whether the observation has the word the design asked for.
+
+    A long word may be one character off: the text is drawn with a font, so
+    that is the vision model misreading it. A short word has to be right - the
+    bubble on the image of brief #100 read "To get to the onthe sid" and a
+    character score of 0.94 let it through (issue #208).
+    """
+    if expected_word in observed_words:
+        return True
+    if len(expected_word) < TOLERATED_WORD_LENGTH:
+        return False
+    return any(_edit_distance(expected_word, word) <= 1 for word in observed_words)
+
+
+def missing_words(expected: str, observed: str) -> list[str]:
+    """The words of the expected text that the observation does not have."""
+    expected_words = normalize_text(expected).split()
+    observed_words = normalize_text(observed).split()
+    if not expected_words or not observed_words:
+        return []
+
+    missing: list[str] = []
+    for word in expected_words:
+        if len(word) <= IGNORED_WORD_LENGTH:
+            # A short word is noise: the font can drop it and the text still reads.
+            continue
+        if not _word_is_covered(word, observed_words):
+            missing.append(word)
+    return missing
+
+
 def text_matches(
     expected: str,
     observed: str,
     *,
     threshold: float = DEFAULT_THRESHOLD,
 ) -> tuple[bool, float]:
-    """Return ``(matched, similarity)`` for the expected text inside the observation."""
+    """Return ``(matched, similarity)`` for the expected text inside the observation.
+
+    The words have to be there: a character score on its own let a misspelled
+    word through (issue #208).
+    """
     normalized_expected = normalize_text(expected)
     normalized_observed = normalize_text(observed)
 
@@ -127,6 +200,8 @@ def text_matches(
         return False, 0.0
 
     score = _best_window_ratio(normalized_expected, normalized_observed)
+    if missing_words(normalized_expected, normalized_observed):
+        return False, score
     return score >= threshold, score
 
 
@@ -228,6 +303,7 @@ class TextValidator:
         missing: list[str] = []
         unverifiable: list[str] = []
         duplicated: list[str] = []
+        wrong_words: list[str] = []
         lines = _observed_lines(observed)
         for text in expected:
             if not is_verifiable(text):
@@ -237,6 +313,9 @@ class TextValidator:
             scores.append(score)
             if not found:
                 missing.append(text)
+                for word in missing_words(text, observed):
+                    if word not in wrong_words:
+                        wrong_words.append(word)
             elif len(hits) > 1:
                 # The text is on the image more than once - the model drew it
                 # twice, which is a defect of its own.
@@ -256,6 +335,7 @@ class TextValidator:
             missing=missing,
             unverifiable=unverifiable,
             duplicated=duplicated,
+            wrong_words=wrong_words,
         )
 
     def _transcribe(self, data_url: str) -> str:

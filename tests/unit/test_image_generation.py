@@ -95,6 +95,21 @@ class TestBuildFluxPrompt:
 
         assert "without any lettering" in prompt.lower()
 
+    def test_the_prompt_never_carries_the_words_of_the_scene(self) -> None:
+        # The image model cannot spell: a scene that quotes a punchline makes it
+        # draw the words wrong (issue #208).
+        brief = _make_brief(
+            scene_description=(
+                "A grinning pumpkin with a speech bubble saying "
+                "'To get to the other side!' with a small ghost peeking out"
+            )
+        )
+        prompt = build_flux_prompt(brief)
+
+        assert "other side" not in prompt
+        assert "speech bubble" not in prompt
+        assert "pumpkin" in prompt
+
     def test_the_prompt_asks_for_clear_space_where_the_text_goes(self) -> None:
         brief = _make_brief(
             layout_type="text_top_bottom",

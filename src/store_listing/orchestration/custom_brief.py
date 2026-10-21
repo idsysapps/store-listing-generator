@@ -18,6 +18,7 @@ from store_listing.orchestration.design_briefs import (
     DesignBriefDBClient,
     headline_for_text_only,
 )
+from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,11 @@ def parse_custom_brief_response(text: str) -> DesignBrief | None:
     scene_description = b.get("scene_description")
     if scene_description is not None and not isinstance(scene_description, str):
         scene_description = None
+    if scene_description is not None:
+        # The image model cannot spell, so a scene that quotes the words to
+        # draw comes back misspelled (issue #208). The scene keeps the picture
+        # and loses the words.
+        scene_description = strip_lettering(scene_description) or None
 
     if layout_type == "text_only":
         headline_text = headline_for_text_only(concept, headline_text)

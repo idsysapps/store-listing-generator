@@ -31,6 +31,7 @@ from store_listing.orchestration.brief_prompts import (
 )
 from store_listing.orchestration.context_seeds import get_upcoming_events
 from store_listing.orchestration.promotion import ORIGIN_TREND
+from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
 logger = logging.getLogger(__name__)
@@ -290,6 +291,15 @@ def parse_brief_response(text: str) -> list[DesignBrief]:
         scene_description = b.get("scene_description")
         if scene_description is not None and not isinstance(scene_description, str):
             scene_description = None
+        if scene_description is not None:
+            # The image model cannot spell, so a scene that quotes the words to
+            # draw comes back misspelled - the bubble on the image of brief
+            # #100 read "To get to the onthe sid" (issue #208). The scene
+            # keeps the picture and loses the words.
+            scene_description = strip_lettering(scene_description) or None
+            if scene_description is None:
+                logger.warning("Skipping brief %r: the scene description is only words", concept)
+                continue
 
         if layout_type == "text_only":
             headline_text = headline_for_text_only(concept, headline_text)

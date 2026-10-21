@@ -37,6 +37,8 @@ config:
   maxTextRegenerationAttempts: "2"
   maxArtworkRegenerationAttempts: "1"
   artworkValidationEnabled: "true"
+  artworkTextValidationEnabled: "true"
+  maxLetteringRegenerationAttempts: "1"
   requireTaglineText: "false"
 
 secrets:

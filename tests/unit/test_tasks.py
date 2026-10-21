@@ -112,6 +112,23 @@ class TestGenerateSingleBriefImageTask:
 
         assert pipeline.call_args.kwargs["artwork_validator"] is not None
 
+    def test_passes_an_artwork_text_validator_to_the_pipeline(self, tasks) -> None:
+        # The artwork must not carry words: the image model cannot spell
+        # (issue #208).
+        pipeline, _ = _run_task(tasks, "generate_single_brief_image_task", {}, args=(7,))
+
+        assert pipeline.call_args.kwargs["artwork_text_validator"] is not None
+
+    def test_the_lettering_gate_can_be_turned_off(self, tasks) -> None:
+        pipeline, _ = _run_task(
+            tasks,
+            "generate_single_brief_image_task",
+            {"ARTWORK_TEXT_VALIDATION_ENABLED": "false"},
+            args=(7,),
+        )
+
+        assert pipeline.call_args.kwargs["artwork_text_validator"] is None
+
     def test_does_not_create_a_bedrock_runtime_client(self, tasks) -> None:
         _, boto_client = _run_task(tasks, "generate_single_brief_image_task", {}, args=(7,))
 

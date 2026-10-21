@@ -19,15 +19,20 @@ import os
 import random
 from typing import Any
 
-from store_listing.orchestration.artwork_validation import ArtworkValidator
+from store_listing.orchestration.artwork_validation import (
+    ArtworkTextValidator,
+    ArtworkValidator,
+)
 from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.image_generation import (
     ARTWORK_RETRY_HINT,
+    NO_LETTERING_RETRY_HINT,
     font_colour,
     generate_image,
 )
 from store_listing.orchestration.image_storage import ImageStorageClient
+from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.text_compositor import (
     LayoutSpec,
     blank_canvas,
@@ -39,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_TEXT_RETRIES = 2
 DEFAULT_MAX_ARTWORK_RETRIES = 1
+DEFAULT_MAX_LETTERING_RETRIES = 1
 
 
 def _max_text_retries() -> int:
@@ -61,7 +67,21 @@ def _max_artwork_retries() -> int:
         return DEFAULT_MAX_ARTWORK_RETRIES
 
 
+def _max_lettering_retries() -> int:
+    """Retries allowed after the artwork came back with lettering in it."""
+    raw = os.environ.get("MAX_LETTERING_REGENERATION_ATTEMPTS", str(DEFAULT_MAX_LETTERING_RETRIES))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("Invalid MAX_LETTERING_REGENERATION_ATTEMPTS=%r, using the default", raw)
+        return DEFAULT_MAX_LETTERING_RETRIES
+
+
 def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
+    # The scene is stripped of the words it asks the image model to spell: a
+    # scene that is only words leaves nothing to draw, and the design falls
+    # back to typography (issue #208).
+    scene = strip_lettering((brief_row.get("scene_description") or "").strip())
     return DesignBrief(
         concept=brief_row["concept"],
         product_type=brief_row["product_type"],
@@ -76,7 +96,7 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         tagline_text=brief_row.get("tagline_text"),
         font_color=brief_row.get("font_color"),
         regeneration_feedback=brief_row.get("regeneration_feedback"),
-        scene_description=brief_row.get("scene_description"),
+        scene_description=scene or None,
     )
 
 
@@ -104,6 +124,7 @@ def generate_images_for_briefs(
     limit: int = 20,
     text_validator: TextValidator | None = None,
     artwork_validator: ArtworkValidator | None = None,
+    artwork_text_validator: ArtworkTextValidator | None = None,
 ) -> dict[str, Any]:
     briefs = db_client.list_briefs_without_images(limit)
     if not briefs:
@@ -121,6 +142,7 @@ def generate_images_for_briefs(
             comfyui_client=comfyui_client,
             text_validator=text_validator,
             artwork_validator=artwork_validator,
+            artwork_text_validator=artwork_text_validator,
             db_client=db_client,
         )
         if success:
@@ -190,6 +212,7 @@ def _generate_single_brief(
     text_validator: TextValidator | None,
     db_client: Any,
     artwork_validator: ArtworkValidator | None = None,
+    artwork_text_validator: ArtworkTextValidator | None = None,
 ) -> tuple[bool, str | None]:
     brief = _brief_from_row(brief_row)
     brief_id = brief_row["id"]
@@ -203,6 +226,7 @@ def _generate_single_brief(
     needs_text_check = layout.needs_text
     max_retries = _max_text_retries()
     max_artwork_retries = _max_artwork_retries()
+    max_lettering_retries = _max_lettering_retries()
 
     # A typography-only design is the text and nothing else: the image model
     # is never asked for an illustration (issue #196).
@@ -234,6 +258,7 @@ def _generate_single_brief(
     retry_hint = ""
     attempts = 0
     artwork_attempts = 0
+    lettering_attempts = 0
     text_attempts = 0
 
     while True:
@@ -284,6 +309,42 @@ def _generate_single_brief(
                     "Brief %d: the artwork could not be judged (%s), keeping the image",
                     brief_id,
                     artwork.error or "unknown verdict",
+                )
+
+        # The lettering gate: the artwork must not carry words of its own. The
+        # image model cannot spell, and the text of the design is drawn on the
+        # artwork afterwards, so a letter it drew is a letter that is wrong
+        # (issue #208).
+        if artwork_text_validator is not None:
+            lettering = artwork_text_validator.validate(result.raw_bytes or result.image_bytes)
+            if lettering.has_text:
+                lettering_attempts += 1
+                if lettering_attempts <= max_lettering_retries:
+                    logger.warning(
+                        "Brief %d: the artwork came back with lettering in it, retrying",
+                        brief_id,
+                    )
+                    retry_hint = NO_LETTERING_RETRY_HINT
+                    continue
+                if needs_text_check:
+                    logger.warning(
+                        "Brief %d: the artwork carries lettering, falling back to the "
+                        "typography-only design",
+                        brief_id,
+                    )
+                    return _upload_text_only(
+                        brief_row,
+                        layout,
+                        storage=storage,
+                        db_client=db_client,
+                        text_validator=text_validator,
+                    )
+                return False, "the artwork came back with lettering in it and cannot be printed"
+            if lettering.verdict == "unknown":
+                logger.warning(
+                    "Brief %d: the lettering could not be judged (%s), keeping the image",
+                    brief_id,
+                    lettering.error or "unknown verdict",
                 )
 
         # The text is drawn onto the artwork, not asked of the model: it cannot
@@ -356,6 +417,7 @@ def generate_image_for_brief(
     endpoint_url: str | None = None,
     text_validator: TextValidator | None = None,
     artwork_validator: ArtworkValidator | None = None,
+    artwork_text_validator: ArtworkTextValidator | None = None,
 ) -> dict[str, Any]:
     brief_row = db_client.get_brief_by_id(brief_id)
     if brief_row is None:
@@ -368,6 +430,7 @@ def generate_image_for_brief(
         comfyui_client=comfyui_client,
         text_validator=text_validator,
         artwork_validator=artwork_validator,
+        artwork_text_validator=artwork_text_validator,
         db_client=db_client,
     )
     if success:

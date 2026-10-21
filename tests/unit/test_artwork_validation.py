@@ -14,9 +14,13 @@ from PIL import Image
 
 from store_listing.orchestration.artwork_validation import (
     ARTWORK,
+    HAS_TEXT,
+    NO_LETTERING,
     PRODUCT,
     UNKNOWN,
+    ArtworkTextValidator,
     ArtworkValidator,
+    parse_text_verdict,
     parse_verdict,
 )
 
@@ -123,3 +127,89 @@ class TestArtworkValidator:
         text = call_kwargs["messages"][0]["content"][0]["text"]
         assert "ARTWORK" in text
         assert "PRODUCT" in text
+
+
+class TestParseTextVerdict:
+    def test_text_is_recognised(self) -> None:
+        assert parse_text_verdict("TEXT") == HAS_TEXT
+
+    def test_no_text_is_recognised(self) -> None:
+        assert parse_text_verdict("NOTEXT") == NO_LETTERING
+
+    def test_the_answer_is_case_insensitive(self) -> None:
+        assert parse_text_verdict("text") == HAS_TEXT
+        assert parse_text_verdict("No Text") == NO_LETTERING
+
+    def test_an_unreadable_answer_is_unknown(self) -> None:
+        assert parse_text_verdict("I cannot tell") == UNKNOWN
+
+    def test_an_empty_answer_is_unknown(self) -> None:
+        assert parse_text_verdict("") == UNKNOWN
+
+
+class TestArtworkTextValidator:
+    """The artwork must not carry words: the image model cannot spell.
+
+    The bubble on the image of brief #100 read "To get to the onthe sid"
+    (issue #208).
+    """
+
+    def test_artwork_without_lettering_is_accepted(self) -> None:
+        validator = ArtworkTextValidator(client=_client("NOTEXT"), model="vl")
+
+        result = validator.validate(_image_bytes())
+
+        assert result.verdict == NO_LETTERING
+        assert result.has_text is False
+        assert result.error is None
+
+    def test_artwork_with_lettering_is_reported(self) -> None:
+        validator = ArtworkTextValidator(client=_client("TEXT"), model="vl")
+
+        result = validator.validate(_image_bytes())
+
+        assert result.verdict == HAS_TEXT
+        assert result.has_text is True
+
+    def test_an_unreadable_answer_never_reports_lettering(self) -> None:
+        validator = ArtworkTextValidator(client=_client("hmm"), model="vl")
+
+        result = validator.validate(_image_bytes())
+
+        assert result.verdict == UNKNOWN
+        assert result.has_text is False
+
+    def test_a_client_error_is_reported_and_never_raises(self) -> None:
+        client = _client("NOTEXT")
+        client.chat.completions.create.side_effect = RuntimeError("vision is down")
+        validator = ArtworkTextValidator(client=client, model="vl")
+
+        result = validator.validate(_image_bytes())
+
+        assert result.verdict == UNKNOWN
+        assert result.has_text is False
+        assert result.error is not None
+
+    def test_the_image_is_sent_to_the_vision_model(self) -> None:
+        client = _client("NOTEXT")
+        validator = ArtworkTextValidator(client=client, model="my-vl")
+
+        validator.validate(_image_bytes())
+
+        call_kwargs = client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["model"] == "my-vl"
+        content = call_kwargs["messages"][0]["content"]
+        image_parts = [part for part in content if part["type"] == "image_url"]
+        assert len(image_parts) == 1
+        assert image_parts[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+    def test_the_prompt_asks_for_one_word(self) -> None:
+        client = _client("NOTEXT")
+        validator = ArtworkTextValidator(client=client, model="vl")
+
+        validator.validate(_image_bytes())
+
+        call_kwargs = client.chat.completions.create.call_args.kwargs
+        text = call_kwargs["messages"][0]["content"][0]["text"]
+        assert "TEXT" in text
+        assert "NOTEXT" in text
