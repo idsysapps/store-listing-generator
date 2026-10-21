@@ -56,7 +56,7 @@ model cannot spell, so it is never asked to.
 | `text_top_bottom` | The illustration with a headline at the top and a tagline at the bottom |
 | `text_only` | The text alone on a blank canvas - the image model is never called |
 
-Two gates stand between a render and the print file:
+Three gates stand between a render and the print file:
 
 - **The artwork gate** reads the render back and rejects it when it shows the
   product instead of the design (a bag, a hoodie, a mug). A brief whose scene
@@ -64,12 +64,19 @@ Two gates stand between a render and the print file:
   left without an image when it has none. The `concept` is never used as the
   visual prompt: a concept names the design idea, and a concept that names
   the product draws the product.
+- **The lettering gate** rejects the render when the artwork carries words of
+  its own. The image model cannot spell, and the text of the design is drawn
+  on the artwork afterwards with a font, so a letter the model drew is a
+  letter that is wrong. The scene is stripped of the words it asks the model
+  to spell, so the lettering does not happen in the first place.
 - **The text gate** reads the composited text back and rejects the image when
-  the headline cannot be verified. A missing tagline is reported but does not
-  reject the image.
+  the headline cannot be verified. The words have to be there: a word that is
+  misspelled fails even when the characters look close enough. A missing
+  tagline is reported but does not reject the image.
 
-Both gates can be tuned with `ARTWORK_VALIDATION_ENABLED`,
-`MAX_ARTWORK_REGENERATION_ATTEMPTS`, `MAX_TEXT_REGENERATION_ATTEMPTS` and
+The gates can be tuned with `ARTWORK_VALIDATION_ENABLED`,
+`ARTWORK_TEXT_VALIDATION_ENABLED`, `MAX_ARTWORK_REGENERATION_ATTEMPTS`,
+`MAX_LETTERING_REGENERATION_ATTEMPTS`, `MAX_TEXT_REGENERATION_ATTEMPTS` and
 `REQUIRE_TAGLINE_TEXT` in the Helm chart.
 
 ## The seed pool and the brief mix
@@ -351,6 +358,8 @@ Ideogram text routing and the AWS Bedrock image calls have been removed.
 | `VISION_LLM_API_KEY` | `LLM_API_KEY` | Usually a dummy for a local proxy |
 | `TEXT_MATCH_THRESHOLD` | `0.85` | Similarity threshold for the rendered text to count as a match |
 | `MAX_TEXT_REGENERATION_ATTEMPTS` | `2` | Retries after a text mismatch (3 generations max) |
+| `ARTWORK_TEXT_VALIDATION_ENABLED` | `true` | Reject an artwork that carries letters of its own |
+| `MAX_LETTERING_REGENERATION_ATTEMPTS` | `1` | Retries after the artwork came back with lettering in it |
 
 The OCR gate **fails closed**: when the text rendered into the image cannot be
 verified within the retry budget, the image is not uploaded and the brief is

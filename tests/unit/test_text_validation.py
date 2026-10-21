@@ -12,6 +12,7 @@ from PIL import Image
 from store_listing.orchestration.text_validation import (
     TextValidator,
     encode_image_for_vision,
+    missing_words,
     normalize_text,
     text_matches,
 )
@@ -74,6 +75,51 @@ class TestTextMatches:
     def test_empty_expectation_matches(self) -> None:
         matched, _ = text_matches("", "anything")
         assert matched is True
+
+
+class TestWordLevelMatching:
+    """The characters of a line are not enough: a word has to be the word.
+
+    A character score of 0.85 let a misspelled word through - the bubble on
+    the image of brief #100 read "To get to the onthe sid" and the gate passed
+    it (issue #208).
+    """
+
+    def test_a_misspelled_word_fails(self) -> None:
+        matched, _ = text_matches("To get to the other side", "To get to the onthe sid")
+        assert matched is False
+
+    def test_a_wrong_word_fails(self) -> None:
+        matched, _ = text_matches("Cross the Road?", "Cross the toad?")
+        assert matched is False
+
+    def test_a_dropped_letter_in_a_short_word_fails(self) -> None:
+        matched, _ = text_matches("SPOOKY SEASON", "SPOOKY SEAS")
+        assert matched is False
+
+    def test_a_dropped_letter_in_a_long_word_is_tolerated(self) -> None:
+        # The text is drawn with a font, so a long word that is one character
+        # off is the vision model misreading it, not a typo in the design.
+        matched, _ = text_matches("SPOOKY SEASON", "SPOOKY SEAS0N")
+        assert matched is True
+
+    def test_the_whole_text_must_be_there(self) -> None:
+        matched, _ = text_matches("Why Did the Pumpkin", "Why Did the")
+        assert matched is False
+
+    def test_a_word_split_over_a_line_break_is_still_found(self) -> None:
+        matched, _ = text_matches("Pumpkin Patch Crew", "Pumpkin\nPatch Crew")
+        assert matched is True
+
+    def test_extra_words_around_the_text_do_not_break_the_match(self) -> None:
+        matched, _ = text_matches("SPOOKY SEASON", "the spooky season is here")
+        assert matched is True
+
+    def test_the_missing_words_are_reported(self) -> None:
+        assert missing_words("Cross the Road?", "Cross the toad?") == ["road"]
+
+    def test_nothing_is_missing_when_the_text_matches(self) -> None:
+        assert missing_words("Cross the Road?", "Cross the Road?") == []
 
 
 class TestEncodeImageForVision:

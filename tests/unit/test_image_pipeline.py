@@ -9,7 +9,10 @@ from unittest.mock import MagicMock
 
 from PIL import Image
 
-from store_listing.orchestration.artwork_validation import ArtworkValidationResult
+from store_listing.orchestration.artwork_validation import (
+    ArtworkTextResult,
+    ArtworkValidationResult,
+)
 from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.image_pipeline import (
     generate_image_for_brief,
@@ -612,6 +615,32 @@ class TestTypographyOnlyDesigns:
         comfyui.generate_image.assert_not_called()
         s3.put_object.assert_called()
 
+    def test_a_brief_whose_scene_is_only_words_is_rendered_as_typography_only(self) -> None:
+        # A scene that only asks the image model to spell something leaves no
+        # picture to draw (issue #208).
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    scene_description="a speech bubble saying 'To get to the other side!'",
+                    layout_type="text_top",
+                    headline_text="Why Did the Pumpkin",
+                )
+            ]
+        )
+        comfyui = _comfyui_client()
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        assert result["images_generated"] == 1
+        comfyui.generate_image.assert_not_called()
+        s3.put_object.assert_called()
+
     def test_a_full_bleed_brief_without_a_scene_is_left_pending(self) -> None:
         db = _mock_db_client(briefs=[_brief(scene_description=None)])
         comfyui = _comfyui_client()
@@ -638,6 +667,169 @@ def _artwork_validator(*verdicts: str) -> MagicMock:
         for verdict in verdicts
     ]
     return validator
+
+
+def _artwork_text_validator(*verdicts: bool) -> MagicMock:
+    """A validator that reports lettering in the artwork, in order."""
+    validator = MagicMock()
+    validator.validate.side_effect = [
+        ArtworkTextResult(has_text=verdict, verdict="text" if verdict else "nolettering")
+        for verdict in verdicts
+    ]
+    return validator
+
+
+class TestArtworkLetteringGate:
+    """The artwork must not carry words: the image model cannot spell.
+
+    Brief #100 drew a speech bubble that read "To get to the onthe sid"
+    (issue #208).
+    """
+
+    def test_artwork_with_lettering_is_retried(self) -> None:
+        db = _mock_db_client(briefs=[_brief()])
+        comfyui = _comfyui_client()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(True, False),
+        )
+
+        assert result["images_generated"] == 1
+        assert comfyui.generate_image.call_count == 2
+
+    def test_the_retry_asks_for_no_lettering(self) -> None:
+        db = _mock_db_client(briefs=[_brief()])
+        comfyui = _comfyui_client()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(True, False),
+        )
+
+        second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"]
+        assert "no lettering" in second_prompt.lower()
+
+    def test_artwork_with_lettering_is_never_uploaded(self) -> None:
+        db = _mock_db_client(briefs=[_brief()])
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(True, True, True),
+        )
+
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        s3.put_object.assert_not_called()
+
+    def test_artwork_with_lettering_falls_back_to_the_typography_only_design(self) -> None:
+        db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(True, True, True),
+        )
+
+        assert result["images_generated"] == 1
+        s3.put_object.assert_called()
+
+    def test_the_gate_is_not_run_for_a_typography_only_design(self) -> None:
+        db = _mock_db_client(
+            briefs=[_brief(layout_type="text_only", headline_text="SPOOKY SEASON")]
+        )
+        validator = _artwork_text_validator()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=validator,
+        )
+
+        validator.validate.assert_not_called()
+
+    def test_the_gate_reads_the_artwork_before_the_text_is_drawn_on_it(self) -> None:
+        db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
+        validator = _artwork_text_validator(False)
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=validator,
+        )
+
+        checked = validator.validate.call_args.args[0]
+        assert checked == b"raw-bytes"
+
+
+class TestBrief100Regression:
+    """Brief #100 is the image with the bubble that read "To get to the onthe sid"."""
+
+    SCENE = (
+        "A grinning pumpkin with a speech bubble saying 'To get to the other side!' "
+        "with a small ghost peeking out"
+    )
+
+    def _brief_100(self) -> dict[str, Any]:
+        return _brief(
+            id=100,
+            concept="Why Did the Pumpkin Cross the Road",
+            layout_type="text_top_bottom",
+            headline_text="Why Did the Pumpkin",
+            tagline_text="Cross the Road?",
+            scene_description=self.SCENE,
+        )
+
+    def test_the_model_is_never_asked_to_spell_the_punchline(self) -> None:
+        db = _mock_db_client(briefs=[self._brief_100()])
+        comfyui = _comfyui_client()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(False),
+        )
+
+        prompt = comfyui.generate_image.call_args.kwargs["prompt"]
+        assert "other side" not in prompt
+        assert "speech bubble" not in prompt
+        assert "pumpkin" in prompt
+
+    def test_the_artwork_with_the_bubble_is_not_published(self) -> None:
+        db = _mock_db_client(briefs=[self._brief_100()])
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(True, True, True),
+        )
+
+        # The artwork with the misspelled bubble is never uploaded. The design
+        # falls back to the typography-only version, whose text is exact.
+        assert result["images_generated"] == 1
+        s3.put_object.assert_called()
 
 
 class TestArtworkGate:

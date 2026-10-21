@@ -85,6 +85,31 @@ def _build_artwork_validator() -> Any:
     return ArtworkValidator(client=get_vision_client(), model=get_artwork_vision_model())
 
 
+def _artwork_text_validation_enabled() -> bool:
+    """Whether the lettering gate runs.
+
+    On by default: the image model cannot spell, and the text of the design is
+    drawn on the artwork afterwards, so lettering in the artwork is lettering
+    that is wrong (issue #208).
+    """
+    return os.environ.get("ARTWORK_TEXT_VALIDATION_ENABLED", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _build_artwork_text_validator() -> Any:
+    """The validator that looks for lettering in the artwork, or None when it is off."""
+    if not _artwork_text_validation_enabled():
+        return None
+
+    from store_listing.orchestration.artwork_validation import ArtworkTextValidator
+    from store_listing.orchestration.llm_client import get_artwork_vision_model, get_vision_client
+
+    return ArtworkTextValidator(client=get_vision_client(), model=get_artwork_vision_model())
+
+
 celery_app.conf.beat_schedule = {
     "seed-context-injection": {
         "task": "store_listing.orchestration.tasks.inject_context_seeds_task",
@@ -552,6 +577,7 @@ def generate_design_images_task() -> dict:
         endpoint_url=S3_ENDPOINT_URL,
         text_validator=text_validator,
         artwork_validator=_build_artwork_validator(),
+        artwork_text_validator=_build_artwork_text_validator(),
     )
 
 
@@ -600,4 +626,5 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         endpoint_url=S3_ENDPOINT_URL,
         text_validator=text_validator,
         artwork_validator=_build_artwork_validator(),
+        artwork_text_validator=_build_artwork_text_validator(),
     )

@@ -463,6 +463,58 @@ class TestParseBriefResponse:
 
         assert result[0].scene_description is None
 
+    def test_a_scene_that_asks_for_words_loses_them(self) -> None:
+        # The image model cannot spell: a scene that quotes the punchline makes
+        # it draw the words wrong (issue #208).
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Pumpkin joke",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_top_bottom",
+                        "headline_text": "Why Did the Pumpkin",
+                        "tagline_text": "Cross the Road?",
+                        "scene_description": (
+                            "A grinning pumpkin with a speech bubble saying "
+                            "'To get to the other side!' with a small ghost peeking out"
+                        ),
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        scene = result[0].scene_description
+        assert scene is not None
+        assert "other side" not in scene
+        assert "speech bubble" not in scene
+        assert "pumpkin" in scene
+
+    def test_a_scene_that_is_only_words_is_dropped(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Pumpkin joke",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_top_bottom",
+                        "headline_text": "Why Did the Pumpkin",
+                        "scene_description": "the words 'TO GET TO THE OTHER SIDE'",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result == []
+
     def test_a_typography_only_brief_falls_back_to_a_short_concept(self) -> None:
         response = json.dumps(
             {

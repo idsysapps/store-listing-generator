@@ -117,6 +117,20 @@ class TestParseCustomBriefResponse:
         assert brief is not None
         assert brief.scene_description == "a baseball diamond at sunset"
 
+    def test_a_scene_that_asks_for_words_loses_them(self) -> None:
+        # The image model cannot spell, so a scene that quotes the words to
+        # draw comes back misspelled (issue #208).
+        brief = parse_custom_brief_response(
+            _brief_response(
+                scene_description="a mascot with a speech bubble saying 'GO TEAM' in the stands"
+            )
+        )
+        assert brief is not None
+        assert brief.scene_description is not None
+        assert "GO TEAM" not in brief.scene_description
+        assert "speech bubble" not in brief.scene_description
+        assert "mascot" in brief.scene_description
+
     def test_returns_none_on_invalid_json(self) -> None:
         assert parse_custom_brief_response("not json at all") is None
 

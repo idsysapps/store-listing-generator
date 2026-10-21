@@ -16,6 +16,7 @@ helm/values-local.yaml
 
 # OS
 .DS_Store
+*.swp
 
 # Claude Code / agent tooling
 # Keep personal settings and local worktrees out of the repo.
