@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
+from store_listing.orchestration.brief_mix import classify_brief_mix, seed_themes_for_queries
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
     LAYOUT_RULES,
@@ -329,6 +330,12 @@ def generate_design_briefs(
     valid_ids = {c.active_seed_id for c in candidates}
     batch_id = today.isoformat()
 
+    mix = classify_brief_mix(
+        briefs,
+        seed_themes_for_queries((c.active_seed_id, c.query) for c in candidates),
+    )
+    logger.info("Design brief mix: %s", mix.summary())
+
     created = 0
     for brief in briefs:
         brief_id = db_client.insert_design_brief(
@@ -363,4 +370,10 @@ def generate_design_briefs(
 
     logger.info("Design brief generation: created=%d from %d candidates", created, len(candidates))
 
-    return {"status": "success", "briefs_created": created, "briefable": len(candidates)}
+    return {
+        "status": "success",
+        "briefs_created": created,
+        "briefable": len(candidates),
+        "seasonal": mix.seasonal,
+        "evergreen": mix.evergreen,
+    }

@@ -440,6 +440,25 @@ class DatabaseClient:
         """Ids of the seeds the brief task may use right now."""
         return [candidate.active_seed_id for candidate in self.list_briefable_seeds(cooldown_days)]
 
+    def list_recent_brief_seed_links(self, days: int = 14) -> list[tuple[str, str, str]]:
+        """The briefs of the last `days` days with the seed each one came from.
+
+        Read-only: (batch_id, concept, seed query) per brief/seed pair.
+        """
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT db.batch_id, db.concept, a.query
+                FROM design_briefs db
+                JOIN design_brief_sources dbs ON dbs.brief_id = db.id
+                JOIN active_seeds a ON a.id = dbs.active_seed_id
+                WHERE db.created_at > now() - make_interval(days => %s)
+                ORDER BY db.created_at DESC
+                """,
+                (days,),
+            )
+            return [(row[0] or "", row[1] or "", row[2] or "") for row in cur.fetchall()]
+
     def insert_design_brief(
         self,
         concept: str,

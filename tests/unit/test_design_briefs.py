@@ -611,6 +611,51 @@ class TestGenerateDesignBriefs:
         db.insert_design_brief.assert_called_once()
         db.insert_brief_source.assert_called_once_with(brief_id=1, active_seed_id=42)
 
+    def test_logs_the_seasonal_evergreen_mix(self, caplog) -> None:
+        # A batch that is all seasonal is the symptom this reports (issue #199).
+        candidates = [_briefable(1, "halloween costume shirt")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Pumpkin Party",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                    }
+                ]
+            }
+        )
+
+        with caplog.at_level("INFO"):
+            result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert "seasonal=1" in caplog.text
+        assert result["seasonal"] == 1
+        assert result["evergreen"] == 0
+
+    def test_reports_an_evergreen_batch_as_evergreen(self) -> None:
+        candidates = [_briefable(1, "dad jokes shirt")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Dad Jokes",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                    }
+                ]
+            }
+        )
+
+        result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["seasonal"] == 0
+        assert result["evergreen"] == 1
+
     def test_validates_source_ids_against_actual_candidates(self) -> None:
         candidates = [_briefable(42, "dad jokes shirt")]
         db = self._mock_db(candidates=candidates)
