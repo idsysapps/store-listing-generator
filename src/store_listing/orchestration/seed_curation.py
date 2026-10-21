@@ -14,10 +14,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
-from store_listing.orchestration.context_seeds import get_upcoming_events
+from store_listing.orchestration.context_seeds import SEASONAL_EVENT_THEME, get_upcoming_events
 from store_listing.orchestration.promotion import (
     MAX_ACTIVE_SEEDS,
     MIN_BRIEFABLE_SEEDS,
+    ORIGIN_EVENT,
+    ORIGIN_PIVOT,
+    ORIGIN_TREND,
     ActiveSeed,
     SeedCandidate,
     enforce_cap,
@@ -113,7 +116,13 @@ class CurationDBClient(Protocol):
     def cross_seed_counts(self) -> dict[str, int]: ...
 
     def insert_active_seed(
-        self, query: str, promotion_score: int, candidate_id: int | None
+        self,
+        query: str,
+        promotion_score: int,
+        candidate_id: int | None,
+        origin: str = ...,
+        theme: str | None = ...,
+        seasonal_window_end: date | None = ...,
     ) -> int | None: ...
 
     def promote_candidate(self, candidate_id: int) -> int: ...
@@ -323,6 +332,7 @@ def curate_seeds(
                 query=candidate.query,
                 promotion_score=candidate.promotion_score,
                 candidate_id=ev.id,
+                origin=ORIGIN_TREND,
             )
             db_client.promote_candidate(ev.id)
             db_client.insert_curation_log(
@@ -340,7 +350,10 @@ def curate_seeds(
             pivot_seed = ev.pivot_to or candidate.query
             db_client.reject_candidate(ev.id)
             inserted = db_client.insert_active_seed(
-                query=pivot_seed, promotion_score=0, candidate_id=None
+                query=pivot_seed,
+                promotion_score=0,
+                candidate_id=None,
+                origin=ORIGIN_PIVOT,
             )
             db_client.insert_curation_log(
                 candidate_id=ev.id,
@@ -366,7 +379,13 @@ def curate_seeds(
 
     event_count = 0
     for es in result.event_seeds:
-        inserted = db_client.insert_active_seed(query=es.seed, promotion_score=0, candidate_id=None)
+        inserted = db_client.insert_active_seed(
+            query=es.seed,
+            promotion_score=0,
+            candidate_id=None,
+            origin=ORIGIN_EVENT,
+            theme=SEASONAL_EVENT_THEME,
+        )
         if inserted is not None:
             db_client.insert_curation_log(
                 candidate_id=None,

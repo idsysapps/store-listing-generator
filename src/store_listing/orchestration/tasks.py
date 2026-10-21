@@ -85,8 +85,8 @@ def _build_artwork_validator() -> Any:
 
 
 celery_app.conf.beat_schedule = {
-    "seasonal-seed-injection": {
-        "task": "store_listing.orchestration.tasks.inject_seasonal_seeds_task",
+    "seed-context-injection": {
+        "task": "store_listing.orchestration.tasks.inject_context_seeds_task",
         "schedule": crontab(hour=5, minute=55),
     },
     "daily-trend-harvest": {
@@ -344,11 +344,11 @@ def backfill_seeds_from_candidates() -> dict:
 
 
 @celery_app.task
-def inject_seasonal_seeds_task() -> dict:
-    """Inject rule-based calendar seeds before harvesters run."""
-    from store_listing.orchestration.context_seeds import inject_seasonal_seeds
+def inject_context_seeds_task() -> dict:
+    """Inject the calendar seeds and the evergreen theme seeds before harvesters run."""
+    from store_listing.orchestration.context_seeds import inject_context_seeds
 
-    return inject_seasonal_seeds(DatabaseClient())
+    return inject_context_seeds(DatabaseClient())
 
 
 _CURATION_MAX_CHAIN = int(os.environ.get("LLM_CURATION_MAX_CHAIN", "10"))

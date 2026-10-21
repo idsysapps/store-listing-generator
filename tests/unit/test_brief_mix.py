@@ -112,9 +112,9 @@ class TestSeedThemesForQueries:
 class TestGroupBriefMix:
     def test_groups_the_links_by_batch(self) -> None:
         links = [
-            ("2026-10-20", "Pumpkin Party", "halloween costume shirt"),
-            ("2026-10-20", "Coffee Cat", "dad jokes"),
-            ("2026-10-21", "Witch Brew", "spooky mug"),
+            ("2026-10-20", "Pumpkin Party", "halloween costume shirt", "halloween"),
+            ("2026-10-20", "Coffee Cat", "dad jokes", None),
+            ("2026-10-21", "Witch Brew", "spooky mug", "halloween"),
         ]
 
         batches = group_brief_mix(links)
@@ -127,8 +127,8 @@ class TestGroupBriefMix:
 
     def test_a_brief_with_several_seeds_is_counted_once(self) -> None:
         links = [
-            ("2026-10-20", "Pumpkin Party", "halloween costume shirt"),
-            ("2026-10-20", "Pumpkin Party", "dad jokes"),
+            ("2026-10-20", "Pumpkin Party", "halloween costume shirt", "halloween"),
+            ("2026-10-20", "Pumpkin Party", "dad jokes", None),
         ]
 
         batches = group_brief_mix(links)
@@ -136,10 +136,17 @@ class TestGroupBriefMix:
         assert batches[0].total == 1
         assert batches[0].seasonal == 1
 
+    def test_a_seed_without_a_theme_is_guessed_from_its_query(self) -> None:
+        links = [("2026-10-20", "Pumpkin Party", "halloween costume shirt", None)]
+
+        batches = group_brief_mix(links)
+
+        assert batches[0].seasonal == 1
+
     def test_the_report_totals_every_batch(self) -> None:
         links = [
-            ("2026-10-20", "Pumpkin Party", "halloween costume shirt"),
-            ("2026-10-21", "Coffee Cat", "dad jokes"),
+            ("2026-10-20", "Pumpkin Party", "halloween costume shirt", "halloween"),
+            ("2026-10-21", "Coffee Cat", "dad jokes", None),
         ]
 
         report = render(group_brief_mix(links))

@@ -318,7 +318,7 @@ class TestCurateSeeds:
 
         assert result["promoted"] == 1
         db.insert_active_seed.assert_any_call(
-            query="dad jokes shirt", promotion_score=5000, candidate_id=42
+            query="dad jokes shirt", promotion_score=5000, candidate_id=42, origin="trend"
         )
         db.promote_candidate.assert_called_with(42)
 
@@ -360,7 +360,7 @@ class TestCurateSeeds:
         assert result["pivots"] == 1
         db.reject_candidate.assert_called_with(10)
         db.insert_active_seed.assert_any_call(
-            query="angel rider hoodie", promotion_score=0, candidate_id=None
+            query="angel rider hoodie", promotion_score=0, candidate_id=None, origin="pivot"
         )
 
     def test_pivot_uses_original_query_when_no_pivot_to(self) -> None:
@@ -383,7 +383,7 @@ class TestCurateSeeds:
         curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
 
         db.insert_active_seed.assert_any_call(
-            query="broad hoodie", promotion_score=0, candidate_id=None
+            query="broad hoodie", promotion_score=0, candidate_id=None, origin="pivot"
         )
 
     def test_inserts_event_seeds(self) -> None:
@@ -400,7 +400,11 @@ class TestCurateSeeds:
 
         assert result["event_seeds"] == 1
         db.insert_active_seed.assert_any_call(
-            query="halloween candy shirt", promotion_score=0, candidate_id=None
+            query="halloween candy shirt",
+            promotion_score=0,
+            candidate_id=None,
+            origin="event",
+            theme="seasonal_event",
         )
 
     def test_logs_all_actions_with_reasoning(self) -> None:
