@@ -111,6 +111,11 @@ data:
         archived_at TIMESTAMP WITH TIME ZONE
     );
 
+    -- An existing table keeps its shape here, so the columns are added
+    -- before anything writes to them.
+    ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS origin VARCHAR(20) NOT NULL DEFAULT 'trend';
+    ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS theme VARCHAR(50);
+    ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS seasonal_window_end DATE;
     CREATE INDEX IF NOT EXISTS idx_active_seeds_origin ON active_seeds(origin);
 
     -- Starter seeds (fallback seed set for a fresh database)
@@ -282,6 +287,15 @@ data:
         archived_at TIMESTAMP WITH TIME ZONE
     );
 
+    -- Seed origin: where a seed came from. Without it the pool cannot tell a
+    -- holiday seed from a standing theme, and the season takes it over.
+    -- The columns are added before the starter seeds are written, because
+    -- the insert below names them.
+    ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS origin VARCHAR(20) NOT NULL DEFAULT 'trend';
+    ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS theme VARCHAR(50);
+    ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS seasonal_window_end DATE;
+    CREATE INDEX IF NOT EXISTS idx_active_seeds_origin ON active_seeds(origin);
+
     -- Starter seeds (fallback seed set for a fresh database)
     INSERT INTO active_seeds (query, promotion_score, origin) VALUES
         ('funny t-shirt', 0, 'evergreen'),
@@ -300,13 +314,6 @@ data:
         ('novelty socks', 0, 'evergreen'),
         ('personalized gifts', 0, 'evergreen')
     ON CONFLICT (query) DO NOTHING;
-
-    -- Seed origin: where a seed came from. Without it the pool cannot tell a
-    -- holiday seed from a standing theme, and the season takes it over.
-    ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS origin VARCHAR(20) NOT NULL DEFAULT 'trend';
-    ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS theme VARCHAR(50);
-    ALTER TABLE active_seeds ADD COLUMN IF NOT EXISTS seasonal_window_end DATE;
-    CREATE INDEX IF NOT EXISTS idx_active_seeds_origin ON active_seeds(origin);
 
     -- The starter seeds are evergreen themes, not trends.
     UPDATE active_seeds
