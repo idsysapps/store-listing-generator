@@ -322,6 +322,26 @@ class TestCurateSeeds:
         )
         db.promote_candidate.assert_called_with(42)
 
+    def test_a_promoted_discovery_keeps_its_origin(self) -> None:
+        # A discovery came from outside the pool, so it must not be expanded
+        # by the harvesters later (issue #201).
+        candidates = [_candidate(7, "national dog day", source="discovery")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            _eval_response(
+                [{"id": 7, "action": "PROMOTE", "reasoning": "fresh idea"}],
+            )
+        )
+
+        curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        db.insert_active_seed.assert_any_call(
+            query="national dog day",
+            promotion_score=5000,
+            candidate_id=7,
+            origin="discovery",
+        )
+
     def test_rejects_candidates(self) -> None:
         candidates = [_candidate(99, "compression socks")]
         db = self._mock_db(candidates=candidates)

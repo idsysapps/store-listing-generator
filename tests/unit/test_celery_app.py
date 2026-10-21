@@ -552,6 +552,48 @@ def test_beat_schedule_seed_injection_runs_daily_0555(redis_url: str) -> None:
     assert schedule.hour == {5}
 
 
+def test_beat_schedule_registers_the_discovery_task(redis_url: str) -> None:
+    module = _reload(redis_url)
+    beat = module.celery_app.conf.beat_schedule
+    assert (
+        beat["trend-discovery"]["task"]
+        == "store_listing.orchestration.tasks.fetch_discovery_trends"
+    )
+
+
+def test_the_discovery_seeds_are_not_used_to_harvest(redis_url: str) -> None:
+    # A discovery was found without a seed, so expanding it again is the pool
+    # talking to itself (issue #201).
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    db_mock.list_active_seeds.return_value = [
+        ActiveSeed(id=1, query="cat lover mug", promotion_score=0, origin="trend"),
+        ActiveSeed(id=2, query="national dog day", promotion_score=10, origin="discovery"),
+    ]
+
+    keywords = module._active_seed_keywords(db_mock)
+
+    assert keywords == ["cat lover mug"]
+
+
+def test_the_discovery_task_asks_for_a_rotating_window_of_categories(redis_url: str) -> None:
+    module = _reload(redis_url)
+    db_mock = MagicMock()
+    harvester = MagicMock()
+    harvester.harvest_and_store.return_value = ([], [])
+
+    with (
+        patch.object(module, "DatabaseClient", return_value=db_mock),
+        patch("store_listing.ingest.trends.discovery.DiscoveryHarvester", return_value=harvester),
+    ):
+        result = module.fetch_discovery_trends.run()
+
+    assert result["status"] == "success"
+    assert result["categories"]
+    request = harvester.harvest_and_store.call_args.args[0]
+    assert request.categories == tuple(result["categories"])
+
+
 def test_beat_schedule_llm_curation_registered_when_enabled(redis_url: str) -> None:
     with patch.dict(os.environ, {"REDIS_URL": redis_url, "LLM_SEED_CURATION_ENABLED": "true"}):
         module = importlib.import_module("store_listing.orchestration.tasks")

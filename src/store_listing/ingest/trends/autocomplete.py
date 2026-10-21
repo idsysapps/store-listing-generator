@@ -15,7 +15,7 @@ from typing import Any, Final, Protocol
 
 import httpx
 
-from store_listing.orchestration.promotion import compute_promotion_score
+from store_listing.orchestration.promotion import compute_novelty_score
 
 from .google_trends import DatabaseClient
 from .schemas import Source, TrendHarvestRequest, TrendResult
@@ -175,7 +175,14 @@ class AutocompleteHarvester:
             source=source_name,
             trend_direction=result.trend_direction,
         )
-        promotion_score = compute_promotion_score(source_name, "search", rank_score, 0)
+        promotion_score = compute_novelty_score(
+            source_name,
+            "search",
+            rank_score,
+            0,
+            query=result.query,
+            seed=seed,
+        )
         self.db_client.upsert_seed_candidate(
             source_seed=seed,
             query=result.query,

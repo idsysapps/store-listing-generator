@@ -72,6 +72,30 @@ Both gates can be tuned with `ARTWORK_VALIDATION_ENABLED`,
 `MAX_ARTWORK_REGENERATION_ATTEMPTS`, `MAX_TEXT_REGENERATION_ATTEMPTS` and
 `REQUIRE_TAGLINE_TEXT` in the Helm chart.
 
+## The seed pool and the brief mix
+
+A batch of briefs is only as good as the pool it is made of, and the pool used
+to be nothing but a calendar: every holiday injected its whole seed list every
+day, and the briefs that came out were all seasonal. The pool now keeps three
+kinds of seeds apart, and a seed says which kind it is.
+
+| Kind | Where it comes from | How it behaves |
+|------|--------------------|----------------|
+| `calendar` | A holiday of the calendar | A few seeds a day, rotating through the list of the event; it leaves the pool when its day has passed |
+| `evergreen` | A standing theme (pets, careers, hobbies, food, home, sports) | Injected every day; never archived below the evergreen reserve |
+| `trend` | A harvested trend | Ranked by its promotion score |
+| `discovery` | A trend found without a seed (the trending list, a theme of the marketplace) | Ranked higher than the same signal harvested from a seed, and never used to harvest again |
+
+The brief task is given a mix of those seeds instead of the highest scoring
+ones, and a batch is only allowed a few briefs per event. A batch that misses
+the evergreen minimum is asked for once more before it is accepted.
+
+The mix of the last days can be read at any time:
+
+```bash
+python -m store_listing.orchestration.brief_mix_report --days 14
+```
+
 ## Prerequisites
 
 | Requirement | Version | Description |
@@ -285,6 +309,23 @@ store-listing-generator/
 | `HEALTH_EMPTY_THRESHOLD` | `3` | Consecutive empty harvests before an `[auto-health]` issue is opened |
 | `GITHUB_TOKEN` | (empty) | Token used to open auto-health issues (requires `GITHUB_REPO` too) |
 | `GITHUB_REPO` | (empty) | `owner/repo` to file auto-health issues against |
+
+### Seed pool and brief mix
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_CALENDAR_SEEDS_PER_EVENT_PER_DAY` | 3 | Calendar seeds one holiday may inject per day |
+| `LLM_EVERGREEN_SEEDS_PER_DAY` | 4 | Standing theme seeds injected per day |
+| `LLM_EVERGREEN_RESERVE` | 10 | Evergreen seeds the pool always keeps |
+| `LLM_BRIEF_SEED_SEASONAL_QUOTA` | 6 | Seasonal seeds the brief task may see in one batch |
+| `LLM_BRIEF_SEED_EVERGREEN_QUOTA` | 8 | Evergreen seeds the brief task may see in one batch |
+| `LLM_BRIEF_SEED_TREND_QUOTA` | 6 | Trend seeds the brief task may see in one batch |
+| `LLM_MAX_BRIEFS_PER_THEME` | 2 | Briefs of one batch that may be tied to the same event |
+| `LLM_MIN_EVERGREEN_BRIEFS` | 4 | Briefs of one batch that may not be tied to an event |
+| `LLM_BRIEF_MIX_REGENERATE_ONCE` | true | Ask for a second batch when the first misses the evergreen minimum |
+| `LLM_DISCOVERY_BONUS` | 1000 | What a discovery is worth on top of the score of its source |
+| `LLM_ECHO_FACTOR` | 0.5 | What is left of the score of a candidate that only repeats its seed |
+| `DISCOVERY_CATEGORIES_PER_RUN` | 4 | Standing themes one discovery run asks for |
 
 ### Image generation (ComfyUI on the DGX)
 

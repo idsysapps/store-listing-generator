@@ -11,6 +11,7 @@ every time (issue #198). A seed therefore says where it came from
 """
 
 import os
+import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -19,6 +20,31 @@ from typing import Final
 DEFAULT_MAX_ACTIVE_SEEDS: Final[int] = 200
 DEFAULT_MIN_BRIEFABLE_SEEDS: Final[int] = 30
 DEFAULT_BRIEF_SEED_COOLDOWN_DAYS: Final[int] = 14
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    """Read an int knob from the environment, falling back to the default."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float knob from the environment, falling back to the default."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return min(max(value, 0.0), 1.0)
+
 
 # How many calendar seeds one event may inject per day.
 DEFAULT_CALENDAR_SEEDS_PER_EVENT_PER_DAY: Final[int] = 3
@@ -37,20 +63,22 @@ ORIGIN_CALENDAR: Final[str] = "calendar"
 ORIGIN_EVERGREEN: Final[str] = "evergreen"
 ORIGIN_PIVOT: Final[str] = "pivot"
 ORIGIN_EVENT: Final[str] = "event"
+ORIGIN_DISCOVERY: Final[str] = "discovery"
 
 SEASONAL_ORIGINS: Final[frozenset[str]] = frozenset({ORIGIN_CALENDAR, ORIGIN_EVENT})
 
+# The source of a trend that was found without a seed to start from.
+DISCOVERY_SOURCE: Final = "discovery"
 
-def _env_int(name: str, default: int, minimum: int = 1) -> int:
-    """Read an int knob from the environment, falling back to the default."""
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return max(minimum, value)
+# What a discovery is worth on top of the score of its source.
+DEFAULT_DISCOVERY_BONUS: Final[int] = 1000
+# What is left of the score of a candidate that only repeats its seed.
+DEFAULT_ECHO_FACTOR: Final[float] = 0.5
+
+# What a discovery is worth on top of the score of its source.
+DISCOVERY_BONUS: Final[int] = _env_int("LLM_DISCOVERY_BONUS", DEFAULT_DISCOVERY_BONUS, minimum=0)
+# What is left of the score of a candidate that only repeats its seed.
+ECHO_FACTOR: Final[float] = _env_float("LLM_ECHO_FACTOR", DEFAULT_ECHO_FACTOR)
 
 
 # How many seeds the pool may hold before the curation archives the surplus.
@@ -161,7 +189,51 @@ def compute_promotion_score(source: str, query_type: str, score: int, delta: int
         return min(max(score, 0) // 100_000, 10000)
     if source == "instagram" and query_type == "hashtag":
         return min(max(score, 0) // 1000, 10000)
+    if source == DISCOVERY_SOURCE:
+        return min(max(score, 0) * 100, 10000)
     return 0
+
+
+def _tokens(text: str) -> set[str]:
+    return set(re.findall(r"[a-z]{3,}", text.lower()))
+
+
+def echoes_seed(query: str, seed: str) -> bool:
+    """Whether a candidate only says back what its seed already said.
+
+    A candidate that adds a word is a new idea; a candidate that repeats the
+    seed is the pool talking to itself, and it should not push the good
+    candidates down (issue #201).
+    """
+    query_tokens = _tokens(query)
+    seed_tokens = _tokens(seed)
+    if not query_tokens or not seed_tokens:
+        return False
+    return query_tokens <= seed_tokens
+
+
+def compute_novelty_score(
+    source: str,
+    query_type: str,
+    score: int,
+    delta: int,
+    query: str = "",
+    seed: str = "",
+) -> int:
+    """The promotion score of a candidate, with novelty taken into account.
+
+    A discovery is worth more than the same signal harvested from a seed,
+    because it did not come out of the pool. A candidate that only repeats
+    its seed is worth less, because it did not come from anywhere.
+    """
+    value = compute_promotion_score(source, query_type, score, delta)
+
+    if source == DISCOVERY_SOURCE:
+        value += DISCOVERY_BONUS
+    if seed and echoes_seed(query, seed):
+        value = int(value * ECHO_FACTOR)
+
+    return max(0, min(10000, value))
 
 
 def _archive_tier(seed: ActiveSeed, today: date) -> int:

@@ -17,7 +17,16 @@ QueryType = Literal[
 ]
 
 Source = Literal[
-    "google", "tiktok", "pinterest", "amazon", "etsy", "x", "reddit", "youtube", "instagram"
+    "google",
+    "tiktok",
+    "pinterest",
+    "amazon",
+    "etsy",
+    "x",
+    "reddit",
+    "youtube",
+    "instagram",
+    "discovery",
 ]
 
 

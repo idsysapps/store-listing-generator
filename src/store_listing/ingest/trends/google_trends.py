@@ -19,7 +19,7 @@ from store_listing.orchestration.promotion import (
     ORIGIN_TREND,
     ActiveSeed,
     SeedCandidate,
-    compute_promotion_score,
+    compute_novelty_score,
     select_briefable_seeds,
 )
 
@@ -1073,8 +1073,13 @@ class GoogleTrendsClient:
         """Feed the unified seed pool: rising/top discoveries (not the seed itself)."""
         if result.query_type not in ("rising", "top") or result.query == seed:
             return
-        promotion_score = compute_promotion_score(
-            result.source, result.query_type, result.score, result.delta
+        promotion_score = compute_novelty_score(
+            result.source,
+            result.query_type,
+            result.score,
+            result.delta,
+            query=result.query,
+            seed=seed,
         )
         self.db_client.upsert_seed_candidate(
             source_seed=seed,
