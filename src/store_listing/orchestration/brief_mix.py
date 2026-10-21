@@ -12,7 +12,8 @@ fallback for seeds that were never tagged.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping
+import os
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Final, Protocol
 
@@ -23,11 +24,48 @@ __all__ = [
     "MixableBrief",
     "classify_brief_mix",
     "classify_themes",
+    "enforce_brief_mix",
     "event_theme_for_query",
     "known_event_names",
     "seed_themes_for_queries",
     "theme_of_queries",
 ]
+
+# How many briefs of one batch may be tied to the same event.
+DEFAULT_MAX_BRIEFS_PER_THEME: Final[int] = 2
+# How many briefs of one batch have to be evergreen.
+DEFAULT_MIN_EVERGREEN_BRIEFS: Final[int] = 4
+# Whether a batch that misses the evergreen minimum is asked for once more.
+DEFAULT_BRIEF_MIX_REGENERATE_ONCE: Final[bool] = True
+
+
+def _env_int(name: str, default: int, minimum: int = 0) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+MAX_BRIEFS_PER_THEME: Final[int] = _env_int(
+    "LLM_MAX_BRIEFS_PER_THEME", DEFAULT_MAX_BRIEFS_PER_THEME, minimum=1
+)
+MIN_EVERGREEN_BRIEFS: Final[int] = _env_int(
+    "LLM_MIN_EVERGREEN_BRIEFS", DEFAULT_MIN_EVERGREEN_BRIEFS, minimum=0
+)
+BRIEF_MIX_REGENERATE_ONCE: Final[bool] = _env_bool(
+    "LLM_BRIEF_MIX_REGENERATE_ONCE", DEFAULT_BRIEF_MIX_REGENERATE_ONCE
+)
 
 
 class MixableBrief(Protocol):
@@ -202,3 +240,57 @@ def theme_of_queries(queries: Iterable[str]) -> str | None:
         if theme is not None:
             return theme
     return None
+
+
+def enforce_brief_mix[T: MixableBrief](
+    briefs: Sequence[T],
+    seed_themes: Mapping[int, str | None],
+    seasonal_themes: Collection[str] | None = None,
+    max_per_theme: int = MAX_BRIEFS_PER_THEME,
+) -> tuple[list[T], list[T]]:
+    """Split a batch into the briefs to keep and the briefs to drop.
+
+    A brief tied to an event is kept until that event has its share of the
+    batch; the briefs past the share are dropped, the best first. Evergreen
+    briefs are never dropped for being evergreen (issue #200).
+    """
+    themes = set(seasonal_themes) if seasonal_themes is not None else known_event_names()
+
+    ordered = sorted(briefs, key=lambda brief: (-_confidence(brief), _concept(brief)))
+
+    kept: list[T] = []
+    dropped: list[T] = []
+    per_theme: dict[str, int] = {}
+
+    for brief in ordered:
+        theme = _brief_theme(brief, seed_themes, themes)
+        if theme is None:
+            kept.append(brief)
+            continue
+        if per_theme.get(theme, 0) >= max_per_theme:
+            dropped.append(brief)
+            continue
+        per_theme[theme] = per_theme.get(theme, 0) + 1
+        kept.append(brief)
+
+    return kept, dropped
+
+
+def _confidence(brief: object) -> int:
+    value = getattr(brief, "confidence", 0)
+    return value if isinstance(value, int) else 0
+
+
+def _concept(brief: object) -> str:
+    value = getattr(brief, "concept", "")
+    return value if isinstance(value, str) else ""
+
+
+def evergreen_count(
+    briefs: Iterable[MixableBrief],
+    seed_themes: Mapping[int, str | None],
+    seasonal_themes: Collection[str] | None = None,
+) -> int:
+    """How many briefs of a batch are not tied to an event."""
+    themes = set(seasonal_themes) if seasonal_themes is not None else known_event_names()
+    return sum(1 for brief in briefs if _brief_theme(brief, seed_themes, themes) is None)

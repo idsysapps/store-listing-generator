@@ -14,9 +14,18 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
-from store_listing.orchestration.brief_mix import classify_brief_mix, event_theme_for_query
+from store_listing.orchestration.brief_mix import (
+    BRIEF_MIX_REGENERATE_ONCE,
+    MAX_BRIEFS_PER_THEME,
+    MIN_EVERGREEN_BRIEFS,
+    classify_brief_mix,
+    enforce_brief_mix,
+    event_theme_for_query,
+    evergreen_count,
+)
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
+    DIVERSITY_RULES,
     LAYOUT_RULES,
     PRODUCT_CATALOG,
 )
@@ -43,7 +52,8 @@ SYSTEM_PROMPT: Final[str] = (
     "typography). Do NOT include any text/slogan in this field — text is rendered "
     "separately via the layout fields below.\n"
     "- confidence: 0-100, how confident you are this will sell\n"
-    "- reasoning: why this concept is timely and marketable (cite the trend signals)\n"
+    "- reasoning: why this concept is timely or evergreen and marketable (cite the "
+    "trend signals)\n"
     "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
     f"{LAYOUT_RULES}\n"
     f"{DESIGN_ONLY_RULES}\n"
@@ -155,11 +165,20 @@ class DesignBriefDBClient(Protocol):
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
 
 
+def diversity_rules(
+    max_per_theme: int = MAX_BRIEFS_PER_THEME,
+    min_evergreen: int = MIN_EVERGREEN_BRIEFS,
+) -> str:
+    """The diversity rules with the quotas filled in."""
+    return DIVERSITY_RULES.format(max_per_theme=max_per_theme, min_evergreen=min_evergreen)
+
+
 def build_brief_prompt(
     candidates: list[BriefableCandidate],
     context: list[dict[str, Any]],
     today: date,
     materials: list[dict[str, Any]] | None = None,
+    extra_instructions: list[str] | None = None,
 ) -> list[dict[str, str]]:
     truncated = candidates[:MAX_SEEDS_PER_BRIEF]
 
@@ -179,7 +198,16 @@ def build_brief_prompt(
 
     payload: dict[str, Any] = {
         "date": today.isoformat(),
-        "upcoming_events": context,
+        # The events are named, but their seed lists are not: the seed lists
+        # sat next to the signals and read as the instruction (issue #200).
+        "upcoming_events": [
+            {
+                "name": event.get("name"),
+                "days_until": event.get("days_until"),
+                "theme": event.get("theme") or event.get("name"),
+            }
+            for event in context
+        ],
         "max_briefs": MAX_BRIEFS,
         "signals_by_source": dict(by_source),
     }
@@ -189,8 +217,13 @@ def build_brief_prompt(
 
     user_content = json.dumps(payload, indent=2)
 
+    system = SYSTEM_PROMPT
+    if extra_instructions:
+        system = f"{system}\n" + "\n".join(extra_instructions)
+    system = f"{system}\n{diversity_rules()}"
+
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system},
         {"role": "user", "content": user_content},
     ]
 
@@ -312,36 +345,64 @@ def generate_design_briefs(
     context = get_upcoming_events(today)
     messages = build_brief_prompt(candidates, context, today, materials=materials)
 
-    try:
-        raw = llm_completions.with_raw_response.create(model=model, messages=messages)
-        headers = raw.headers
-        response = raw.parse()
-        _log_llm_response(response, headers, "briefs")
-        if not response.choices:
-            logger.warning(
-                "LLM brief generation returned empty choices: model=%s, id=%s, body=%s",
-                getattr(response, "model", None),
-                getattr(response, "id", None),
-                getattr(raw, "text", None),
-            )
-            return {"status": "error", "error": "LLM returned empty choices"}
-        content = response.choices[0].message.content or ""
-    except Exception as e:  # noqa: BLE001
-        logger.warning("LLM brief generation call failed: %s", e)
-        return {"status": "error", "error": str(e)}
+    briefs, error = _request_briefs(llm_completions, model, messages)
+    if briefs is None:
+        return {"status": "error", "error": error or "LLM brief generation failed"}
 
-    briefs = parse_brief_response(content)
     valid_ids = {c.active_seed_id for c in candidates}
     batch_id = today.isoformat()
+    seed_themes = {
+        c.active_seed_id: (c.theme or event_theme_for_query(c.query)) for c in candidates
+    }
 
-    mix = classify_brief_mix(
-        briefs,
-        {c.active_seed_id: (c.theme or event_theme_for_query(c.query)) for c in candidates},
+    kept, dropped = enforce_brief_mix(briefs, seed_themes)
+    evergreen = evergreen_count(kept, seed_themes)
+    logger.info(
+        "Design brief batch: %d briefs, %d evergreen, %d dropped over the event quota",
+        len(kept),
+        evergreen,
+        len(dropped),
     )
+
+    if evergreen < MIN_EVERGREEN_BRIEFS and BRIEF_MIX_REGENERATE_ONCE:
+        # The model answered with a season. Ask once more, and say what went
+        # wrong, before shipping a batch that is not a batch (issue #200).
+        retry_messages = build_brief_prompt(
+            candidates,
+            context,
+            today,
+            materials=materials,
+            extra_instructions=[
+                (
+                    f"The previous answer was {evergreen} evergreen briefs out of "
+                    f"{len(kept)}. Write at least {MIN_EVERGREEN_BRIEFS} briefs that are "
+                    "not tied to a calendar event."
+                ),
+            ],
+        )
+        retry_briefs, retry_error = _request_briefs(llm_completions, model, retry_messages)
+        if retry_error:
+            logger.warning("The second brief attempt failed: %s", retry_error)
+        if retry_briefs:
+            retry_kept, retry_dropped = enforce_brief_mix(retry_briefs, seed_themes)
+            retry_evergreen = evergreen_count(retry_kept, seed_themes)
+            if (len(retry_kept), retry_evergreen) > (len(kept), evergreen):
+                kept, dropped = retry_kept, retry_dropped
+                briefs = retry_briefs
+                evergreen = retry_evergreen
+
+    if dropped:
+        logger.info(
+            "Dropped %d briefs over the event quota: %s",
+            len(dropped),
+            ", ".join(brief.concept for brief in dropped),
+        )
+
+    mix = classify_brief_mix(kept, seed_themes)
     logger.info("Design brief mix: %s", mix.summary())
 
     created = 0
-    for brief in briefs:
+    for brief in kept:
         brief_id = db_client.insert_design_brief(
             concept=brief.concept,
             product_type=brief.product_type,
@@ -380,4 +441,32 @@ def generate_design_briefs(
         "briefable": len(candidates),
         "seasonal": mix.seasonal,
         "evergreen": mix.evergreen,
+        "dropped": len(dropped),
     }
+
+
+def _request_briefs(
+    llm_completions: Any,
+    model: str,
+    messages: list[dict[str, str]],
+) -> tuple[list[DesignBrief] | None, str | None]:
+    """Ask the model for a batch of briefs: (briefs, error)."""
+    try:
+        raw = llm_completions.with_raw_response.create(model=model, messages=messages)
+        headers = raw.headers
+        response = raw.parse()
+        _log_llm_response(response, headers, "briefs")
+        if not response.choices:
+            logger.warning(
+                "LLM brief generation returned empty choices: model=%s, id=%s, body=%s",
+                getattr(response, "model", None),
+                getattr(response, "id", None),
+                getattr(raw, "text", None),
+            )
+            return None, "LLM returned empty choices"
+        content = response.choices[0].message.content or ""
+    except Exception as e:  # noqa: BLE001
+        logger.warning("LLM brief generation call failed: %s", e)
+        return None, str(e)
+
+    return parse_brief_response(content), None
