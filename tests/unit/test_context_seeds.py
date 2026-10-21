@@ -78,8 +78,16 @@ class TestGetSeedsToInject:
         pairs = get_seeds_to_inject(today)
         seeds = [p[0] for p in pairs]
         events = [p[1] for p in pairs]
-        assert "halloween costume shirt" in seeds
+        assert seeds
+        assert set(seeds) <= set(SEASONAL_SEED_RULES["halloween"].seeds)
         assert all(e == "halloween" for e in events)
+
+    def test_only_a_few_seeds_per_event_are_injected(self) -> None:
+        # A holiday used to inject its whole seed list every day, which is
+        # what made the pool all-Halloween (issue #198).
+        today = date(2026, 9, 25)
+        pairs = get_seeds_to_inject(today, per_event=2)
+        assert len(pairs) == 2
 
     def test_empty_when_no_events(self) -> None:
         today = date(2026, 6, 20)
@@ -93,13 +101,27 @@ class TestInjectSeasonalSeeds:
         db.insert_active_seed.return_value = 1
         db.insert_curation_log.return_value = 1
 
-        result = inject_seasonal_seeds(db, today=date(2026, 9, 25))
+        result = inject_seasonal_seeds(db, today=date(2026, 9, 25), per_event=3)
 
         assert result["status"] == "success"
-        assert result["injected"] == len(SEASONAL_SEED_RULES["halloween"].seeds)
+        assert result["injected"] == 3
         assert "halloween" in result["events"]
-        assert db.insert_active_seed.call_count == len(SEASONAL_SEED_RULES["halloween"].seeds)
+        assert db.insert_active_seed.call_count == 3
         assert db.insert_curation_log.call_count == result["injected"]
+
+    def test_the_seeds_of_an_event_are_injected_over_the_season(self) -> None:
+        # Every seed of the event gets its turn, not only the first three.
+        db = MagicMock()
+        db.insert_active_seed.return_value = 1
+        db.insert_curation_log.return_value = 1
+
+        injected: set[str] = set()
+        for day in range(16, 31):
+            inject_seasonal_seeds(db, today=date(2026, 9, day), per_event=3)
+            injected.update(call.kwargs["query"] for call in db.insert_active_seed.call_args_list)
+            db.insert_active_seed.reset_mock()
+
+        assert injected == set(SEASONAL_SEED_RULES["halloween"].seeds)
 
     def test_skips_duplicate_seeds(self) -> None:
         db = MagicMock()
@@ -131,3 +153,15 @@ class TestInjectSeasonalSeeds:
         assert log_call.kwargs["action"] == "calendar_inject"
         assert log_call.kwargs["event_context"] == "halloween"
         assert log_call.kwargs["llm_model"] is None
+
+    def test_the_seed_knows_the_event_it_belongs_to(self) -> None:
+        db = MagicMock()
+        db.insert_active_seed.return_value = 1
+        db.insert_curation_log.return_value = 1
+
+        inject_seasonal_seeds(db, today=date(2026, 9, 25))
+
+        kwargs = db.insert_active_seed.call_args.kwargs
+        assert kwargs["origin"] == "calendar"
+        assert kwargs["theme"] == "halloween"
+        assert kwargs["seasonal_window_end"] == date(2026, 10, 31)

@@ -13,10 +13,15 @@ from __future__ import annotations
 import argparse
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from store_listing.ingest.trends.google_trends import DatabaseClient
-from store_listing.orchestration.brief_mix import BriefMix, classify_themes, theme_of_queries
+from store_listing.orchestration.brief_mix import (
+    BriefMix,
+    classify_themes,
+    event_theme_for_query,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,21 +45,34 @@ class BatchMix:
         )
 
 
+def theme_of_seeds(seeds: list[tuple[str, str | None]]) -> str | None:
+    """The event a brief's seeds point at, or None when it is evergreen."""
+    for query, theme in seeds:
+        if theme is not None:
+            return theme
+        guessed = event_theme_for_query(query)
+        if guessed is not None:
+            return guessed
+    return None
+
+
 def group_brief_mix(
-    links: list[tuple[str, str, str]],
+    links: Sequence[tuple[str, str, str, str | None]],
 ) -> list[BatchMix]:
     """The mix of every batch in the brief/seed links.
 
-    `links` holds (batch_id, concept, seed query) rows, one row per brief and
-    the seed it was built from.
+    `links` holds (batch_id, concept, seed query, seed theme) rows, one row
+    per brief and the seed it was built from.
     """
-    by_batch: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
-    for batch_id, concept, seed_query in links:
-        by_batch[batch_id][concept].append(seed_query)
+    by_batch: dict[str, dict[str, list[tuple[str, str | None]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for batch_id, concept, seed_query, theme in links:
+        by_batch[batch_id][concept].append((seed_query, theme))
 
     batches: list[BatchMix] = []
     for batch_id, briefs in by_batch.items():
-        mix: BriefMix = classify_themes(theme_of_queries(queries) for queries in briefs.values())
+        mix: BriefMix = classify_themes(theme_of_seeds(seeds) for seeds in briefs.values())
         batches.append(
             BatchMix(
                 batch_id=batch_id,

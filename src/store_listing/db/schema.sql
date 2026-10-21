@@ -60,32 +60,41 @@ CREATE INDEX idx_seed_candidates_promotion_score ON seed_candidates(promotion_sc
 
 -- Table: active_seeds
 -- Source of truth for the active seed set (max enforced by promote_seeds)
+-- origin says where a seed came from: 'trend' (harvested), 'calendar' (a
+-- holiday), 'evergreen' (a standing theme), 'pivot' (a rewritten trend) or
+-- 'event' (an event the curation model added). theme names the event or the
+-- evergreen category, seasonal_window_end is the last day the seed is useful.
 CREATE TABLE active_seeds (
     id SERIAL PRIMARY KEY,
     query VARCHAR(500) NOT NULL UNIQUE,
     promotion_score BIGINT NOT NULL DEFAULT 0,
     promoted_from_candidate_id INTEGER REFERENCES seed_candidates(id),
+    origin VARCHAR(20) NOT NULL DEFAULT 'trend',
+    theme VARCHAR(50),
+    seasonal_window_end DATE,
     added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     archived_at TIMESTAMP WITH TIME ZONE
 );
 
+CREATE INDEX IF NOT EXISTS idx_active_seeds_origin ON active_seeds(origin);
+
 -- Starter seeds (fallback seed set for a fresh database)
-INSERT INTO active_seeds (query, promotion_score) VALUES
-    ('funny t-shirt', 0),
-    ('hoodie', 0),
-    ('gift', 0),
-    ('socks', 0),
-    ('leggings', 0),
-    ('custom mugs', 0),
-    ('room decor', 0),
-    ('wall art', 0),
-    ('mom humor', 0),
-    ('dad jokes', 0),
-    ('gym fitness', 0),
-    ('running', 0),
-    ('quirky gifts', 0),
-    ('novelty socks', 0),
-    ('personalized gifts', 0)
+INSERT INTO active_seeds (query, promotion_score, origin) VALUES
+    ('funny t-shirt', 0, 'evergreen'),
+    ('hoodie', 0, 'evergreen'),
+    ('gift', 0, 'evergreen'),
+    ('socks', 0, 'evergreen'),
+    ('leggings', 0, 'evergreen'),
+    ('custom mugs', 0, 'evergreen'),
+    ('room decor', 0, 'evergreen'),
+    ('wall art', 0, 'evergreen'),
+    ('mom humor', 0, 'evergreen'),
+    ('dad jokes', 0, 'evergreen'),
+    ('gym fitness', 0, 'evergreen'),
+    ('running', 0, 'evergreen'),
+    ('quirky gifts', 0, 'evergreen'),
+    ('novelty socks', 0, 'evergreen'),
+    ('personalized gifts', 0, 'evergreen')
 ON CONFLICT (query) DO NOTHING;
 
 -- Table: source_health

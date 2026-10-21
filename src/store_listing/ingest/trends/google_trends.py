@@ -3,7 +3,7 @@ import os
 import re
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, ClassVar, Protocol, TypeVar, cast, runtime_checkable
 
 import pandas as pd
@@ -16,9 +16,11 @@ from store_listing.orchestration.brief_reranking import RerankableBrief
 from store_listing.orchestration.design_briefs import BriefableCandidate
 from store_listing.orchestration.promotion import (
     BRIEF_SEED_COOLDOWN_DAYS,
+    ORIGIN_TREND,
     ActiveSeed,
     SeedCandidate,
     compute_promotion_score,
+    select_briefable_seeds,
 )
 
 from .schemas import QueryType, TrendHarvestRequest, TrendResult
@@ -240,14 +242,21 @@ class DatabaseClient:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, query, promotion_score
+                SELECT id, query, promotion_score, origin, theme, seasonal_window_end
                 FROM active_seeds
                 WHERE archived_at IS NULL
                 ORDER BY promotion_score DESC
                 """
             )
             return [
-                ActiveSeed(id=row[0], query=row[1], promotion_score=row[2])
+                ActiveSeed(
+                    id=row[0],
+                    query=row[1],
+                    promotion_score=row[2],
+                    origin=row[3] or ORIGIN_TREND,
+                    theme=row[4],
+                    seasonal_window_end=row[5],
+                )
                 for row in cur.fetchall()
             ]
 
@@ -273,17 +282,24 @@ class DatabaseClient:
             return [(row[0], row[1], row[2], row[3], row[4], row[5]) for row in cur.fetchall()]
 
     def insert_active_seed(
-        self, query: str, promotion_score: int, candidate_id: int | None
+        self,
+        query: str,
+        promotion_score: int,
+        candidate_id: int | None,
+        origin: str = ORIGIN_TREND,
+        theme: str | None = None,
+        seasonal_window_end: date | None = None,
     ) -> int | None:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO active_seeds (query, promotion_score, promoted_from_candidate_id)
-                VALUES (%s, %s, %s)
+                INSERT INTO active_seeds
+                    (query, promotion_score, promoted_from_candidate_id, origin, theme, seasonal_window_end)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (query) DO NOTHING
                 RETURNING id
                 """,
-                (query, promotion_score, candidate_id),
+                (query, promotion_score, candidate_id, origin, theme, seasonal_window_end),
             )
             row = cur.fetchone()
             return None if row is None else row[0]
@@ -380,13 +396,21 @@ class DatabaseClient:
                 for row in cur.fetchall()
             ]
 
-    def list_briefable_seeds(self, cooldown_days: int | None = None) -> list[BriefableCandidate]:
+    def list_briefable_seeds(
+        self,
+        cooldown_days: int | None = None,
+        limit: int | None = None,
+    ) -> list[BriefableCandidate]:
         """Seeds the brief task may use right now.
 
         A seed that already produced a brief stays out of the pool for
         `cooldown_days` days, then becomes available again. Excluding every
         seed that ever produced a brief drained the pool to nothing
         (issue #192).
+
+        With a `limit` the seeds are picked as a mix of seasonal, evergreen
+        and trend seeds instead of the highest scoring ones, so a busy
+        holiday cannot take the whole batch (issue #198).
         """
         days = BRIEF_SEED_COOLDOWN_DAYS if cooldown_days is None else cooldown_days
         with self.connect() as conn, conn.cursor() as cur:
@@ -403,7 +427,10 @@ class DatabaseClient:
                     COALESCE(
                         ARRAY_AGG(spt.tag) FILTER (WHERE spt.tag IS NOT NULL),
                         '{}'
-                    ) AS product_tags
+                    ) AS product_tags,
+                    a.origin,
+                    a.theme,
+                    a.seasonal_window_end
                 FROM active_seeds a
                 LEFT JOIN seed_candidates sc
                     ON sc.id = a.promoted_from_candidate_id
@@ -417,38 +444,71 @@ class DatabaseClient:
                         AND dbs.created_at > now() - make_interval(days => %s)
                   )
                 GROUP BY a.id, a.query, a.promotion_score,
-                         sc.source, sc.query_type, sc.score, sc.delta
+                         sc.source, sc.query_type, sc.score, sc.delta,
+                         a.origin, a.theme, a.seasonal_window_end
                 ORDER BY a.promotion_score DESC
                 """,
                 (days,),
             )
-            return [
-                BriefableCandidate(
-                    active_seed_id=row[0],
-                    query=row[1],
-                    source=row[2],
-                    query_type=row[3],
-                    score=row[4],
-                    delta=row[5],
-                    promotion_score=row[6],
-                    product_tags=list(row[7]) if row[7] else [],
-                )
-                for row in cur.fetchall()
-            ]
+            rows = cur.fetchall()
+
+        candidates = [
+            BriefableCandidate(
+                active_seed_id=row[0],
+                query=row[1],
+                source=row[2],
+                query_type=row[3],
+                score=row[4],
+                delta=row[5],
+                promotion_score=row[6],
+                product_tags=list(row[7]) if row[7] else [],
+                origin=row[8] or ORIGIN_TREND,
+                theme=row[9],
+                seasonal_window_end=row[10],
+            )
+            for row in rows
+        ]
+        if limit is None:
+            return candidates
+        return self._as_brief_mix(candidates, limit)
+
+    def _as_brief_mix(
+        self,
+        candidates: list[BriefableCandidate],
+        limit: int,
+    ) -> list[BriefableCandidate]:
+        """Reduce the candidate list to the mix the brief task should see."""
+        seeds = [
+            ActiveSeed(
+                id=candidate.active_seed_id,
+                query=candidate.query,
+                promotion_score=candidate.promotion_score,
+                origin=candidate.origin,
+                theme=candidate.theme,
+                seasonal_window_end=candidate.seasonal_window_end,
+            )
+            for candidate in candidates
+        ]
+        chosen = select_briefable_seeds(seeds, limit=limit)
+        keep = {seed.id for seed in chosen}
+        return [candidate for candidate in candidates if candidate.active_seed_id in keep]
 
     def list_briefable_seed_ids(self, cooldown_days: int | None = None) -> list[int]:
         """Ids of the seeds the brief task may use right now."""
         return [candidate.active_seed_id for candidate in self.list_briefable_seeds(cooldown_days)]
 
-    def list_recent_brief_seed_links(self, days: int = 14) -> list[tuple[str, str, str]]:
+    def list_recent_brief_seed_links(
+        self, days: int = 14
+    ) -> list[tuple[str, str, str, str | None]]:
         """The briefs of the last `days` days with the seed each one came from.
 
-        Read-only: (batch_id, concept, seed query) per brief/seed pair.
+        Read-only: (batch_id, concept, seed query, seed theme) per brief/seed
+        pair.
         """
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT db.batch_id, db.concept, a.query
+                SELECT db.batch_id, db.concept, a.query, a.theme
                 FROM design_briefs db
                 JOIN design_brief_sources dbs ON dbs.brief_id = db.id
                 JOIN active_seeds a ON a.id = dbs.active_seed_id
@@ -457,7 +517,7 @@ class DatabaseClient:
                 """,
                 (days,),
             )
-            return [(row[0] or "", row[1] or "", row[2] or "") for row in cur.fetchall()]
+            return [(row[0] or "", row[1] or "", row[2] or "", row[3]) for row in cur.fetchall()]
 
     def insert_design_brief(
         self,

@@ -16,7 +16,7 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Final, Protocol
 
-from store_listing.orchestration.context_seeds import SEASONAL_SEED_RULES
+from store_listing.orchestration.context_seeds import SEASONAL_EVENT_THEME, SEASONAL_SEED_RULES
 
 __all__ = [
     "BriefMix",
@@ -96,7 +96,7 @@ _EVERGEN_QUERIES: Final[frozenset[str]] = frozenset(
 
 def known_event_names() -> set[str]:
     """Every event the calendar knows about."""
-    return set(SEASONAL_SEED_RULES)
+    return set(SEASONAL_SEED_RULES) | {SEASONAL_EVENT_THEME}
 
 
 def _rule_seed_match(query: str) -> str | None:

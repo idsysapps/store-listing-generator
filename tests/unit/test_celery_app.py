@@ -118,8 +118,8 @@ def test_beat_schedule_registers_harvest_tasks(redis_url: str) -> None:
     )
     assert "seed-promotion" not in beat
     assert (
-        beat["seasonal-seed-injection"]["task"]
-        == "store_listing.orchestration.tasks.inject_seasonal_seeds_task"
+        beat["seed-context-injection"]["task"]
+        == "store_listing.orchestration.tasks.inject_context_seeds_task"
     )
 
 
@@ -545,9 +545,9 @@ def test_marketplace_health_records_failure_for_source_with_all_seeds_failed(
     assert outcomes_by_source["etsy"] == "success"
 
 
-def test_beat_schedule_seasonal_injection_runs_daily_0555(redis_url: str) -> None:
+def test_beat_schedule_seed_injection_runs_daily_0555(redis_url: str) -> None:
     module = _reload(redis_url)
-    schedule = module.celery_app.conf.beat_schedule["seasonal-seed-injection"]["schedule"]
+    schedule = module.celery_app.conf.beat_schedule["seed-context-injection"]["schedule"]
     assert schedule.minute == {55}
     assert schedule.hour == {5}
 
@@ -631,18 +631,18 @@ def test_curate_seeds_task_skips_without_api_key(redis_url: str) -> None:
     assert result["status"] == "skipped"
 
 
-def test_inject_seasonal_seeds_task_calls_injector(redis_url: str) -> None:
+def test_inject_context_seeds_task_calls_injector(redis_url: str) -> None:
     module = _reload(redis_url)
     db_mock = MagicMock()
 
     with (
         patch.object(module, "DatabaseClient", return_value=db_mock),
         patch(
-            "store_listing.orchestration.context_seeds.inject_seasonal_seeds",
+            "store_listing.orchestration.context_seeds.inject_context_seeds",
             return_value={"status": "success", "injected": 3, "events": ["halloween"]},
         ) as mock_inject,
     ):
-        result = module.inject_seasonal_seeds_task.run()
+        result = module.inject_context_seeds_task.run()
 
     assert result["status"] == "success"
     mock_inject.assert_called_once_with(db_mock)

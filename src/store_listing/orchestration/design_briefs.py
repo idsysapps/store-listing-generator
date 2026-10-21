@@ -14,13 +14,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
-from store_listing.orchestration.brief_mix import classify_brief_mix, seed_themes_for_queries
+from store_listing.orchestration.brief_mix import classify_brief_mix, event_theme_for_query
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
     LAYOUT_RULES,
     PRODUCT_CATALOG,
 )
 from store_listing.orchestration.context_seeds import get_upcoming_events
+from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,9 @@ class BriefableCandidate:
     delta: int
     promotion_score: int
     product_tags: list[str] = field(default_factory=list)
+    origin: str = ORIGIN_TREND
+    theme: str | None = None
+    seasonal_window_end: date | None = None
 
 
 VALID_LAYOUT_TYPES: set[str] = {"full_bleed", "text_top", "text_top_bottom", "text_only"}
@@ -120,7 +124,7 @@ class DesignBrief:
 
 class DesignBriefDBClient(Protocol):
     def list_briefable_seeds(
-        self, cooldown_days: int | None = None
+        self, cooldown_days: int | None = None, limit: int | None = None
     ) -> list[BriefableCandidate]: ...
 
     def list_active_materials(
@@ -294,7 +298,7 @@ def generate_design_briefs(
 ) -> dict[str, Any]:
     today = today or datetime.now(tz=UTC).date()
 
-    candidates = db_client.list_briefable_seeds()
+    candidates = db_client.list_briefable_seeds(limit=MAX_SEEDS_PER_BRIEF)
     if not candidates:
         logger.warning("Design brief generation skipped: no briefable seeds")
         return {
@@ -332,7 +336,7 @@ def generate_design_briefs(
 
     mix = classify_brief_mix(
         briefs,
-        seed_themes_for_queries((c.active_seed_id, c.query) for c in candidates),
+        {c.active_seed_id: (c.theme or event_theme_for_query(c.query)) for c in candidates},
     )
     logger.info("Design brief mix: %s", mix.summary())
 

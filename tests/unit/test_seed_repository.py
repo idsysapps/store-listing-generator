@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 from unittest.mock import patch
 
 from store_listing.ingest.trends.google_trends import DatabaseClient
@@ -178,13 +179,16 @@ def test_cross_seed_counts_groups_by_query() -> None:
 
 def test_list_active_seeds_returns_only_active() -> None:
     cursor = FakeCursor()
-    cursor.fetchall_value = [(1, "hoodie", 0), (2, "gift", 0)]
+    cursor.fetchall_value = [
+        (1, "hoodie", 0, "evergreen", None, None),
+        (2, "gift", 0, "trend", None, None),
+    ]
     with connected_db(cursor) as (db, _conn):
         result = db.list_active_seeds()
 
     assert result == [
-        ActiveSeed(id=1, query="hoodie", promotion_score=0),
-        ActiveSeed(id=2, query="gift", promotion_score=0),
+        ActiveSeed(id=1, query="hoodie", promotion_score=0, origin="evergreen"),
+        ActiveSeed(id=2, query="gift", promotion_score=0, origin="trend"),
     ]
 
 
@@ -204,7 +208,28 @@ def test_insert_active_seed_returns_id() -> None:
     assert result == 3
     sql, params = cursor.executed_params[0]
     assert "ON CONFLICT (query) DO NOTHING" in sql
-    assert params == ("running", 100, 9)
+    assert params == ("running", 100, 9, "trend", None, None)
+
+
+def test_insert_active_seed_stays_where_the_seed_came_from() -> None:
+    # The origin tells the pool whether a seed is a holiday or a standing
+    # theme, so it has to be stored with the seed (issue #198).
+    cursor = FakeCursor()
+    cursor.fetchone_value = (3,)
+    with connected_db(cursor) as (db, _conn):
+        db.insert_active_seed(
+            query="spooky mug",
+            promotion_score=0,
+            candidate_id=None,
+            origin="calendar",
+            theme="halloween",
+            seasonal_window_end=date(2026, 10, 31),
+        )
+
+    sql, params = cursor.executed_params[0]
+    assert "origin" in sql
+    assert "theme" in sql
+    assert params == ("spooky mug", 0, None, "calendar", "halloween", date(2026, 10, 31))
 
 
 def test_insert_active_seed_allows_starter_without_candidate() -> None:
@@ -283,7 +308,19 @@ def test_list_briefable_seeds_skips_seeds_used_inside_the_cooldown() -> None:
     # cooldown, otherwise the brief pool drains to nothing (issue #192).
     cursor = FakeCursor()
     cursor.fetchall_value = [
-        (1, "halloween tote", "google", "rising", 0, 12000, 12000, ["dtf_apparel"]),
+        (
+            1,
+            "halloween tote",
+            "google",
+            "rising",
+            0,
+            12000,
+            12000,
+            ["dtf_apparel"],
+            "calendar",
+            "halloween",
+            date(2026, 10, 31),
+        ),
     ]
     with connected_db(cursor) as (db, _conn):
         result = db.list_briefable_seeds()
@@ -298,6 +335,9 @@ def test_list_briefable_seeds_skips_seeds_used_inside_the_cooldown() -> None:
             delta=12000,
             promotion_score=12000,
             product_tags=["dtf_apparel"],
+            origin="calendar",
+            theme="halloween",
+            seasonal_window_end=date(2026, 10, 31),
         )
     ]
     sql, params = cursor.executed_params[0]
@@ -318,10 +358,48 @@ def test_list_briefable_seeds_accepts_an_explicit_cooldown() -> None:
 def test_list_briefable_seed_ids_returns_only_the_ids() -> None:
     cursor = FakeCursor()
     cursor.fetchall_value = [
-        (1, "halloween tote", "google", "rising", 0, 12000, 12000, []),
-        (2, "pickleball", "google", "top", 80, 0, 8000, []),
+        (
+            1,
+            "halloween tote",
+            "google",
+            "rising",
+            0,
+            12000,
+            12000,
+            [],
+            "calendar",
+            "halloween",
+            None,
+        ),
+        (2, "pickleball", "google", "top", 80, 0, 8000, [], "trend", None, None),
     ]
     with connected_db(cursor) as (db, _conn):
         result = db.list_briefable_seed_ids()
 
     assert result == [1, 2]
+
+
+def test_list_briefable_seeds_keeps_the_evergreen_seeds_of_a_halloween_month() -> None:
+    # The brief batch must not be all seasonal, so the pool hands the brief
+    # task a mix instead of the highest scoring seeds (issue #198).
+    cursor = FakeCursor()
+    cursor.fetchall_value = [
+        (
+            1,
+            "halloween mug",
+            "calendar",
+            "inject",
+            0,
+            9000,
+            9000,
+            [],
+            "calendar",
+            "halloween",
+            None,
+        ),
+        (2, "cat lover mug", "calendar", "inject", 0, 10, 10, [], "evergreen", "pets", None),
+    ]
+    with connected_db(cursor) as (db, _conn):
+        result = db.list_briefable_seeds(limit=20)
+
+    assert [candidate.query for candidate in result] == ["halloween mug", "cat lover mug"]
