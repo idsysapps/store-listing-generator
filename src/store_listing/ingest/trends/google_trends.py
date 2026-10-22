@@ -538,6 +538,7 @@ class DatabaseClient:
         recommended_materials: list[dict[str, Any]] | None = None,
         voice: str = DEFAULT_VOICE,
         font_family: str | None = None,
+        style_preset: str | None = None,
     ) -> int:
         import json as _json
 
@@ -550,8 +551,8 @@ class DatabaseClient:
                      visual_style, confidence, reasoning, llm_model, batch_id,
                      layout_type, headline_text, tagline_text, font_color,
                      scene_description, personal_use, recommended_materials, voice,
-                     font_family)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     font_family, style_preset)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -573,6 +574,7 @@ class DatabaseClient:
                     materials_json,
                     voice,
                     font_family,
+                    style_preset,
                 ),
             )
             result = cur.fetchone()
@@ -609,7 +611,7 @@ class DatabaseClient:
                     SELECT id, concept, product_type, audience, visual_style,
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
-                           voice, font_family
+                           voice, font_family, style_preset
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND product_type = ANY(%s)
@@ -624,7 +626,7 @@ class DatabaseClient:
                     SELECT id, concept, product_type, audience, visual_style,
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
-                           voice, font_family
+                           voice, font_family, style_preset
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                     ORDER BY created_at DESC
@@ -650,6 +652,7 @@ class DatabaseClient:
                     ),
                     "voice": row[12] or DEFAULT_VOICE,
                     "font_family": row[13],
+                    "style_preset": row[14],
                 }
                 for row in cur.fetchall()
             ]

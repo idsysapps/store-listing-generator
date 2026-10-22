@@ -435,6 +435,9 @@ of the brief, is dropped when the brief is read.
 | `LLM_MAX_BRIEFS_PER_THEME` | 2 | Briefs of one batch that may be tied to the same event |
 | `LLM_MIN_EVERGREEN_BRIEFS` | 4 | Briefs of one batch that may not be tied to an event |
 | `LLM_BRIEF_MIX_REGENERATE_ONCE` | true | Ask for a second batch when the first misses the evergreen minimum |
+| `LLM_MAX_BRIEFS_PER_PRESET` | 3 | Briefs of one batch that may be drawn in the same look |
+| `LLM_MAX_BRIEFS_PER_VOICE` | 8 | Briefs of one batch that may be written in the same voice |
+| `LLM_BRIEF_TEXT_REGENERATE` | true | Ask for a second batch when the text of some briefs was rejected |
 | `LLM_DISCOVERY_BONUS` | 1000 | What a discovery is worth on top of the score of its source |
 | `LLM_ECHO_FACTOR` | 0.5 | What is left of the score of a candidate that only repeats its seed |
 | `DISCOVERY_CATEGORIES_PER_RUN` | 4 | Standing themes one discovery run asks for |

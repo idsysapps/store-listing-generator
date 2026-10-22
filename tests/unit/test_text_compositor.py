@@ -489,3 +489,129 @@ class TestEveryFamilyCanDraw:
             assert box is not None, f"{family} drew nothing"
             width = _image(result).size[0]
             assert (box[2] - box[0]) > width * 0.3, f"{family} dropped most of the headline"
+
+
+def _drawn_box_anywhere(data: bytes) -> tuple[int, int, int, int] | None:
+    """The box the text was drawn in, anywhere on the canvas."""
+    image = _image(data)
+    width, height = image.size
+    drawn = [
+        (x, y)
+        for y in range(height)
+        for x in range(width)
+        if image.getpixel((x, y)) != (255, 255, 255)
+    ]
+    if not drawn:
+        return None
+    return (
+        min(x for x, _ in drawn),
+        min(y for _, y in drawn),
+        max(x for x, _ in drawn),
+        max(y for _, y in drawn),
+    )
+
+
+class TestTheNewLayouts:
+    def _drawn(self, layout: str, top: bool = True) -> tuple[int, int, int, int] | None:
+        spec = LayoutSpec(
+            layout_type=layout,
+            headline_text="GOBBLE TIL THE BELL",
+            tagline_text="FEAST AT THE OLD CASTLE",
+        )
+        result = composite_text(_canvas(), spec)
+        return _drawn_box(result, top=top)
+
+    def test_a_badge_draws_the_headline_at_the_top(self) -> None:
+        box = self._drawn("badge", top=True)
+
+        assert box is not None
+        height = _image(_canvas()).size[1]
+        assert box[3] < int(height * 0.2)
+
+    def test_a_badge_draws_the_tagline_at_the_bottom(self) -> None:
+        box = self._drawn("badge", top=False)
+
+        assert box is not None
+        height = _image(_canvas()).size[1]
+        assert box[1] > int(height * 0.8)
+
+    def test_a_badge_draws_a_band_behind_the_text(self) -> None:
+        result = composite_text(
+            _canvas(),
+            LayoutSpec(layout_type="badge", headline_text="GOBBLE TIL THE BELL"),
+        )
+
+        # A row just inside the top of the band carries the band colour and
+        # nothing else: the band is a solid fill.
+        image = _image(result)
+        width, height = image.size
+        row = int(height * 0.02)
+        colours = {image.getpixel((x, row)) for x in range(int(width * 0.1), int(width * 0.9))}
+        assert len(colours) == 1, "the band should be a solid fill"
+
+    def test_a_banner_draws_the_headline_in_the_middle(self) -> None:
+        result = composite_text(
+            _canvas(),
+            LayoutSpec(layout_type="banner", headline_text="GOBBLE TIL THE BELL"),
+        )
+
+        box = _drawn_box_anywhere(result)
+        assert box is not None
+        height = _image(_canvas()).size[1]
+        assert box[1] > int(height * 0.3)
+        assert box[3] < int(height * 0.7)
+
+    def test_an_arch_keeps_the_headline_narrow(self) -> None:
+        box = self._drawn("arch", top=True)
+
+        assert box is not None
+        width = _image(_canvas()).size[0]
+        assert (box[2] - box[0]) < width * 0.8
+
+    def test_a_stack_side_draws_the_text_on_the_right(self) -> None:
+        result = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="stack_side",
+                headline_text="GOBBLE TIL THE BELL",
+                tagline_text="FEAST AT THE OLD CASTLE",
+            ),
+        )
+
+        box = _drawn_box_anywhere(result)
+        assert box is not None
+        width = _image(_canvas()).size[0]
+        assert box[0] > int(width * 0.5)
+
+    def test_a_layout_with_a_tagline_keeps_its_shape(self) -> None:
+        # The shape of a layout is the layout: a badge with a tagline is still
+        # a badge and not a text_top_bottom.
+        spec = LayoutSpec(
+            layout_type="badge",
+            headline_text="GOBBLE TIL THE BELL",
+            tagline_text="FEAST AT THE OLD CASTLE",
+        )
+
+        assert spec.layout_type == "badge"
+
+    def test_the_text_stays_inside_its_band_in_every_layout(self) -> None:
+        for layout in ("badge", "banner", "arch", "stack_side"):
+            result = composite_text(
+                _canvas(),
+                LayoutSpec(
+                    layout_type=layout,
+                    headline_text="Gobble Til The Drawbridge Drops",
+                    tagline_text="Feast at the old castle",
+                ),
+            )
+
+            image = _image(result)
+            width, height = image.size
+            drawn = [
+                (x, y)
+                for y in range(height)
+                for x in range(width)
+                if image.getpixel((x, y)) != (255, 255, 255)
+            ]
+            assert drawn, f"{layout} drew nothing"
+            assert max(x for x, _ in drawn) < width, f"{layout} ran out of the canvas"

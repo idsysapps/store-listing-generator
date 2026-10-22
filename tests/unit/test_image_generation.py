@@ -12,6 +12,7 @@ from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.image_generation import (
     PromptBuildError,
     build_flux_prompt,
+    build_negative_prompt,
     font_colour,
     generate_image,
 )
@@ -331,3 +332,97 @@ class TestGenerateImage:
 
         prompt = client.generate_image.call_args.kwargs["prompt"]
         assert 'The text must read exactly "SPOOKY SEASON".' in prompt
+
+
+class TestTheLookOfTheDesign:
+    def test_the_look_of_the_preset_is_in_the_prompt(self) -> None:
+        brief = _make_brief(
+            layout_type="full_bleed",
+            style_preset="halftone_comic",
+            visual_style="retro vintage, orange and teal",
+        )
+
+        prompt = build_flux_prompt(brief)
+
+        assert "halftone dot shading" in prompt.lower()
+
+    def test_the_free_style_of_the_brief_does_not_fight_the_look(self) -> None:
+        # Free text made every design come out as the same flat vector
+        # clip-art (issue #227).
+        brief = _make_brief(
+            layout_type="full_bleed",
+            style_preset="kawaii_flat",
+            visual_style="photorealistic 3d render, glossy gradient",
+        )
+
+        prompt = build_flux_prompt(brief)
+
+        assert "kawaii" in prompt.lower()
+        assert "glossy gradient" not in prompt.lower()
+
+    def test_a_brief_without_a_look_keeps_its_own_style(self) -> None:
+        # The briefs that were written before the looks existed still render.
+        brief = _make_brief(
+            layout_type="full_bleed",
+            style_preset=None,
+            visual_style="retro vintage, orange and teal",
+        )
+
+        prompt = build_flux_prompt(brief)
+
+        assert "orange and teal" in prompt.lower()
+
+    def test_the_negative_prompt_keeps_the_paper_clean(self) -> None:
+        brief = _make_brief(style_preset="riso_two_color")
+
+        negative = build_negative_prompt(brief)
+
+        assert "paper texture" in negative
+        assert "photorealistic" in negative
+
+    def test_the_negative_prompt_reaches_the_model(self) -> None:
+        client = _client()
+
+        generate_image(_make_brief(style_preset="vintage_screenprint"), comfyui_client=client)
+
+        negative = client.generate_image.call_args.kwargs["negative_prompt"]
+        assert "paper texture" in negative
+
+    def test_the_background_stays_the_last_word(self) -> None:
+        # The background comes last so that a look cannot win over it
+        # (issue #188).
+        brief = _make_brief(
+            layout_type="full_bleed",
+            style_preset="distressed_band_tee",
+        )
+
+        prompt = build_flux_prompt(brief)
+
+        assert (
+            prompt.lower()
+            .rstrip(".")
+            .endswith("plain magenta backdrop, chroma key background, uniform flat magenta color")
+        )
+
+
+class TestTheNewLayouts:
+    def test_a_banner_reserves_the_middle_of_the_canvas(self) -> None:
+        brief = _make_brief(layout_type="banner", headline_text="GOBBLE")
+
+        prompt = build_flux_prompt(brief).lower()
+
+        assert "band across the middle" in prompt
+
+    def test_a_stack_side_reserves_the_right_of_the_canvas(self) -> None:
+        brief = _make_brief(layout_type="stack_side", headline_text="GOBBLE")
+
+        prompt = build_flux_prompt(brief).lower()
+
+        assert "right side" in prompt
+
+    def test_a_badge_reserves_a_band_at_the_top_and_the_bottom(self) -> None:
+        brief = _make_brief(layout_type="badge", headline_text="GOBBLE")
+
+        prompt = build_flux_prompt(brief).lower()
+
+        assert "compact centred emblem" in prompt

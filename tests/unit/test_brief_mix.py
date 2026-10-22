@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from store_listing.orchestration.brief_mix import (
     BriefMix,
     classify_brief_mix,
+    enforce_style_mix,
     event_theme_for_query,
     seed_themes_for_queries,
 )
@@ -152,3 +153,81 @@ class TestGroupBriefMix:
         report = render(group_brief_mix(links))
 
         assert "ALL: total=2 seasonal=1 evergreen=1" in report
+
+
+class _StyleBrief:
+    """A brief with a look and a voice."""
+
+    def __init__(
+        self,
+        concept: str,
+        voice: str = "deadpan",
+        style_preset: str | None = "halftone_comic",
+        confidence: int = 80,
+    ) -> None:
+        self.concept = concept
+        self.voice = voice
+        self.style_preset = style_preset
+        self.confidence = confidence
+
+
+class TestEnforceStyleMix:
+    def test_a_batch_of_one_look_is_thinned_out(self) -> None:
+        # A batch that came back with the same look three times over looks
+        # like one design repeated (issue #227).
+        briefs = [_StyleBrief(f"Design {index}") for index in range(5)]
+
+        kept, dropped = enforce_style_mix(briefs, max_per_preset=3)
+
+        assert len(kept) == 3
+        assert len(dropped) == 2
+
+    def test_the_looks_of_a_batch_are_kept(self) -> None:
+        briefs = [
+            _StyleBrief("A", style_preset="halftone_comic"),
+            _StyleBrief("B", style_preset="kawaii_flat"),
+            _StyleBrief("C", style_preset="art_nouveau"),
+        ]
+
+        kept, dropped = enforce_style_mix(briefs, max_per_preset=1)
+
+        assert len(kept) == 3
+        assert dropped == []
+
+    def test_the_voices_of_a_batch_are_kept(self) -> None:
+        briefs = [
+            _StyleBrief("A", voice="deadpan", style_preset="halftone_comic"),
+            _StyleBrief("B", voice="loud", style_preset="kawaii_flat"),
+            _StyleBrief("C", voice="cozy", style_preset="art_nouveau"),
+        ]
+
+        kept, dropped = enforce_style_mix(briefs, max_per_voice=1)
+
+        assert len(kept) == 3
+        assert dropped == []
+
+    def test_one_voice_does_not_fill_the_batch(self) -> None:
+        briefs = [_StyleBrief(f"Design {index}", voice="deadpan") for index in range(4)]
+
+        kept, dropped = enforce_style_mix(briefs, max_per_voice=2)
+
+        assert len(kept) == 2
+        assert len(dropped) == 2
+
+    def test_a_brief_without_a_look_is_never_dropped_for_it(self) -> None:
+        briefs = [_StyleBrief(f"Design {index}", style_preset=None) for index in range(6)]
+
+        kept, dropped = enforce_style_mix(briefs, max_per_preset=1)
+
+        assert len(kept) == 6
+        assert dropped == []
+
+    def test_the_best_briefs_are_the_ones_kept(self) -> None:
+        briefs = [
+            _StyleBrief("Low", confidence=10),
+            _StyleBrief("High", confidence=99),
+        ]
+
+        kept, _ = enforce_style_mix(briefs, max_per_preset=1)
+
+        assert kept[0].concept == "High"

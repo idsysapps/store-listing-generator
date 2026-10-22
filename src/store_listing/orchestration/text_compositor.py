@@ -77,6 +77,50 @@ DTF_KEY_COLOUR = (255, 0, 255)
 PAPER_COLOUR = (255, 255, 255)
 
 
+@dataclass(frozen=True)
+class TextPlacement:
+    """Where the text of a layout goes, as a share of the canvas.
+
+    The box is (x, y, width, height) in shares of the canvas, so the same
+    placement works on a render of any size.
+    """
+
+    headline: tuple[float, float, float, float] | None = None
+    tagline: tuple[float, float, float, float] | None = None
+    # Whether a band is drawn behind the text.
+    bar: bool = False
+
+
+# The layouts that put the text in a shape of its own. Every other layout
+# puts the text above and below the art, which is why every design looked the
+# same (issue #227).
+SHAPED_LAYOUTS: tuple[str, ...] = ("badge", "banner", "arch", "stack_side")
+
+# The placements of the layouts that draw text.
+PLACEMENTS: dict[str, TextPlacement] = {
+    "text_top": TextPlacement(headline=(0.05, 0.00, 0.90, 0.15)),
+    "text_top_bottom": TextPlacement(
+        headline=(0.05, 0.00, 0.90, 0.15), tagline=(0.05, 0.88, 0.90, 0.12)
+    ),
+    # A label: a band at the top, a band at the bottom, an emblem between.
+    "badge": TextPlacement(
+        headline=(0.08, 0.01, 0.84, 0.14), tagline=(0.08, 0.85, 0.84, 0.13), bar=True
+    ),
+    # A ribbon across the middle of the art.
+    "banner": TextPlacement(
+        headline=(0.00, 0.36, 1.00, 0.22), tagline=(0.05, 0.88, 0.90, 0.12), bar=True
+    ),
+    # A tall arch with the headline in the head of the arch.
+    "arch": TextPlacement(
+        headline=(0.20, 0.00, 0.60, 0.14), tagline=(0.05, 0.88, 0.90, 0.12), bar=True
+    ),
+    # The art on the left, the text stacked on the right.
+    "stack_side": TextPlacement(
+        headline=(0.56, 0.28, 0.40, 0.32), tagline=(0.56, 0.62, 0.40, 0.16)
+    ),
+}
+
+
 def resolve_layout(layout_type: str, headline_text: str | None, tagline_text: str | None) -> str:
     """The layout that is actually drawn.
 
@@ -89,6 +133,8 @@ def resolve_layout(layout_type: str, headline_text: str | None, tagline_text: st
         return "full_bleed"
     if layout_type == "text_only":
         return "text_only"
+    if layout_type in SHAPED_LAYOUTS:
+        return layout_type
     if tagline_text and tagline_text.strip():
         return "text_top_bottom"
     return "text_top"
@@ -442,8 +488,14 @@ def _draw_text(
     box: tuple[int, int, int, int],
     family: str = DEFAULT_FONT,
     treatment: TextTreatment | None = None,
+    bar: str | None = None,
 ) -> None:
-    """Draw the text centred in the given box."""
+    """Draw the text centred in the given box.
+
+    ``bar`` is the colour of a band that is drawn behind the text. The text on
+    a band is drawn in the colour that stands out against it, so it stays
+    readable whatever the band is.
+    """
     treatment = treatment or TextTreatment()
     text = text.strip()
     if treatment.uppercase:
@@ -455,6 +507,14 @@ def _draw_text(
     x, y, width, height = box
     font, lines = _fit(draw, text, width, int(height * (1 - ZONE_PADDING)), family, treatment)
 
+    if bar is not None:
+        color = _contrast_colour(bar)
+        treatment = TextTreatment(
+            uppercase=treatment.uppercase,
+            tracking=treatment.tracking,
+            style=treatment.style,
+        )
+
     line_height = _line_height(font)
     total_height = line_height * len(lines)
     top = y + max(0, (height - total_height) // 2)
@@ -464,6 +524,9 @@ def _draw_text(
     shadow_color = _halo_colour(color)
     offset = max(1, int(font.size * SHADOW_RATIO))
     halo = max(1, int(font.size * HALO_RATIO)) if treatment.style == "halo" else 0
+
+    if bar is not None:
+        draw.rectangle([x, y, x + width, y + height], fill=bar)
 
     def fill_for(is_accent: bool) -> str:
         return accent if is_accent else color
@@ -535,31 +598,51 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
 
     if layout.layout_type == "text_only":
         _draw_text_only(draw, layout, margin_x=margin_x, text_width=text_width, height=height)
-    else:
-        if layout.headline_text:
-            _draw_text(
-                draw,
-                layout.headline_text,
-                color=layout.font_color,
-                box=(margin_x, 0, text_width, int(height * HEADLINE_ZONE)),
-                family=layout.family,
-                treatment=treatment,
-            )
-        if layout.tagline_text:
-            _draw_text(
-                draw,
-                layout.tagline_text,
-                color=layout.font_color,
-                box=(
-                    margin_x,
-                    int(height * (1 - TAGLINE_ZONE)),
-                    text_width,
-                    int(height * TAGLINE_ZONE),
-                ),
-                family=layout.tagline_family,
-                treatment=treatment,
-            )
+        return _composite(image, overlay)
 
+    placement = PLACEMENTS.get(layout.layout_type, PLACEMENTS["text_top"])
+    bar = accent_for(layout.font_color) if placement.bar else None
+
+    if layout.headline_text and placement.headline:
+        box = _box(placement.headline, width, height)
+        _draw_text(
+            draw,
+            layout.headline_text,
+            color=layout.font_color,
+            box=box,
+            family=layout.family,
+            treatment=treatment,
+            bar=bar,
+        )
+    if layout.tagline_text and placement.tagline:
+        box = _box(placement.tagline, width, height)
+        _draw_text(
+            draw,
+            layout.tagline_text,
+            color=layout.font_color,
+            box=box,
+            family=layout.tagline_family,
+            treatment=treatment,
+            bar=bar,
+        )
+
+    return _composite(image, overlay)
+
+
+def _box(
+    placement: tuple[float, float, float, float], width: int, height: int
+) -> tuple[int, int, int, int]:
+    """A placement in shares of the canvas as a box in pixels."""
+    x, y, box_width, box_height = placement
+    return (
+        int(x * width),
+        int(y * height),
+        int(box_width * width),
+        int(box_height * height),
+    )
+
+
+def _composite(image: Image.Image, overlay: Image.Image) -> bytes:
     result = Image.alpha_composite(image, overlay)
     buffer = BytesIO()
     result.save(buffer, format="PNG")

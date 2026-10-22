@@ -15,18 +15,21 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, Protocol
 
+from store_listing.orchestration.art_direction import family_for, preset_for
 from store_listing.orchestration.brief_mix import (
     BRIEF_MIX_REGENERATE_ONCE,
     MAX_BRIEFS_PER_THEME,
     MIN_EVERGREEN_BRIEFS,
     classify_brief_mix,
     enforce_brief_mix,
+    enforce_style_mix,
     event_theme_for_query,
     evergreen_count,
 )
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
     DIVERSITY_RULES,
+    art_direction_rules,
     layout_rules,
     product_belongs_to,
     product_catalog,
@@ -43,7 +46,6 @@ from store_listing.orchestration.llm_client import is_model_missing_error, model
 from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
-from store_listing.orchestration.typography import family_for_voice
 
 logger = logging.getLogger(__name__)
 
@@ -76,15 +78,17 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         f"- product_type: exactly one of {product_types}\n"
         "- specific_products: array of 1-3 specific products from the catalog above\n"
         "- audience: who would buy this (demographics, interests)\n"
-        "- visual_style: art direction notes (color palette, illustration style, "
-        "typography). Do NOT include any text/slogan in this field — text is rendered "
-        "separately via the layout fields below.\n"
+        "- visual_style: the colours and the details of this one design (colour "
+        "palette, the details of the drawing). Do NOT name a style or a look in this "
+        "field - the style_preset decides the look. Do NOT include any text/slogan "
+        "either - text is rendered separately via the layout fields below.\n"
         "- confidence: 0-100, how confident you are this will sell\n"
         "- reasoning: why this concept is timely or evergreen and marketable (cite the "
         "trend signals)\n"
         "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
         f"{layout_rules(types)}\n"
         f"{voice_rules()}\n"
+        f"{art_direction_rules()}\n"
         f"{DESIGN_ONLY_RULES}\n"
         "MATERIALS — picking the right substrate:\n"
         "- recommended_materials: array of objects from the available_materials list, each with "
@@ -102,6 +106,9 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         '"layout_type": "text_top", "headline_text": "...", '
         '"tagline_text": "...", "font_color": "#000000", '
         '"voice": "deadpan | loud | cozy", '
+        '"style_preset": "vintage_screenprint | seventies_retro | halftone_comic | '
+        "riso_two_color | hand_inked_woodcut | kawaii_flat | art_nouveau | "
+        'distressed_band_tee", '
         '"scene_description": "...", '
         '"recommended_materials": [{"external_id": "...", "name": "...", '
         '"color": "...", "substrate_type": "...", "unit_cost": 0.00}]}]}'
@@ -123,7 +130,16 @@ class BriefableCandidate:
     seasonal_window_end: date | None = None
 
 
-VALID_LAYOUT_TYPES: set[str] = {"full_bleed", "text_top", "text_top_bottom", "text_only"}
+VALID_LAYOUT_TYPES: set[str] = {
+    "full_bleed",
+    "text_top",
+    "text_top_bottom",
+    "text_only",
+    "badge",
+    "banner",
+    "arch",
+    "stack_side",
+}
 
 # The most words a headline may have. A typography-only design without a
 # headline falls back to its concept, and a long concept is not a headline.
@@ -165,6 +181,8 @@ class DesignBrief:
     voice: str = DEFAULT_VOICE
     # The family the text of the design is drawn in.
     font_family: str | None = None
+    # The look the design is drawn in.
+    style_preset: str | None = None
 
 
 class DesignBriefDBClient(Protocol):
@@ -197,6 +215,7 @@ class DesignBriefDBClient(Protocol):
         recommended_materials: list[dict[str, Any]] | None = None,
         voice: str = DEFAULT_VOICE,
         font_family: str | None = None,
+        style_preset: str | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -353,9 +372,17 @@ def _brief_from(
             return None
 
     voice = normalise_voice(b.get("voice") if isinstance(b.get("voice"), str) else None)
+    # The look of the design. A brief that names a look we do not print has
+    # no look, and the voice decides the type then (issue #227).
+    style_preset = b.get("style_preset")
+    if not isinstance(style_preset, str):
+        style_preset = None
+    preset = preset_for(style_preset)
+    if preset is None:
+        style_preset = None
     # The family of the type is decided here, not by the model: the model picks
     # a tone, and the type follows the art direction (issue #226).
-    font_family = family_for_voice(voice)
+    font_family = family_for(preset, voice)
 
     # The text of a design is the part the buyer reads, so it is the part that
     # has to be good. A headline that names a brand, that lists three nouns or
@@ -396,6 +423,7 @@ def _brief_from(
         recommended_materials=recommended_materials,
         voice=voice,
         font_family=font_family,
+        style_preset=style_preset,
     )
 
 
@@ -571,6 +599,18 @@ def generate_design_briefs(
         len(dropped),
     )
 
+    # The shop sells eight looks and three voices, so a batch that came back
+    # with the same look three times over looks like one design repeated
+    # (issue #227).
+    kept, style_dropped = enforce_style_mix(kept)
+    if style_dropped:
+        logger.info(
+            "Dropped %d briefs over the look quota: %s",
+            len(style_dropped),
+            ", ".join(brief.concept for brief in style_dropped),
+        )
+        dropped = list(dropped) + list(style_dropped)
+
     if evergreen < MIN_EVERGREEN_BRIEFS and BRIEF_MIX_REGENERATE_ONCE:
         # The model answered with a season. Ask once more, and say what went
         # wrong, before shipping a batch that is not a batch (issue #200).
@@ -631,6 +671,7 @@ def generate_design_briefs(
             recommended_materials=brief.recommended_materials,
             voice=brief.voice,
             font_family=brief.font_family,
+            style_preset=brief.style_preset,
         )
         linked = 0
         for seed_id in brief.source_seed_ids:

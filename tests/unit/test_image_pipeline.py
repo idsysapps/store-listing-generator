@@ -986,3 +986,46 @@ class TestTheTypeOfTheDesign:
         width, height = image.size
         top_zone = image.crop((0, 0, width, int(height * 0.15)))
         assert _distinct_colours(top_zone) != {(255, 255, 255)}
+
+
+class TestTheTextureOfTheDesign:
+    def _render(self, style_preset: str) -> Image.Image:
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    layout_type="text_top",
+                    headline_text="GOBBLE TIL THE BELL",
+                    style_preset=style_preset,
+                )
+            ]
+        )
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=_real_png()),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        body = s3.put_object.call_args.kwargs["Body"]
+        return Image.open(BytesIO(body)).convert("RGB")
+
+    def test_a_look_with_a_texture_gets_one(self) -> None:
+        # The grain, the halftone and the cracked ink are what make a flat
+        # vector read as a print, and they cannot be asked of the model: a
+        # texture it paints lands on the background too (issue #227).
+        textured = self._render("vintage_screenprint")
+        plain = self._render("kawaii_flat")
+
+        textured_colours = textured.getcolors(maxcolors=1_000_000) or []
+        plain_colours = plain.getcolors(maxcolors=1_000_000) or []
+        assert len(textured_colours) > len(plain_colours) * 2
+
+    def test_a_look_without_a_texture_is_left_alone(self) -> None:
+        # The look without a texture keeps the flat colour of the render.
+        plain = self._render("kawaii_flat")
+
+        colours = plain.getcolors(maxcolors=1_000_000) or []
+        white = sum(count for count, colour in colours if colour == (255, 255, 255))
+        assert white > 0

@@ -19,6 +19,7 @@ import os
 import random
 from typing import Any
 
+from store_listing.orchestration.art_direction import preset_for
 from store_listing.orchestration.artwork_validation import (
     ArtworkTextValidator,
     ArtworkValidator,
@@ -28,18 +29,22 @@ from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE
 from store_listing.orchestration.image_generation import (
     ARTWORK_RETRY_HINT,
+    LAYOUT_RESERVES,
     NO_LETTERING_RETRY_HINT,
+    ImageResult,
     font_colour,
     generate_image,
 )
 from store_listing.orchestration.image_storage import ImageStorageClient
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.text_compositor import (
+    DTF_KEY_COLOUR,
     LayoutSpec,
     blank_canvas,
     composite_text,
 )
 from store_listing.orchestration.text_validation import TextValidator
+from store_listing.orchestration.textures import apply_texture
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +105,35 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         scene_description=scene or None,
         voice=brief_row.get("voice") or DEFAULT_VOICE,
         font_family=brief_row.get("font_family"),
+        style_preset=brief_row.get("style_preset"),
     )
+
+
+def _textured(
+    result: ImageResult,
+    brief: DesignBrief,
+    is_dtf: bool,
+    *,
+    keyed: bool = False,
+) -> bytes:
+    """The artwork of a render, with the texture of its look on it.
+
+    The texture is applied after the keying, and never on the background: a
+    texture on the background of a DTF render would survive the cutout as a
+    grey rectangle (issue #227).
+    """
+    source = result.image_bytes if keyed else (result.raw_bytes or result.image_bytes)
+    if not source:
+        return b""
+
+    preset = preset_for(brief.style_preset)
+    texture = preset.texture if preset else None
+    if not texture:
+        return source
+
+    if keyed:
+        return apply_texture(source, texture)
+    return apply_texture(source, texture, key_colour=DTF_KEY_COLOUR if is_dtf else None)
 
 
 def _retry_hint(brief: DesignBrief) -> str:
@@ -110,10 +143,9 @@ def _retry_hint(brief: DesignBrief) -> str:
     to spell it - it can only ask for a clearer area to put it in.
     """
     layout_type = brief.layout_type or "full_bleed"
-    if layout_type == "text_top_bottom":
-        return "Leave the top and the bottom of the canvas clear and empty."
-    if layout_type == "text_top":
-        return "Leave the top of the canvas clear and empty."
+    reserve = LAYOUT_RESERVES.get(layout_type)
+    if reserve:
+        return reserve
     return "Render the requested scene more clearly."
 
 
@@ -357,7 +389,7 @@ def _generate_single_brief(
 
         # The text is drawn onto the artwork, not asked of the model: it cannot
         # spell, and a colour in a prompt is not a colour (issue #187).
-        raw_bytes = composite_text(result.raw_bytes or result.image_bytes, layout)
+        raw_bytes = composite_text(_textured(result, brief, is_dtf), layout)
 
         if text_validator is None or not needs_text_check:
             break
@@ -398,7 +430,7 @@ def _generate_single_brief(
 
     transparent_bytes: bytes | None = None
     if is_dtf and result.background_removed and result.image_bytes:
-        transparent_bytes = composite_text(result.image_bytes, layout)
+        transparent_bytes = composite_text(_textured(result, brief, is_dtf, keyed=True), layout)
 
     keys = storage.upload_design(
         raw_bytes=raw_bytes,

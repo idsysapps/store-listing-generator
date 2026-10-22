@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from typing import Final
 
 __all__ = [
+    "ART_DIRECTION_RULES",
     "DESIGN_ONLY_RULES",
     "DIVERSITY_RULES",
     "LAYOUT_RULES",
@@ -29,6 +30,7 @@ __all__ = [
     "PRODUCT_CATALOG_BY_TYPE",
     "SEASONAL_WORDS",
     "VOICE_RULES",
+    "art_direction_rules",
     "layout_rules",
     "product_belongs_to",
     "product_catalog",
@@ -125,7 +127,12 @@ def layout_rules(enabled: Sequence[str] | None = None) -> str:
         "- layout_type: one of 'full_bleed' (illustration only, no text), 'text_top' "
         "(headline at the top, art below), 'text_top_bottom' (headline top, tagline "
         "bottom, art in center), 'text_only' (typography only: the headline and the "
-        "tagline, with no illustration at all). Use 'full_bleed' for a purely visual "
+        "tagline, with no illustration at all), 'badge' (a band at the top with the "
+        "headline, a band at the bottom with the tagline, a compact emblem in the "
+        "middle), 'banner' (a band across the middle of the art with the headline), "
+        "'arch' (the art in a tall arch, the headline in the head of the arch) and "
+        "'stack_side' (the art on the left, the headline and the tagline stacked on "
+        "the right). Use 'full_bleed' for a purely visual "
         "design with no slogan, 'text_only' for a pure slogan design with no "
         "illustration, and a text layout with art when a catchphrase strengthens the "
         "illustration.\n"
@@ -174,6 +181,27 @@ VOICE_RULES: Final[str] = (
 def voice_rules() -> str:
     """The voice rules, for the prompts that write the text of a design."""
     return VOICE_RULES
+
+
+# The looks the shop prints in. The model names one of them and never writes
+# a style of its own: free text made every design come out as the same flat
+# vector clip-art (issue #227).
+ART_DIRECTION_RULES: Final[str] = (
+    "ART DIRECTION - every brief is drawn in one of the looks the shop prints:\n"
+    "- style_preset: one of 'vintage_screenprint', 'seventies_retro', "
+    "'halftone_comic', 'riso_two_color', 'hand_inked_woodcut', 'kawaii_flat', "
+    "'art_nouveau' or 'distressed_band_tee'.\n"
+    "- The look decides the colours, the linework and the type of the design. "
+    "Do not name a style or a look in visual_style - name the look in "
+    "style_preset and let it decide.\n"
+    "- The look has to suit the concept: a quiet design is not a comic book "
+    "cover and a loud one is not a quiet vintage print.\n"
+)
+
+
+def art_direction_rules() -> str:
+    """The art direction rules, for the prompts that write a brief."""
+    return ART_DIRECTION_RULES
 
 
 DESIGN_ONLY_RULES: Final[str] = (

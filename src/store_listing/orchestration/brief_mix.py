@@ -22,9 +22,11 @@ from store_listing.orchestration.context_seeds import SEASONAL_EVENT_THEME, SEAS
 __all__ = [
     "BriefMix",
     "MixableBrief",
+    "StyleableBrief",
     "classify_brief_mix",
     "classify_themes",
     "enforce_brief_mix",
+    "enforce_style_mix",
     "event_theme_for_query",
     "known_event_names",
     "seed_themes_for_queries",
@@ -37,6 +39,11 @@ DEFAULT_MAX_BRIEFS_PER_THEME: Final[int] = 2
 DEFAULT_MIN_EVERGREEN_BRIEFS: Final[int] = 4
 # Whether a batch that misses the evergreen minimum is asked for once more.
 DEFAULT_BRIEF_MIX_REGENERATE_ONCE: Final[bool] = True
+# How many briefs of one batch may be drawn in the same look. Eight looks in
+# a batch of twenty, so at least six of them show up (issue #227).
+DEFAULT_MAX_BRIEFS_PER_PRESET: Final[int] = 3
+# How many briefs of one batch may be written in the same voice.
+DEFAULT_MAX_BRIEFS_PER_VOICE: Final[int] = 8
 
 
 def _env_int(name: str, default: int, minimum: int = 0) -> int:
@@ -66,6 +73,12 @@ MIN_EVERGREEN_BRIEFS: Final[int] = _env_int(
 BRIEF_MIX_REGENERATE_ONCE: Final[bool] = _env_bool(
     "LLM_BRIEF_MIX_REGENERATE_ONCE", DEFAULT_BRIEF_MIX_REGENERATE_ONCE
 )
+MAX_BRIEFS_PER_PRESET: Final[int] = _env_int(
+    "LLM_MAX_BRIEFS_PER_PRESET", DEFAULT_MAX_BRIEFS_PER_PRESET, minimum=1
+)
+MAX_BRIEFS_PER_VOICE: Final[int] = _env_int(
+    "LLM_MAX_BRIEFS_PER_VOICE", DEFAULT_MAX_BRIEFS_PER_VOICE, minimum=1
+)
 
 
 class MixableBrief(Protocol):
@@ -76,9 +89,24 @@ class MixableBrief(Protocol):
 
     @property
     def confidence(self) -> int: ...
-
     @property
     def source_seed_ids(self) -> list[int]: ...
+
+
+class StyleableBrief(Protocol):
+    """What the style mix needs to know about a brief."""
+
+    @property
+    def concept(self) -> str: ...
+
+    @property
+    def confidence(self) -> int: ...
+
+    @property
+    def voice(self) -> str: ...
+
+    @property
+    def style_preset(self) -> str | None: ...
 
 
 @dataclass(frozen=True)
@@ -284,6 +312,43 @@ def _confidence(brief: object) -> int:
 def _concept(brief: object) -> str:
     value = getattr(brief, "concept", "")
     return value if isinstance(value, str) else ""
+
+
+def enforce_style_mix[T: StyleableBrief](
+    briefs: Sequence[T],
+    max_per_preset: int = MAX_BRIEFS_PER_PRESET,
+    max_per_voice: int = MAX_BRIEFS_PER_VOICE,
+) -> tuple[list[T], list[T]]:
+    """Split a batch into the briefs to keep and the briefs to drop.
+
+    The shop sells eight looks and three voices. A batch that came back with
+    the same look three times over and the others not at all looks like one
+    design repeated, so a look and a voice have a share of the batch and the
+    briefs past the share are dropped, the best first (issue #227).
+    """
+    ordered = sorted(briefs, key=lambda brief: (-_confidence(brief), _concept(brief)))
+
+    kept: list[T] = []
+    dropped: list[T] = []
+    per_preset: dict[str, int] = {}
+    per_voice: dict[str, int] = {}
+
+    for brief in ordered:
+        preset = brief.style_preset
+        if preset and per_preset.get(preset, 0) >= max_per_preset:
+            dropped.append(brief)
+            continue
+        voice = brief.voice
+        if voice and per_voice.get(voice, 0) >= max_per_voice:
+            dropped.append(brief)
+            continue
+        if preset:
+            per_preset[preset] = per_preset.get(preset, 0) + 1
+        if voice:
+            per_voice[voice] = per_voice.get(voice, 0) + 1
+        kept.append(brief)
+
+    return kept, dropped
 
 
 def evergreen_count(
