@@ -1,9 +1,13 @@
 package com.trends.repository;
 
 import com.trends.domain.FabricationMaterial;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
+import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.mockito.Spy;
 
@@ -19,6 +23,9 @@ import static org.mockito.Mockito.*;
 
 class FabricationMaterialRepositoryTest {
 
+    @Mock
+    EntityManager entityManager;
+
     @Spy
     @InjectMocks
     FabricationMaterialRepository repository;
@@ -29,27 +36,34 @@ class FabricationMaterialRepositoryTest {
     }
 
     @Test
-    void testFindByProductType_ReturnsActiveMatchingMaterials() {
-        FabricationMaterial mat1 = createMaterial("bc3001-white", "Bella Canvas 3001", "dtf_apparel", true);
-        FabricationMaterial mat2 = createMaterial("bc3001-grey", "Bella Canvas 3001", "dtf_apparel", true);
+    void testFindByProductType_MatchesAnyProductTypeOfTheMaterial() {
+        // A material can serve several product types, so the column holds an
+        // array and the filter has to match any of them (issue #186).
+        FabricationMaterial mat = createMaterial("bc3001-white", "Bella Canvas 3001",
+                new String[] { "substrate", "dtf_apparel" }, true);
 
         @SuppressWarnings("unchecked")
-        PanacheQuery<FabricationMaterial> mockQuery = mock(PanacheQuery.class);
-        when(mockQuery.list()).thenReturn(List.of(mat1, mat2));
-        doReturn(mockQuery).when(repository).find(
-                eq("productType = ?1 AND active = true ORDER BY name, color"),
-                eq("dtf_apparel"));
+        Query mockQuery = mock(Query.class);
+        when(entityManager.createNativeQuery(anyString(), eq(FabricationMaterial.class)))
+                .thenReturn(mockQuery);
+        when(mockQuery.setParameter(eq(1), eq("dtf_apparel"))).thenReturn(mockQuery);
+        when(mockQuery.getResultList()).thenReturn(List.of(mat));
 
         List<FabricationMaterial> result = repository.findByProductType("dtf_apparel");
 
-        assertEquals(2, result.size());
+        assertEquals(1, result.size());
         assertEquals("bc3001-white", result.get(0).externalId);
-        assertEquals("bc3001-grey", result.get(1).externalId);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(entityManager).createNativeQuery(sql.capture(), eq(FabricationMaterial.class));
+        assertTrue(sql.getValue().contains("= ANY(product_type)"),
+                "the filter has to match any product type of the material: " + sql.getValue());
     }
 
     @Test
     void testFindByExternalId_ReturnsMatchingMaterial() {
-        FabricationMaterial mat = createMaterial("bc3001-white", "Bella Canvas 3001", "dtf_apparel", true);
+        FabricationMaterial mat = createMaterial("bc3001-white", "Bella Canvas 3001",
+                new String[] { "dtf_apparel" }, true);
 
         @SuppressWarnings("unchecked")
         PanacheQuery<FabricationMaterial> mockQuery = mock(PanacheQuery.class);
@@ -77,21 +91,24 @@ class FabricationMaterialRepositoryTest {
 
     @Test
     void testFindAllActive_ReturnsOnlyActiveMaterials() {
-        FabricationMaterial mat1 = createMaterial("bc3001-white", "Bella Canvas 3001", "dtf_apparel", true);
-        FabricationMaterial mat2 = createMaterial("mug-white", "11oz Mug", "sublimation", true);
+        FabricationMaterial mat1 = createMaterial("bc3001-white", "Bella Canvas 3001",
+                new String[] { "dtf_apparel" }, true);
+        FabricationMaterial mat2 = createMaterial("mug-white", "11oz Mug",
+                new String[] { "sublimation" }, true);
 
         @SuppressWarnings("unchecked")
-        PanacheQuery<FabricationMaterial> mockQuery = mock(PanacheQuery.class);
-        when(mockQuery.list()).thenReturn(List.of(mat1, mat2));
-        doReturn(mockQuery).when(repository).find(
-                eq("active = true ORDER BY productType, name, color"));
+        Query mockQuery = mock(Query.class);
+        when(entityManager.createNativeQuery(anyString(), eq(FabricationMaterial.class)))
+                .thenReturn(mockQuery);
+        when(mockQuery.getResultList()).thenReturn(List.of(mat1, mat2));
 
         List<FabricationMaterial> result = repository.findAllActive();
 
         assertEquals(2, result.size());
     }
 
-    private FabricationMaterial createMaterial(String externalId, String name, String productType, boolean active) {
+    private FabricationMaterial createMaterial(String externalId, String name, String[] productType,
+            boolean active) {
         FabricationMaterial mat = new FabricationMaterial();
         mat.externalId = externalId;
         mat.name = name;

@@ -32,6 +32,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -165,6 +166,56 @@ class FabricationMaterialJsonPersistenceIT {
         }
     }
 
+    @Test
+    void shouldPersistProductTypesAsTextArray() throws SQLException {
+        // Cost-book publishes the product types a material can serve as a JSON
+        // array, so the column holds the array (issue #186).
+        Integer id = persistMaterial(ATTRIBUTES);
+
+        FabricationMaterial saved = findById(id);
+        assertNotNull(saved, "material should have been persisted");
+        assertEquals(List.of("substrate", "dtf_apparel"), List.of(saved.productType));
+
+        try (Connection connection = openConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT product_type FROM fabrication_materials WHERE id = ?")) {
+            statement.setInt(1, id);
+            try (ResultSet result = statement.executeQuery()) {
+                assertNotNull(result.next(), "material row should exist");
+                Object[] productTypes = (Object[]) result.getArray("product_type").getArray();
+                assertEquals(List.of("substrate", "dtf_apparel"), List.of(productTypes));
+            }
+        }
+    }
+
+    @Test
+    void shouldFindMaterialsByAnyOfTheirProductTypes() throws SQLException {
+        Integer id = persistMaterial(ATTRIBUTES);
+
+        try (Connection connection = openConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT external_id FROM fabrication_materials "
+                             + "WHERE active = true AND ?1 = ANY(product_type)")) {
+            statement.setString(1, "dtf_apparel");
+            try (ResultSet result = statement.executeQuery()) {
+                assertNotNull(result.next(), "the material serves dtf_apparel");
+                assertEquals("bc3001-white", result.getString("external_id"));
+            }
+        }
+
+        try (Connection connection = openConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT external_id FROM fabrication_materials "
+                             + "WHERE active = true AND ?1 = ANY(product_type)")) {
+            statement.setString(1, "sublimation");
+            try (ResultSet result = statement.executeQuery()) {
+                assertFalse(result.next(), "the material does not serve sublimation");
+            }
+        }
+
+        assertNotNull(id);
+    }
+
     /**
      * jsonb normalises the document it stores (key order, whitespace), so the comparison
      * has to be made on the parsed documents.
@@ -187,7 +238,7 @@ class FabricationMaterialJsonPersistenceIT {
         material.color = "White";
         material.sizes = new String[]{"S", "M", "L"};
         material.materialComposition = "100% ring-spun cotton";
-        material.productType = "dtf_apparel";
+        material.productType = new String[] { "substrate", "dtf_apparel" };
         material.sku = "BC3001-WHT";
         material.unitCost = new BigDecimal("4.50");
         material.active = true;

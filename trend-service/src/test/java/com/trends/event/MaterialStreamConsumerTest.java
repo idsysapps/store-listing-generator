@@ -47,7 +47,7 @@ class MaterialStreamConsumerTest {
         consumer.processUpsertEvent(
                 "bc3001-white", "Bella Canvas 3001", "Bella Canvas",
                 "t-shirt", "White", "[\"S\",\"M\",\"L\",\"XL\"]",
-                "100% ring-spun cotton", "dtf_apparel",
+                "100% ring-spun cotton", "[\"substrate\",\"dtf_apparel\"]",
                 "BC3001-WHT", "4.50", "true", null);
 
         ArgumentCaptor<FabricationMaterial> captor = ArgumentCaptor.forClass(FabricationMaterial.class);
@@ -60,11 +60,46 @@ class MaterialStreamConsumerTest {
         assertEquals("t-shirt", saved.substrateType);
         assertEquals("White", saved.color);
         assertEquals("100% ring-spun cotton", saved.materialComposition);
-        assertEquals("dtf_apparel", saved.productType);
+        assertArrayEquals(new String[] { "substrate", "dtf_apparel" }, saved.productType);
         assertEquals("BC3001-WHT", saved.sku);
         assertEquals(new BigDecimal("4.50"), saved.unitCost);
         assertTrue(saved.active);
         assertNotNull(saved.sizes);
+    }
+
+    @Test
+    void testProcessUpsertEvent_StoresProductTypesAsAnArray() {
+        // Cost-book publishes the product types a material can serve as a
+        // JSON array, so the column holds the array and not one string
+        // (issue #186).
+        when(materialRepository.findByExternalId("bc3001-white")).thenReturn(null);
+
+        consumer.processUpsertEvent(
+                "bc3001-white", "Bella Canvas 3001", "Bella Canvas",
+                "t-shirt", "White", null,
+                "100% cotton", "[\"substrate\",\"dtf_apparel\"]",
+                "BC3001-WHT", "4.50", "true", null);
+
+        ArgumentCaptor<FabricationMaterial> captor = ArgumentCaptor.forClass(FabricationMaterial.class);
+        verify(materialRepository).persist(captor.capture());
+
+        assertArrayEquals(new String[] { "substrate", "dtf_apparel" }, captor.getValue().productType);
+    }
+
+    @Test
+    void testProcessUpsertEvent_StoresASingleProductTypeAsAnArray() {
+        when(materialRepository.findByExternalId("bc3001-white")).thenReturn(null);
+
+        consumer.processUpsertEvent(
+                "bc3001-white", "Bella Canvas 3001", "Bella Canvas",
+                "t-shirt", "White", null,
+                "100% cotton", "dtf_apparel",
+                "BC3001-WHT", "4.50", "true", null);
+
+        ArgumentCaptor<FabricationMaterial> captor = ArgumentCaptor.forClass(FabricationMaterial.class);
+        verify(materialRepository).persist(captor.capture());
+
+        assertArrayEquals(new String[] { "dtf_apparel" }, captor.getValue().productType);
     }
 
     @Test
@@ -80,12 +115,13 @@ class MaterialStreamConsumerTest {
         consumer.processUpsertEvent(
                 "bc3001-white", "Bella Canvas 3001", "Bella Canvas",
                 "t-shirt", "White", null,
-                "100% cotton", "dtf_apparel",
+                "100% cotton", "[\"substrate\",\"dtf_apparel\"]",
                 "BC3001-WHT", "4.50", "true", null);
 
         assertEquals("Bella Canvas 3001", existing.name);
         assertEquals(new BigDecimal("4.50"), existing.unitCost);
         assertEquals("Bella Canvas", existing.brand);
+        assertArrayEquals(new String[] { "substrate", "dtf_apparel" }, existing.productType);
         assertNotNull(existing.updatedAt);
         verify(materialRepository, never()).persist(any(FabricationMaterial.class));
     }

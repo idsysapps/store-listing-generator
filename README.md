@@ -352,6 +352,37 @@ the column is filled in production:
 SELECT llm_model, count(*), max(created_at) FROM design_briefs GROUP BY 1;
 ```
 
+### Product types in production
+
+The store focuses on one production method at a time: the DTF apparel batches
+are the ones that sell, and the sublimation ones wait.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLED_PRODUCT_TYPES` | (empty, every known type) | Comma-separated product types the pipeline produces, e.g. `dtf_apparel` |
+
+The scope comes from the database when a row is there, and from the
+environment otherwise, so it can be changed without a redeploy:
+
+```graphql
+query {
+  enabledProductTypes
+}
+
+mutation {
+  setEnabledProductTypes(types: ["dtf_apparel"])
+}
+```
+
+The setting is stored in the `app_settings` table:
+
+```sql
+SELECT key, value, updated_at FROM app_settings;
+```
+
+A name the pipeline does not know is ignored with a warning, and a scope that
+names nothing usable falls back to the environment.
+
 ### Seed pool and brief mix
 | Variable | Default | Description |
 |----------|---------|-------------|

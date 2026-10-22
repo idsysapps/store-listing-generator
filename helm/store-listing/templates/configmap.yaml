@@ -30,6 +30,7 @@ data:
   LLM_BRIEFS_SCHEDULE: {{ .Values.config.llmBriefsSchedule | default "0 7 * * *" | quote }}
   LLM_IMAGE_GEN_SCHEDULE: {{ .Values.config.llmImageGenSchedule | default "30 7 * * *" | quote }}
   LLM_RERANK_SCHEDULE: {{ .Values.config.llmRerankSchedule | default "0 8 * * *" | quote }}
+  ENABLED_PRODUCT_TYPES: {{ .Values.config.enabledProductTypes | default "" | quote }}
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -225,7 +226,7 @@ data:
         color VARCHAR(100),
         sizes TEXT[],
         material_composition VARCHAR(255),
-        product_type VARCHAR(50),
+        product_type TEXT[],
         sku VARCHAR(100),
         unit_cost DECIMAL(10,2),
         active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -237,6 +238,16 @@ data:
     CREATE INDEX IF NOT EXISTS idx_fab_materials_product_type ON fabrication_materials(product_type);
     CREATE INDEX IF NOT EXISTS idx_fab_materials_active ON fabrication_materials(active);
     CREATE INDEX IF NOT EXISTS idx_fab_materials_external_id ON fabrication_materials(external_id);
+
+    -- Table: app_settings
+    -- The settings the operator can change without a redeploy, e.g. which
+    -- product types the pipeline produces right now.
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_by TEXT
+    );
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -428,7 +439,7 @@ data:
         color VARCHAR(100),
         sizes TEXT[],
         material_composition VARCHAR(255),
-        product_type VARCHAR(50),
+        product_type TEXT[],
         sku VARCHAR(100),
         unit_cost DECIMAL(10,2),
         active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -446,8 +457,37 @@ data:
     ALTER TABLE fabrication_materials ALTER COLUMN substrate_type DROP NOT NULL;
     ALTER TABLE fabrication_materials ALTER COLUMN product_type DROP NOT NULL;
 
+    -- cost-book publishes the product types a material can serve as a JSON
+    -- array, so the column holds the array and a filter matches any of them
+    -- (issue #186). The old value was the raw JSON text, which does not cast,
+    -- and the table is a cache: it is refilled from the stream. The conversion
+    -- only runs while the column is not an array yet, so a redeploy does not
+    -- empty it again.
+    DO $$
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'fabrication_materials'
+              AND column_name = 'product_type'
+              AND data_type <> 'ARRAY'
+        ) THEN
+            UPDATE fabrication_materials SET product_type = NULL;
+            ALTER TABLE fabrication_materials
+                ALTER COLUMN product_type TYPE TEXT[] USING NULL::TEXT[];
+        END IF;
+    END $$;
+
     -- Add recommended_materials to design_briefs
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS recommended_materials JSONB;
+
+    -- Table: app_settings (the settings the operator can change without a
+    -- redeploy, e.g. which product types the pipeline produces)
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_by TEXT
+    );
 
     -- Migration: split 'marketplace' source_health into 'amazon' and 'etsy'
     DELETE FROM source_health WHERE source = 'marketplace';

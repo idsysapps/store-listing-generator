@@ -7,12 +7,17 @@ import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.metamodel.spi.MappingMetamodelImplementor;
 import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.type.BasicType;
+import org.hibernate.type.SqlTypes;
+import org.hibernate.type.Type;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -63,6 +68,15 @@ class FabricationMaterialNullabilityTest {
                 "fabrication_materials.product_type is optional in the event contract");
     }
 
+    @Test
+    void shouldMapProductTypeAsAnArray() {
+        // Cost-book publishes the product types a material can serve as a JSON
+        // array, so the column holds the array and a filter matches any of
+        // them (issue #186).
+        assertEquals(SqlTypes.ARRAY, jdbcTypeOf("productType"),
+                "fabrication_materials.product_type is a text array");
+    }
+
     private static boolean isNullable(String attribute) {
         EntityPersister persister = sessionFactory
                 .unwrap(SessionFactoryImplementor.class)
@@ -73,5 +87,18 @@ class FabricationMaterialNullabilityTest {
         int index = Arrays.asList(propertyNames).indexOf(attribute);
         assertTrue(index >= 0, "unknown property " + attribute);
         return nullability[index];
+    }
+
+    private static int jdbcTypeOf(String attribute) {
+        EntityPersister persister = sessionFactory
+                .unwrap(SessionFactoryImplementor.class)
+                .getMappingMetamodel()
+                .getEntityDescriptor(FabricationMaterial.class);
+        int index = Arrays.asList(persister.getPropertyNames()).indexOf(attribute);
+        assertTrue(index >= 0, "unknown property " + attribute);
+        Type type = persister.getPropertyTypes()[index];
+        assertInstanceOf(BasicType.class, type, attribute + " is a basic type");
+        BasicType<?> basicType = (BasicType<?>) type;
+        return basicType.getJdbcType().getJdbcTypeCode();
     }
 }
