@@ -9,6 +9,7 @@ import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Which product types the pipeline produces right now.
@@ -33,8 +34,15 @@ public class ProductScope {
 
     public static final String SETTING_KEY = "enabled_product_types";
 
-    @ConfigProperty(name = "ENABLED_PRODUCT_TYPES", defaultValue = "")
-    String envValue;
+    /**
+     * The scope from the environment.
+     *
+     * <p>Optional, because an empty value is not a value: SmallRye refuses
+     * to start when a property is defined as the empty string, and the chart
+     * ships the key empty when a cluster does not set it (issue #181).
+     */
+    @ConfigProperty(name = "ENABLED_PRODUCT_TYPES")
+    Optional<String> envValue;
 
     @Inject
     AppSettingRepository appSettingRepository;
@@ -58,7 +66,7 @@ public class ProductScope {
             LOG.warnf("The stored product type scope names no known type, falling back to the environment");
         }
 
-        List<String> types = parse(envValue);
+        List<String> types = parse(envValue.orElse(""));
         if (!types.isEmpty()) {
             return types;
         }

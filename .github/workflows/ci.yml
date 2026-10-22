@@ -46,8 +46,27 @@ jobs:
           files: ./coverage.xml
           fail_ci_if_error: false
 
+  java-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      # The integration tests run against a PostgreSQL container, so the
+      # Java suite was invisible in CI and a broken one stayed invisible
+      # (issue #181).
+      - name: Run the trend-service tests
+        run: mvn -B -f trend-service verify
+
   build-only:
-    needs: lint-and-test
+    needs: [lint-and-test, java-test]
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
@@ -74,7 +93,7 @@ jobs:
           tags: quay.io/idsysapps/trend-service:pr-test
 
   build-and-push:
-    needs: lint-and-test
+    needs: [lint-and-test, java-test]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     outputs:
