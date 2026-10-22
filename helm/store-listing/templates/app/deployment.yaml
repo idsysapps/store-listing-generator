@@ -181,6 +181,13 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_TOKENS
+            {{- if .Values.config.enabledProductTypes }}
+            - name: ENABLED_PRODUCT_TYPES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: ENABLED_PRODUCT_TYPES
+            {{- end }}
             - name: LLM_CURATION_SCHEDULE
               valueFrom:
                 configMapKeyRef:
@@ -397,6 +404,13 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: LLM_MAX_TOKENS
+            {{- if .Values.config.enabledProductTypes }}
+            - name: ENABLED_PRODUCT_TYPES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: ENABLED_PRODUCT_TYPES
+            {{- end }}
             - name: LLM_CURATION_SCHEDULE
               valueFrom:
                 configMapKeyRef:
