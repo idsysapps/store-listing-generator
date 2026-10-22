@@ -16,7 +16,11 @@ from typing import Any, Final, Protocol
 
 from store_listing.orchestration.context_seeds import SEASONAL_EVENT_THEME, get_upcoming_events
 from store_listing.orchestration.json_response import extract_json_objects, merge_items
-from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
+from store_listing.orchestration.llm_client import (
+    LLM_MAX_TOKENS,
+    is_model_missing_error,
+    model_error_message,
+)
 from store_listing.orchestration.promotion import (
     DISCOVERY_SOURCE,
     MAX_ACTIVE_SEEDS,
@@ -41,15 +45,21 @@ def _log_llm_response(response: Any, headers: Any, label: str) -> None:
     tokens_in = getattr(usage, "prompt_tokens", None) if usage else None
     tokens_out = getattr(usage, "completion_tokens", None) if usage else None
     model = getattr(response, "model", None)
+    # The reason the answer ended. An answer that was cut off says "length",
+    # and without it a cut answer and a broken answer look the same
+    # (issue #232).
+    choices = getattr(response, "choices", None)
+    finish_reason = getattr(choices[0], "finish_reason", None) if choices else None
     limit = headers.get("x-ratelimit-limit") if headers else None
     remaining = headers.get("x-ratelimit-remaining") if headers else None
     reset = headers.get("x-ratelimit-reset") if headers else None
     logger.info(
-        "LLM %s: model=%s, tokens_in=%s, tokens_out=%s, ratelimit=%s/%s, reset=%s",
+        "LLM %s: model=%s, tokens_in=%s, tokens_out=%s, finish=%s, ratelimit=%s/%s, reset=%s",
         label,
         model,
         tokens_in,
         tokens_out,
+        finish_reason,
         remaining,
         limit,
         reset,
@@ -84,7 +94,6 @@ SYSTEM_PROMPT = (
 )
 
 MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "10"))
-LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
 
 
 @dataclass(frozen=True)

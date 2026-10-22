@@ -3,16 +3,24 @@
 Uses Groq's free tier by default; swap to local vLLM by changing LLM_BASE_URL.
 """
 
+import logging
 import os
 import re
 from collections.abc import Sequence
-from typing import Final
+from typing import Any, Final
 
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL: Final[str] = "https://api.groq.com/openai/v1"
 DEFAULT_MODEL: Final[str] = "llama-3.3-70b-versatile"
 DEFAULT_VISION_MODEL: Final[str] = "qwen_vl_ocr"
+
+# The tokens a call may answer with. The budget of the endpoint is the rest
+# of its context when a call asks for none, and a brief that is cut off is a
+# brief that is lost (issue #232).
+LLM_MAX_TOKENS: Final[int] = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
 
 # The DGX proxy answers an unknown model with
 # "Unknown model: <name>. Available: ['a', 'b']" (deploy/dgx/openai-proxy.py).
@@ -21,6 +29,20 @@ _AVAILABLE_PATTERN = re.compile(r"Available:\s*\[(?P<models>[^\]]*)\]")
 
 def configured() -> bool:
     return bool(os.environ.get("LLM_API_KEY", ""))
+
+
+def reasoning_body(model: str) -> dict[str, Any]:
+    """The request body that asks a reasoning model to answer straight away.
+
+    Qwen3 thinks before it answers, and the thinking comes out of the same
+    token budget as the answer: a brief that is JSON gets a few hundred
+    tokens of answer and is cut in the middle (issue #232). A JSON answer
+    needs no thinking, so the thinking is turned off for the models that do
+    it. The other models are left alone, because the field is not theirs.
+    """
+    if "qwen" not in model.lower():
+        return {}
+    return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
 
 
 def get_llm_client() -> OpenAI:
@@ -111,6 +133,54 @@ def is_model_missing_error(error: Exception) -> bool:
         return True
     status = getattr(error, "status_code", None)
     return status == 404 and "model" in text
+
+
+def _is_bad_request(error: Exception) -> bool:
+    """Whether the endpoint refused the request itself."""
+    status = getattr(error, "status_code", None)
+    if status in (400, 422):
+        return True
+    text = str(error).lower()
+    return "chat_template_kwargs" in text or "extra_body" in text
+
+
+def create_answer(
+    llm_completions: Any,
+    model: str,
+    messages: list[dict[str, str]],
+    label: str,
+    **extra: Any,
+) -> tuple[Any, str | None]:
+    """The answer of the model, and the error when there is none.
+
+    The thinking of a reasoning model is turned off, because the thinking
+    comes out of the same token budget as the answer (issue #232). An
+    endpoint that does not know the field refuses the request, and the
+    answer without the field is still an answer.
+    """
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": LLM_MAX_TOKENS,
+        **extra,
+    }
+    thinking = reasoning_body(model)
+    try:
+        return llm_completions.with_raw_response.create(**kwargs, **thinking), None
+    except Exception as e:  # noqa: BLE001
+        if not thinking or is_model_missing_error(e) or not _is_bad_request(e):
+            if is_model_missing_error(e):
+                logger.error("LLM %s call failed: %s", label, model_error_message(e, model))
+            else:
+                logger.warning("LLM %s call failed: %s", label, e)
+            return None, model_error_message(e, model)
+        logger.warning("The endpoint does not take the thinking field: %s", e)
+
+    try:
+        return llm_completions.with_raw_response.create(**kwargs), None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("LLM %s call failed: %s", label, e)
+        return None, model_error_message(e, model)
 
 
 def missing_model_message(model: str, served: Sequence[str]) -> str:

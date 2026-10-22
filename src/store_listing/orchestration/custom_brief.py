@@ -23,8 +23,12 @@ from store_listing.orchestration.design_briefs import (
     headline_for_text_only,
 )
 from store_listing.orchestration.headline_voice import normalise_voice, screen_text
-from store_listing.orchestration.json_response import extract_json_objects
-from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
+from store_listing.orchestration.json_response import extract_json_objects, repair_truncated_object
+from store_listing.orchestration.llm_client import (
+    create_answer,
+    is_model_missing_error,
+    model_error_message,
+)
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
@@ -117,28 +121,38 @@ def build_custom_brief_prompt(
     ]
 
 
-def _brief_from(
-    b: dict[str, Any],
+def _read_brief(
+    b: Any,
     enabled: Sequence[str] | None = None,
     personal_use: bool = False,
-) -> DesignBrief | None:
-    """The brief in one answer object, or None when it is not usable."""
+) -> tuple[DesignBrief | None, str]:
+    """The brief in one answer object, and why it is not usable when it is not.
+
+    The reason is what the caller tells the operator with, so a brief that
+    was dropped for a licensed brand does not look like an answer that could
+    not be read (issue #232).
+    """
+    if not isinstance(b, dict):
+        return None, "the answer has no 'brief' object"
+
     concept = b.get("concept", "")
     if not concept:
-        return None
+        return None, "the answer has no concept"
 
     product_type = b.get("product_type", "")
     if product_type not in PRODUCT_TAGS:
-        return None
+        return None, f"the product type {product_type!r} is not one we produce"
 
     if enabled and product_type not in enabled:
         if len(enabled) > 1:
+            # The model answered with a type that is not in production and
+            # there is no single type to fall back to.
             logger.warning(
                 "Skipping the brief %r: the product type %s is not in production",
                 concept,
                 product_type,
             )
-            return None
+            return None, f"the product type {product_type} is not in production"
         product_type = enabled[0]
 
     raw_products = b.get("specific_products", [])
@@ -180,7 +194,7 @@ def _brief_from(
         headline_text = headline_for_text_only(concept, headline_text)
         if headline_text is None:
             logger.warning("A text_only design needs a headline: %r", concept)
-            return None
+            return None, "a text_only design needs a headline"
 
     voice = normalise_voice(b.get("voice") if isinstance(b.get("voice"), str) else None)
     # The look of the design. A brief that names a look we do not print has no
@@ -207,26 +221,68 @@ def _brief_from(
     )
     if reason is not None:
         logger.warning("Skipping the custom brief %r: %s", concept, reason)
-        return None
+        return None, reason
 
-    return DesignBrief(
-        concept=concept,
-        product_type=product_type,
-        specific_products=specific_products,
-        audience=str(b.get("audience", "")),
-        visual_style=str(b.get("visual_style", "")),
-        confidence=confidence,
-        reasoning=str(b.get("reasoning", "")),
-        source_seed_ids=[],
-        layout_type=layout_type,
-        headline_text=headline_text,
-        tagline_text=tagline_text,
-        font_color=font_color,
-        scene_description=scene_description,
-        voice=voice,
-        font_family=font_family,
-        style_preset=style_preset,
+    return (
+        DesignBrief(
+            concept=concept,
+            product_type=product_type,
+            specific_products=specific_products,
+            audience=str(b.get("audience", "")),
+            visual_style=str(b.get("visual_style", "")),
+            confidence=confidence,
+            reasoning=str(b.get("reasoning", "")),
+            source_seed_ids=[],
+            layout_type=layout_type,
+            headline_text=headline_text,
+            tagline_text=tagline_text,
+            font_color=font_color,
+            scene_description=scene_description,
+            voice=voice,
+            font_family=font_family,
+            style_preset=style_preset,
+        ),
+        "",
     )
+
+
+def read_custom_brief(
+    text: str,
+    enabled: Sequence[str] | None = None,
+    personal_use: bool = False,
+) -> tuple[DesignBrief | None, str | None]:
+    """The brief in the answer, and why there is none when there is none.
+
+    The reason is None when the answer held no JSON at all, and a sentence
+    when the brief was read but was not usable.
+
+    The model does not always answer with only JSON: it appends a note, or
+    answers with a second object. The answer is read value by value, because
+    a parser that read two values as one lost the brief (issue #209).
+    """
+    objects = extract_json_objects(text)
+    if objects:
+        reason = "the answer has no usable brief"
+        for obj in objects:
+            brief, why = _read_brief(obj.get("brief"), enabled, personal_use)
+            if brief is not None:
+                return brief, None
+            reason = why
+        return None, reason
+
+    # The answer held no JSON at all. A model that ran out of room stops in
+    # the middle of its answer, and the parts that arrived are still good, so
+    # the object is closed and read (issue #232).
+    repaired = repair_truncated_object(text)
+    if repaired is not None:
+        brief, why = _read_brief(repaired.get("brief"), enabled, personal_use)
+        if brief is not None:
+            logger.warning(
+                "The answer was cut short; the brief was read from the part that arrived"
+            )
+            return brief, None
+        return None, why
+    return None, None
 
 
 def parse_custom_brief_response(
@@ -234,20 +290,9 @@ def parse_custom_brief_response(
     enabled: Sequence[str] | None = None,
     personal_use: bool = False,
 ) -> DesignBrief | None:
-    """The brief in the answer, or None when it cannot be read.
-
-    The model does not always answer with only JSON: it appends a note, or
-    answers with a second object. The answer is read value by value, because
-    a parser that read two values as one lost the brief (issue #209).
-    """
-    for obj in extract_json_objects(text):
-        b = obj.get("brief")
-        if not isinstance(b, dict):
-            continue
-        brief = _brief_from(b, enabled, personal_use)
-        if brief is not None:
-            return brief
-    return None
+    """The brief in the answer, or None when it cannot be read."""
+    brief, _ = read_custom_brief(text, enabled, personal_use)
+    return brief
 
 
 def create_custom_brief(
@@ -274,12 +319,11 @@ def create_custom_brief(
         description, product_type, personal_use=personal_use, enabled=enabled
     )
 
+    raw, error = create_answer(llm_completions, model, messages, "custom_brief", temperature=0)
+    if error is not None:
+        return {"status": "error", "error": error}
+
     try:
-        raw = llm_completions.with_raw_response.create(
-            model=model,
-            messages=messages,
-            temperature=0,
-        )
         headers = raw.headers
         response = raw.parse()
         _log_llm_response(response, headers, "custom_brief")
@@ -294,12 +338,17 @@ def create_custom_brief(
             logger.warning("Custom brief LLM call failed: %s", e)
         return {"status": "error", "error": message}
 
-    brief = parse_custom_brief_response(content, enabled, personal_use)
+    brief, reason = read_custom_brief(content, enabled, personal_use)
     if brief is None:
-        # The raw answer is the only way to see what the model actually sent.
-        logger.error("The LLM custom brief response could not be read")
-        logger.error("Raw LLM custom brief response: %s", content)
-        return {"status": "error", "error": "Failed to parse LLM response"}
+        if reason is None:
+            # The raw answer is the only way to see what the model actually sent.
+            logger.error("The LLM custom brief response could not be read")
+            logger.error("Raw LLM custom brief response: %s", content)
+            return {"status": "error", "error": "Failed to parse LLM response"}
+        # The answer was read, and the brief was not usable. Saying so is
+        # better than blaming the parser (issue #232).
+        logger.error("The LLM custom brief was dropped: %s", reason)
+        return {"status": "error", "error": f"The brief was not created: {reason}"}
 
     brief_id = db_client.insert_design_brief(
         concept=brief.concept,

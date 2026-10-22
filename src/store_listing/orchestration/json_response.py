@@ -18,6 +18,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# How many members of a cut answer are dropped before the repair gives up.
+_MAX_REPAIRS: int = 20
+
 
 class LLMResponseParseError(Exception):
     """The model answered, but the answer could not be read."""
@@ -113,3 +116,86 @@ def merge_items(objects: list[dict[str, Any]], key: str) -> list[Any]:
         if isinstance(value, list):
             items.extend(value)
     return items
+
+
+def _close_open_brackets(text: str) -> str | None:
+    """The text with its open brackets closed, or None when a string is open."""
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            stack.append("}")
+        elif char == "[":
+            stack.append("]")
+        elif char in "}]" and stack:
+            stack.pop()
+    if in_string:
+        return None
+    return text + "".join(reversed(stack))
+
+
+def _trim_incomplete_member(text: str) -> str | None:
+    """The text without the member that was still being written."""
+    in_string = False
+    escaped = False
+    string_start = -1
+    last_comma = -1
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            string_start = index
+        elif char == ",":
+            last_comma = index
+    if in_string and string_start > 0:
+        # The string was never closed, so it is cut at its opening quote.
+        text = text[:string_start]
+    if last_comma < 0:
+        return None
+    return text[:last_comma]
+
+
+def repair_truncated_object(text: str) -> dict[str, Any] | None:
+    """The object the model was writing when it ran out of room.
+
+    A model that hits its token limit stops in the middle of its answer, and
+    the answer is then no JSON at all. The parts that did arrive are still
+    good, so the object is closed and the member that was being written is
+    dropped: a brief without its last field beats no brief at all.
+
+    The repair gives up as soon as nothing complete is left to read.
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+
+    fragment = text[start:]
+    for _ in range(_MAX_REPAIRS):
+        closed = _close_open_brackets(fragment)
+        if closed is not None:
+            value = _loads(closed)
+            if isinstance(value, dict):
+                return value
+        trimmed = _trim_incomplete_member(fragment)
+        if trimmed is None:
+            return None
+        fragment = trimmed
+    return None
