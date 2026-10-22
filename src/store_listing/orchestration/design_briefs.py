@@ -42,6 +42,11 @@ from store_listing.orchestration.design_templates import (
     assign_templates,
 )
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE, normalise_voice, screen_text
+from store_listing.orchestration.idea_devices import (
+    device_for,
+    idea_device_rules,
+    plan_device_slots,
+)
 from store_listing.orchestration.json_response import (
     LLMResponseParseError,
     extract_json_objects,
@@ -98,6 +103,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         f"{layout_rules(types)}\n"
         f"{voice_rules()}\n"
         f"{art_direction_rules()}\n"
+        f"{idea_device_rules()}\n"
         f"{DESIGN_ONLY_RULES}\n"
         "MATERIALS — picking the right substrate:\n"
         "- recommended_materials: array of objects from the available_materials list, each with "
@@ -115,6 +121,8 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         '"layout_type": "auto", "headline_text": "...", '
         '"tagline_text": "...", "font_color": "#000000", '
         '"voice": "deadpan | loud | cozy", '
+        '"idea_device": "juxtaposition | transformation | scale | narrative | '
+        'collection | pattern", '
         '"style_preset": "vintage_screenprint | seventies_retro | halftone_comic | '
         "riso_two_color | hand_inked_woodcut | kawaii_flat | art_nouveau | "
         'distressed_band_tee", '
@@ -191,6 +199,8 @@ class DesignBrief:
     font_family: str | None = None
     # The look the design is drawn in.
     style_preset: str | None = None
+    # How the scene carries its idea: 'juxtaposition', 'transformation', ...
+    idea_device: str | None = None
 
 
 class DesignBriefDBClient(Protocol):
@@ -274,6 +284,12 @@ def build_brief_prompt(
             for event in context
         ],
         "max_briefs": MAX_BRIEFS,
+        # One device per brief, so the batch covers the vocabulary instead of
+        # the model writing the same still life eight times (issue #240).
+        "brief_slots": [
+            {"brief": index + 1, "idea_device": device}
+            for index, device in enumerate(plan_device_slots(MAX_BRIEFS, today.isoformat()))
+        ],
         "signals_by_source": dict(by_source),
     }
 
@@ -380,6 +396,13 @@ def _brief_from(
             return None
 
     voice = normalise_voice(b.get("voice") if isinstance(b.get("voice"), str) else None)
+    # The device is how the scene carries its idea. A device we do not use is
+    # no device; the batch slot fills it in later (issue #240).
+    idea_device = b.get("idea_device")
+    if not isinstance(idea_device, str):
+        idea_device = None
+    if device_for(idea_device) is None:
+        idea_device = None
     # The look of the design. A brief that names a look we do not print has
     # no look, and the voice decides the type then (issue #227).
     style_preset = b.get("style_preset")
@@ -432,6 +455,7 @@ def _brief_from(
         voice=voice,
         font_family=font_family,
         style_preset=style_preset,
+        idea_device=idea_device,
     )
 
 
@@ -650,6 +674,9 @@ def generate_design_briefs(
     # that the model answered with text_top for the eighth time still gets
     # eight different silhouettes (issue #238).
     kept = assign_batch_templates(kept, batch_id)
+    # The idea device is rotated too, so the batch is not eight still lifes
+    # (issue #240).
+    kept = assign_batch_devices(kept, batch_id)
 
     if evergreen < MIN_EVERGREEN_BRIEFS and BRIEF_MIX_REGENERATE_ONCE:
         # The model answered with a season. Ask once more, and say what went
@@ -748,6 +775,19 @@ def assign_batch_templates(briefs: Sequence[DesignBrief], batch_id: str) -> list
     return [
         replace(brief, layout_type=template_id)
         for brief, template_id in zip(briefs, assign_templates(briefs, batch_id), strict=True)
+    ]
+
+
+def assign_batch_devices(briefs: Sequence[DesignBrief], batch_id: str) -> list[DesignBrief]:
+    """The briefs with an idea device assigned by the batch.
+
+    The model writes each brief against a device slot, and the slot is what
+    the scene was written for. The slot wins here so a batch covers the
+    vocabulary even when the model repeated itself (issue #240).
+    """
+    return [
+        replace(brief, idea_device=device)
+        for brief, device in zip(briefs, plan_device_slots(len(briefs), batch_id), strict=True)
     ]
 
 
