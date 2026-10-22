@@ -19,17 +19,17 @@ def configured() -> bool:
 
 def get_llm_client() -> OpenAI:
     return OpenAI(
-        base_url=os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL),
+        base_url=os.environ.get("LLM_BASE_URL") or DEFAULT_BASE_URL,
         api_key=os.environ.get("LLM_API_KEY", ""),
     )
 
 
 def get_llm_model() -> str:
-    return os.environ.get("LLM_MODEL", DEFAULT_MODEL)
+    return os.environ.get("LLM_MODEL") or DEFAULT_MODEL
 
 
 def get_llm_curation_model() -> str:
-    return os.environ.get("LLM_CURATION_MODEL", get_llm_model())
+    return os.environ.get("LLM_CURATION_MODEL") or get_llm_model()
 
 
 def get_vision_client() -> OpenAI:
@@ -39,19 +39,27 @@ def get_vision_client() -> OpenAI:
     that is the local proxy, which routes the model to the right vLLM service.
     The local proxy does not check the key, so a placeholder is used when none
     is configured.
+
+    An empty variable means "not configured": the chart ships the model names
+    empty when a cluster does not override them, and an empty value must not
+    win over the default (issue #213).
     """
     return OpenAI(
-        base_url=os.environ.get(
-            "VISION_LLM_BASE_URL", os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL)
+        base_url=(
+            os.environ.get("VISION_LLM_BASE_URL")
+            or os.environ.get("LLM_BASE_URL")
+            or DEFAULT_BASE_URL
         ),
-        api_key=os.environ.get(
-            "VISION_LLM_API_KEY", os.environ.get("LLM_API_KEY", "local-placeholder")
+        api_key=(
+            os.environ.get("VISION_LLM_API_KEY")
+            or os.environ.get("LLM_API_KEY")
+            or "local-placeholder"
         ),
     )
 
 
 def get_vision_model() -> str:
-    return os.environ.get("VISION_LLM_MODEL", DEFAULT_VISION_MODEL)
+    return os.environ.get("VISION_LLM_MODEL") or DEFAULT_VISION_MODEL
 
 
 def get_artwork_vision_model() -> str:
@@ -60,4 +68,4 @@ def get_artwork_vision_model() -> str:
     The OCR model reads text well, but judging a picture is a different job,
     so the model can be pointed at a general vision model instead.
     """
-    return os.environ.get("ARTWORK_VISION_MODEL", get_vision_model())
+    return os.environ.get("ARTWORK_VISION_MODEL") or get_vision_model()
