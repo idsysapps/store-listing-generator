@@ -2,17 +2,20 @@
 
 import json
 import logging
+import re
 from datetime import date
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+from store_listing.orchestration.brief_prompts import SEASONAL_WORDS
 from store_listing.orchestration.design_briefs import (
     BriefableCandidate,
     build_brief_prompt,
     generate_design_briefs,
     parse_brief_response,
+    read_brief_response,
 )
 
 
@@ -1323,3 +1326,214 @@ class TestParseBriefResponseWithMaterials:
         result = parse_brief_response(response)
 
         assert result[0].recommended_materials is None
+
+
+class TestTheVoiceOfThePrompt:
+    def _prompt(self) -> str:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "funny t-shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+        return messages[0]["content"]
+
+    def test_the_prompt_asks_for_a_voice(self) -> None:
+        # The store sells three voices and the operator curates afterwards,
+        # so every brief has to name the one it is written in (issue #225).
+        assert "voice" in self._prompt().lower()
+
+    def test_the_prompt_teaches_the_three_voices(self) -> None:
+        prompt = self._prompt().lower()
+        for voice in ("deadpan", "loud", "cozy"):
+            assert voice in prompt
+
+    def test_the_prompt_shows_what_a_line_looks_like(self) -> None:
+        prompt = self._prompt()
+        assert "GOOD:" in prompt
+        assert "BAD:" in prompt
+
+    def test_the_examples_stay_evergreen(self) -> None:
+        # A seasonal example anchors every brief in the batch, which is what
+        # happened when the rules taught the design-vs-product rule with a
+        # holiday example (issue #200).
+        prompt = self._prompt().lower()
+        for word in SEASONAL_WORDS:
+            assert not re.search(rf"\b{re.escape(word)}\b", prompt), f"{word} anchors the prompt"
+
+    def test_the_prompt_asks_the_scene_for_one_idea(self) -> None:
+        prompt = self._prompt().lower()
+        assert "one idea" in prompt
+
+    def test_the_scene_has_room_for_the_idea(self) -> None:
+        # The scene used to be capped at twenty words, which is enough to
+        # name objects and not enough to invent anything.
+        assert "under 20 words" not in self._prompt().lower()
+        assert "under 35 words" in self._prompt().lower()
+
+
+class TestTheTextGate:
+    def _brief(self, headline: str, **extra: Any) -> str:
+        brief = {
+            "concept": "A Design",
+            "product_type": "dtf_apparel",
+            "confidence": 80,
+            "source_seed_ids": [1],
+            "layout_type": "text_top",
+            "headline_text": headline,
+            "scene_description": "a stone castle with a wide gate",
+        }
+        brief.update(extra)
+        return json.dumps({"briefs": [brief]})
+
+    def test_a_line_is_kept(self) -> None:
+        result = parse_brief_response(self._brief("Gobble Til The Drawbridge Drops"))
+        assert len(result) == 1
+
+    def test_a_headline_that_names_a_brand_is_dropped(self) -> None:
+        # The design that started this (issue #225).
+        result = parse_brief_response(self._brief("Thanksgiving in the Magic Kingdom"))
+        assert result == []
+
+    def test_a_noun_list_is_dropped(self) -> None:
+        result = parse_brief_response(self._brief("Feast, fun, and fireworks"))
+        assert result == []
+
+    def test_a_headline_that_only_restates_the_picture_is_dropped(self) -> None:
+        result = parse_brief_response(
+            self._brief(
+                "A Stone Castle With A Wide Gate",
+                scene_description="a stone castle with a wide gate",
+            )
+        )
+        assert result == []
+
+    def test_the_reason_is_reported(self) -> None:
+        rejections: list[str] = []
+
+        read_brief_response(self._brief("Feast, fun, and fireworks"), rejections=rejections)
+
+        assert rejections
+        assert "list" in rejections[0].lower()
+
+    def test_the_voice_is_parsed(self) -> None:
+        result = parse_brief_response(self._brief("Gobble Til The Drawbridge Drops", voice="loud"))
+        assert result[0].voice == "loud"
+
+    def test_an_unknown_voice_falls_back(self) -> None:
+        result = parse_brief_response(
+            self._brief("Gobble Til The Drawbridge Drops", voice="shouty")
+        )
+        assert result[0].voice == "deadpan"
+
+
+class TestTheTextIsAskedForAgain:
+    def _mock_db(self) -> MagicMock:
+        db = MagicMock()
+        db.list_briefable_seeds.return_value = [_briefable(1, "funny t-shirt")]
+        db.list_active_materials.return_value = []
+        db.insert_design_brief.return_value = 1
+        db.insert_brief_source.return_value = 1
+        return db
+
+    def _raw(self, response_json: dict) -> MagicMock:
+        choice = MagicMock()
+        choice.message.content = json.dumps(response_json)
+        parsed = MagicMock(choices=[choice])
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = parsed
+        return raw
+
+    def _bad_brief(self) -> dict:
+        return {
+            "briefs": [
+                {
+                    "concept": "A Castle Design",
+                    "product_type": "dtf_apparel",
+                    "confidence": 80,
+                    "source_seed_ids": [1],
+                    "layout_type": "text_top",
+                    "headline_text": "Thanksgiving in the Magic Kingdom",
+                    "scene_description": "a stone castle with a wide gate",
+                }
+            ]
+        }
+
+    def _good_brief(self) -> dict:
+        return {
+            "briefs": [
+                {
+                    "concept": "A Castle Design",
+                    "product_type": "dtf_apparel",
+                    "confidence": 80,
+                    "source_seed_ids": [1],
+                    "layout_type": "text_top",
+                    "headline_text": "Gobble Til The Drawbridge Drops",
+                    "scene_description": "a stone castle with a wide gate",
+                }
+            ]
+        }
+
+    def test_a_dropped_brief_is_asked_for_again(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The batch is worth more with the brief in it than without it, so the
+        # model gets one more chance with the reason (issue #225).
+        monkeypatch.setattr(
+            "store_listing.orchestration.design_briefs.BRIEF_MIX_REGENERATE_ONCE", False
+        )
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(self._bad_brief()),
+            self._raw(self._good_brief()),
+        ]
+        db = self._mock_db()
+
+        result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert llm.with_raw_response.create.call_count == 2
+        assert result["briefs_created"] == 1
+
+    def test_the_second_attempt_is_told_what_was_wrong(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "store_listing.orchestration.design_briefs.BRIEF_MIX_REGENERATE_ONCE", False
+        )
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(self._bad_brief()),
+            self._raw(self._good_brief()),
+        ]
+        db = self._mock_db()
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        second_prompt = llm.with_raw_response.create.call_args_list[1].kwargs["messages"][0][
+            "content"
+        ]
+        assert "brand" in second_prompt.lower()
+
+    def test_the_voice_is_stored_with_the_brief(self) -> None:
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "A Castle Design",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                            "layout_type": "text_top",
+                            "headline_text": "Gobble Til The Drawbridge Drops",
+                            "scene_description": "a stone castle with a wide gate",
+                            "voice": "loud",
+                        }
+                    ]
+                }
+            )
+        ]
+        db = self._mock_db()
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert db.insert_design_brief.call_args.kwargs["voice"] == "loud"

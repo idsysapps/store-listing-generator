@@ -169,7 +169,9 @@ CREATE TABLE design_briefs (
     headline_text TEXT,
     tagline_text TEXT,
     font_color VARCHAR(20),
-    regeneration_feedback TEXT
+    regeneration_feedback TEXT,
+    -- The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
+    voice VARCHAR(20) DEFAULT 'deadpan'
 );
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);
