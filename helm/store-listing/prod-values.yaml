@@ -2,6 +2,14 @@ config:
   databaseName: store_listing
   redisUrl: redis://store-listing-store-listing-redis:6379/0
   quarkusProfile: prod
+  # The DGX proxy serves these models (deploy/dgx/openai-proxy.py, MODEL_ROUTES).
+  # A model the proxy does not route makes every brief and curation call fail
+  # with a 404 (issue #194), so the names are checked against that file.
+  llmBaseUrl: "http://192.168.6.202:9000/v1"
+  llmModel: "qwen38_briefs"
+  llmCurationModel: "qwen38_briefs"
+  llmSeedCurationEnabled: "true"
+  llmDesignBriefsEnabled: "true"
 
 secrets:
   databaseUser: store_listing

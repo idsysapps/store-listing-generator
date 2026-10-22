@@ -317,8 +317,42 @@ store-listing-generator/
 | `GITHUB_TOKEN` | (empty) | Token used to open auto-health issues (requires `GITHUB_REPO` too) |
 | `GITHUB_REPO` | (empty) | `owner/repo` to file auto-health issues against |
 
-### Seed pool and brief mix
+### LLM models
 
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_BASE_URL` | `https://api.groq.com/openai/v1` | OpenAI-compatible endpoint (the DGX proxy in production) |
+| `LLM_MODEL` | `llama-3.3-70b-versatile` | The model that writes the design briefs |
+| `LLM_CURATION_MODEL` | (empty, follows `LLM_MODEL`) | The model that curates the seeds |
+| `VISION_LLM_MODEL` | `qwen_vl_ocr` | The vision model that verifies the rendered text |
+
+**The model names come from the DGX proxy.** The proxy routes a model name to
+the vLLM instance behind it, and the names it routes are declared in
+[`deploy/dgx/openai-proxy.py`](deploy/dgx/openai-proxy.py) (`MODEL_ROUTES`).
+A model the proxy does not route is refused, and every brief and curation
+call fails - which is what happened when the cluster pointed at
+`qwen2.5:32b-instruct-q4_K_M` (issue #194).
+
+Check the served models before a rollout:
+
+```bash
+curl -s http://<proxy>:9000/v1/models | jq -r '.data[].id'
+```
+
+The app does the same check: before an LLM task it asks the endpoint which
+models it serves and logs an error naming the served ones when the configured
+model is not among them. A refused call reports the same thing instead of a
+generic LLM failure.
+
+The model that answered is stored with the brief (`design_briefs.llm_model`)
+and with the curation decision (`seed_curation_log.llm_model`). To check that
+the column is filled in production:
+
+```sql
+SELECT llm_model, count(*), max(created_at) FROM design_briefs GROUP BY 1;
+```
+
+### Seed pool and brief mix
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_CALENDAR_SEEDS_PER_EVENT_PER_DAY` | 3 | Calendar seeds one holiday may inject per day |

@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
 from store_listing.orchestration.context_seeds import SEASONAL_EVENT_THEME, get_upcoming_events
+from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.promotion import (
     DISCOVERY_SOURCE,
     MAX_ACTIVE_SEEDS,
@@ -314,8 +315,12 @@ def curate_seeds(
         if "429" in error_str:
             logger.warning("LLM curation rate-limited: %s", e)
             return {"status": "rate_limited", "error": error_str}
-        logger.warning("LLM curation call failed: %s", e)
-        return {"status": "error", "error": error_str}
+        message = model_error_message(e, model)
+        if is_model_missing_error(e):
+            logger.error("LLM curation call failed: %s", message)
+        else:
+            logger.warning("LLM curation call failed: %s", e)
+        return {"status": "error", "error": message}
 
     result = parse_curation_response(content)
     by_id = {c.id: c for c in candidates}

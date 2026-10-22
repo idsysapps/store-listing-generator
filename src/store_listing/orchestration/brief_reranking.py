@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final, Protocol
 
+from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.seed_curation import _log_llm_response
 
 logger = logging.getLogger(__name__)
@@ -177,8 +178,12 @@ def rerank_briefs(
             return {"status": "error", "error": "LLM returned empty choices"}
         content = response.choices[0].message.content or ""
     except Exception as e:  # noqa: BLE001
-        logger.warning("Reranking LLM call failed: %s", e)
-        return {"status": "error", "error": str(e)}
+        message = model_error_message(e, model)
+        if is_model_missing_error(e):
+            logger.error("Reranking LLM call failed: %s", message)
+        else:
+            logger.warning("Reranking LLM call failed: %s", e)
+        return {"status": "error", "error": message}
 
     evaluations = parse_rerank_response(content)
     valid_ids = {b.id for b in briefs}

@@ -554,6 +554,14 @@ class TestParseBriefResponse:
         assert result == []
 
 
+class _ApiError(Exception):
+    """An error that carries an HTTP status, like the OpenAI SDK raises."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class TestGenerateDesignBriefs:
     def _mock_db(self, candidates: list[BriefableCandidate] | None = None) -> MagicMock:
         db = MagicMock()
@@ -596,6 +604,34 @@ class TestGenerateDesignBriefs:
 
         assert result["reason"] == "no briefable seeds"
         assert result["briefable"] == 0
+
+    def test_a_model_the_endpoint_does_not_serve_is_reported_clearly(self) -> None:
+        # The cluster pointed at a model the DGX proxy does not serve, so
+        # every brief call failed with a generic LLM error that did not say
+        # which model was missing (issue #194).
+        db = self._mock_db([_briefable(1, "funny t-shirt")])
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = _ApiError(
+            400,
+            "Unknown model: qwen2.5. Available: ['qwen38_briefs', 'qwen_vl_ocr']",
+        )
+
+        result = generate_design_briefs(
+            db, llm, "qwen2.5:32b-instruct-q4_K_M", today=date(2026, 10, 1)
+        )
+
+        assert result["status"] == "error"
+        assert "qwen38_briefs" in result["error"]
+
+    def test_the_result_says_which_model_was_asked(self) -> None:
+        db = self._mock_db([_briefable(1, "funny t-shirt")])
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = _ApiError(500, "boom")
+
+        result = generate_design_briefs(db, llm, "qwen38_briefs", today=date(2026, 10, 1))
+
+        assert result["status"] == "error"
+        assert "boom" in result["error"]
 
     def test_reports_how_many_seeds_were_available(self) -> None:
         candidates = [_briefable(42, "dad jokes shirt")]
