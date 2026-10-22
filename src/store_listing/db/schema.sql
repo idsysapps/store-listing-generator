@@ -188,3 +188,13 @@ CREATE TABLE design_brief_sources (
 
 CREATE INDEX idx_design_brief_sources_brief ON design_brief_sources(brief_id);
 CREATE INDEX idx_design_brief_sources_seed ON design_brief_sources(active_seed_id);
+
+-- Table: app_settings
+-- The settings the operator can change without a redeploy, e.g. which
+-- product types the pipeline produces right now.
+CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT
+);

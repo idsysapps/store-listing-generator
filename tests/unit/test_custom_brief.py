@@ -292,6 +292,17 @@ class TestCreateCustomBrief:
         assert "qwen38_briefs" in result["error"]
         db.insert_design_brief.assert_not_called()
 
+    def test_reads_a_response_the_model_appended_something_to(self) -> None:
+        # The model answered with the brief and then another object; the
+        # parser read two values as one and lost the brief (issue #209).
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response() + "\n" + json.dumps({"notes": {"summary": "x"}}))
+
+        result = create_custom_brief(db, llm, "model-x", "test idea", "dtf_apparel")
+
+        assert result["status"] == "success"
+        assert result["brief_id"] == 42
+
     def test_returns_error_on_empty_choices(self) -> None:
         db = self._mock_db()
         llm = MagicMock()

@@ -30,6 +30,11 @@ from store_listing.orchestration.brief_prompts import (
     PRODUCT_CATALOG,
 )
 from store_listing.orchestration.context_seeds import get_upcoming_events
+from store_listing.orchestration.json_response import (
+    LLMResponseParseError,
+    extract_json_objects,
+    merge_items,
+)
 from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.scene_text import strip_lettering
@@ -230,108 +235,122 @@ def build_brief_prompt(
     ]
 
 
-def parse_brief_response(text: str) -> list[DesignBrief]:
-    try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start < 0 or end <= start:
-            logger.warning("No JSON object found in LLM brief response")
-            return []
-        data = json.loads(text[start:end])
-    except json.JSONDecodeError as e:
-        logger.warning("Failed to parse LLM brief response: %s", e)
-        return []
+def _brief_from(b: dict[str, Any]) -> DesignBrief | None:
+    """The brief in one answer object, or None when it is not usable."""
+    concept = b.get("concept", "")
+    if not concept:
+        return None
 
-    briefs_raw = data.get("briefs", [])
-    if not isinstance(briefs_raw, list):
-        return []
+    product_type = b.get("product_type", "")
+    if product_type not in PRODUCT_TAGS:
+        return None
+
+    raw_products = b.get("specific_products", [])
+    specific_products = (
+        [p for p in raw_products if isinstance(p, str)] if isinstance(raw_products, list) else []
+    )
+
+    confidence = b.get("confidence", 0)
+    if not isinstance(confidence, int):
+        confidence = 0
+    confidence = max(0, min(100, confidence))
+
+    source_seed_ids = [i for i in b.get("source_seed_ids", []) if isinstance(i, int)]
+
+    layout_type = b.get("layout_type", "full_bleed")
+    if layout_type not in VALID_LAYOUT_TYPES:
+        layout_type = "full_bleed"
+
+    headline_text = b.get("headline_text")
+    if headline_text is not None and not isinstance(headline_text, str):
+        headline_text = None
+
+    tagline_text = b.get("tagline_text")
+    if tagline_text is not None and not isinstance(tagline_text, str):
+        tagline_text = None
+
+    font_color = b.get("font_color")
+    if font_color is not None and not isinstance(font_color, str):
+        font_color = None
+
+    scene_description = b.get("scene_description")
+    if scene_description is not None and not isinstance(scene_description, str):
+        scene_description = None
+    if scene_description is not None:
+        # The image model cannot spell, so a scene that quotes the words to
+        # draw comes back misspelled - the bubble on the image of brief
+        # #100 read "To get to the onthe sid" (issue #208). The scene
+        # keeps the picture and loses the words.
+        scene_description = strip_lettering(scene_description) or None
+        if scene_description is None:
+            logger.warning("Skipping brief %r: the scene description is only words", concept)
+            return None
+
+    if layout_type == "text_only":
+        headline_text = headline_for_text_only(concept, headline_text)
+        if headline_text is None:
+            logger.warning("Skipping brief %r: a text_only design needs a headline", concept)
+            return None
+
+    recommended_materials = b.get("recommended_materials")
+    if recommended_materials is not None and not isinstance(recommended_materials, list):
+        recommended_materials = None
+
+    return DesignBrief(
+        concept=concept,
+        product_type=product_type,
+        specific_products=specific_products,
+        audience=str(b.get("audience", "")),
+        visual_style=str(b.get("visual_style", "")),
+        confidence=confidence,
+        reasoning=str(b.get("reasoning", "")),
+        source_seed_ids=source_seed_ids,
+        layout_type=layout_type,
+        headline_text=headline_text,
+        tagline_text=tagline_text,
+        font_color=font_color,
+        scene_description=scene_description,
+        recommended_materials=recommended_materials,
+    )
+
+
+def read_brief_response(text: str) -> tuple[list[DesignBrief], str | None]:
+    """The briefs in the answer, and the reason the answer could not be read.
+
+    The model does not always answer with only JSON: it appends a note,
+    repeats the batch, or splits it in two. The answer is read value by
+    value and the batches are merged, because a parser that read two values
+    as one threw the whole batch away (issue #209).
+    """
+    objects = extract_json_objects(text)
+    if not objects:
+        return [], "no JSON object in the LLM response"
+
+    if not any(isinstance(obj.get("briefs"), list) for obj in objects):
+        return [], "the LLM response has no 'briefs' array"
+
+    raw_briefs = [b for b in merge_items(objects, "briefs") if isinstance(b, dict)]
 
     result: list[DesignBrief] = []
-    for b in briefs_raw:
-        if not isinstance(b, dict):
+    seen: set[tuple[str, str]] = set()
+    for b in raw_briefs:
+        brief = _brief_from(b)
+        if brief is None:
             continue
-
-        concept = b.get("concept", "")
-        if not concept:
+        # A repeated batch must not become two briefs.
+        key = (brief.concept, brief.product_type)
+        if key in seen:
             continue
+        seen.add(key)
+        result.append(brief)
 
-        product_type = b.get("product_type", "")
-        if product_type not in PRODUCT_TAGS:
-            continue
+    return result, None
 
-        raw_products = b.get("specific_products", [])
-        specific_products = (
-            [p for p in raw_products if isinstance(p, str)]
-            if isinstance(raw_products, list)
-            else []
-        )
 
-        confidence = b.get("confidence", 0)
-        if not isinstance(confidence, int):
-            confidence = 0
-        confidence = max(0, min(100, confidence))
-
-        source_seed_ids = [i for i in b.get("source_seed_ids", []) if isinstance(i, int)]
-
-        layout_type = b.get("layout_type", "full_bleed")
-        if layout_type not in VALID_LAYOUT_TYPES:
-            layout_type = "full_bleed"
-
-        headline_text = b.get("headline_text")
-        if headline_text is not None and not isinstance(headline_text, str):
-            headline_text = None
-
-        tagline_text = b.get("tagline_text")
-        if tagline_text is not None and not isinstance(tagline_text, str):
-            tagline_text = None
-
-        font_color = b.get("font_color")
-        if font_color is not None and not isinstance(font_color, str):
-            font_color = None
-
-        scene_description = b.get("scene_description")
-        if scene_description is not None and not isinstance(scene_description, str):
-            scene_description = None
-        if scene_description is not None:
-            # The image model cannot spell, so a scene that quotes the words to
-            # draw comes back misspelled - the bubble on the image of brief
-            # #100 read "To get to the onthe sid" (issue #208). The scene
-            # keeps the picture and loses the words.
-            scene_description = strip_lettering(scene_description) or None
-            if scene_description is None:
-                logger.warning("Skipping brief %r: the scene description is only words", concept)
-                continue
-
-        if layout_type == "text_only":
-            headline_text = headline_for_text_only(concept, headline_text)
-            if headline_text is None:
-                logger.warning("Skipping brief %r: a text_only design needs a headline", concept)
-                continue
-
-        recommended_materials = b.get("recommended_materials")
-        if recommended_materials is not None and not isinstance(recommended_materials, list):
-            recommended_materials = None
-
-        result.append(
-            DesignBrief(
-                concept=concept,
-                product_type=product_type,
-                specific_products=specific_products,
-                audience=str(b.get("audience", "")),
-                visual_style=str(b.get("visual_style", "")),
-                confidence=confidence,
-                reasoning=str(b.get("reasoning", "")),
-                source_seed_ids=source_seed_ids,
-                layout_type=layout_type,
-                headline_text=headline_text,
-                tagline_text=tagline_text,
-                font_color=font_color,
-                scene_description=scene_description,
-                recommended_materials=recommended_materials,
-            )
-        )
-
-    return result
+def parse_brief_response(text: str) -> list[DesignBrief]:
+    """The briefs in the answer, or an empty list when it cannot be read."""
+    briefs, _ = read_brief_response(text)
+    return briefs
 
 
 def generate_design_briefs(
@@ -356,7 +375,7 @@ def generate_design_briefs(
     context = get_upcoming_events(today)
     messages = build_brief_prompt(candidates, context, today, materials=materials)
 
-    briefs, error = _request_briefs(llm_completions, model, messages)
+    briefs, error = _request_briefs_with_retry(llm_completions, model, messages)
     if briefs is None:
         return {"status": "error", "error": error or "LLM brief generation failed"}
 
@@ -456,12 +475,42 @@ def generate_design_briefs(
     }
 
 
+def _request_briefs_with_retry(
+    llm_completions: Any,
+    model: str,
+    messages: list[dict[str, str]],
+) -> tuple[list[DesignBrief] | None, str | None]:
+    """Ask for a batch of briefs, and ask again when the answer was unreadable.
+
+    A parse failure used to be reported as a successful batch of zero briefs,
+    so the whole run was lost without a word in the logs (issue #209). The
+    model gets one more chance, and if the second answer is unreadable too
+    the run fails.
+    """
+    briefs: list[DesignBrief] | None = None
+    error: str | None = None
+    for attempt in (1, 2):
+        try:
+            briefs, error = _request_briefs(llm_completions, model, messages)
+            break
+        except LLMResponseParseError as e:
+            error = str(e)
+            if attempt == 1:
+                logger.info("Asking for the briefs again after an unreadable answer: %s", e)
+    return briefs, error
+
+
 def _request_briefs(
     llm_completions: Any,
     model: str,
     messages: list[dict[str, str]],
 ) -> tuple[list[DesignBrief] | None, str | None]:
-    """Ask the model for a batch of briefs: (briefs, error)."""
+    """Ask the model for a batch of briefs: (briefs, error).
+
+    An answer that cannot be read raises `LLMResponseParseError`: the model
+    answered, but the answer was not JSON, and losing the batch silently is
+    what the parse failure looked like (issue #209).
+    """
     try:
         raw = llm_completions.with_raw_response.create(model=model, messages=messages)
         headers = raw.headers
@@ -484,4 +533,11 @@ def _request_briefs(
             logger.warning("LLM brief generation call failed: %s", e)
         return None, message
 
-    return parse_brief_response(content), None
+    briefs, parse_error = read_brief_response(content)
+    if parse_error is not None:
+        logger.error("The LLM brief response could not be read: %s", parse_error)
+        # The raw answer is the only way to see what the model actually sent.
+        logger.error("Raw LLM brief response: %s", content)
+        raise LLMResponseParseError(parse_error)
+
+    return briefs, None

@@ -19,6 +19,7 @@ from store_listing.ingest.trends import (
     YouTubeClient,
 )
 from store_listing.orchestration import celery_redis_url
+from store_listing.orchestration.product_scope import enabled_product_types
 from store_listing.orchestration.promotion import (
     ORIGIN_DISCOVERY,
     STARTER_SEEDS,
@@ -539,6 +540,9 @@ def generate_design_briefs_task() -> dict:
     client = get_llm_client()
     model = get_llm_model()
     _check_llm_model(client, model)
+    logger.info(
+        "Product types in production: %s", ", ".join(enabled_product_types(DatabaseClient()))
+    )
     result = generate_design_briefs(DatabaseClient(), client.chat.completions, model)
     result["llm_model"] = model
     return result

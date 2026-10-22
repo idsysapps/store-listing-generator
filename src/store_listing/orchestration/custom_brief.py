@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -18,6 +17,7 @@ from store_listing.orchestration.design_briefs import (
     DesignBriefDBClient,
     headline_for_text_only,
 )
+from store_listing.orchestration.json_response import extract_json_objects
 from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
@@ -100,20 +100,8 @@ def build_custom_brief_prompt(
     ]
 
 
-def parse_custom_brief_response(text: str) -> DesignBrief | None:
-    try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start < 0 or end <= start:
-            return None
-        data = json.loads(text[start:end])
-    except json.JSONDecodeError:
-        return None
-
-    b = data.get("brief", {})
-    if not isinstance(b, dict):
-        return None
-
+def _brief_from(b: dict[str, Any]) -> DesignBrief | None:
+    """The brief in one answer object, or None when it is not usable."""
     concept = b.get("concept", "")
     if not concept:
         return None
@@ -152,9 +140,6 @@ def parse_custom_brief_response(text: str) -> DesignBrief | None:
     if scene_description is not None and not isinstance(scene_description, str):
         scene_description = None
     if scene_description is not None:
-        # The image model cannot spell, so a scene that quotes the words to
-        # draw comes back misspelled (issue #208). The scene keeps the picture
-        # and loses the words.
         scene_description = strip_lettering(scene_description) or None
 
     if layout_type == "text_only":
@@ -178,6 +163,23 @@ def parse_custom_brief_response(text: str) -> DesignBrief | None:
         font_color=font_color,
         scene_description=scene_description,
     )
+
+
+def parse_custom_brief_response(text: str) -> DesignBrief | None:
+    """The brief in the answer, or None when it cannot be read.
+
+    The model does not always answer with only JSON: it appends a note, or
+    answers with a second object. The answer is read value by value, because
+    a parser that read two values as one lost the brief (issue #209).
+    """
+    for obj in extract_json_objects(text):
+        b = obj.get("brief")
+        if not isinstance(b, dict):
+            continue
+        brief = _brief_from(b)
+        if brief is not None:
+            return brief
+    return None
 
 
 def create_custom_brief(
@@ -213,6 +215,9 @@ def create_custom_brief(
 
     brief = parse_custom_brief_response(content)
     if brief is None:
+        # The raw answer is the only way to see what the model actually sent.
+        logger.error("The LLM custom brief response could not be read")
+        logger.error("Raw LLM custom brief response: %s", content)
         return {"status": "error", "error": "Failed to parse LLM response"}
 
     brief_id = db_client.insert_design_brief(

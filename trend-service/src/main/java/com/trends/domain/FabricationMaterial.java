@@ -37,8 +37,14 @@ public class FabricationMaterial extends PanacheEntityBase {
     @Column(name = "material_composition", length = 255)
     public String materialComposition;
 
-    @Column(name = "product_type", length = 50)
-    public String productType;
+    /**
+     * The product types this material can serve.
+     *
+     * <p>Cost-book publishes them as a JSON array, so the column holds the
+     * array and a filter has to match any of them (issue #186).
+     */
+    @Column(name = "product_type", columnDefinition = "TEXT[]")
+    public String[] productType;
 
     @Column(name = "sku", length = 100)
     public String sku;

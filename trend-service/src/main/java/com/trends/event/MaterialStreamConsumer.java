@@ -139,9 +139,9 @@ public class MaterialStreamConsumer {
             if (brand != null) existing.brand = brand;
             if (substrateType != null) existing.substrateType = substrateType;
             if (color != null) existing.color = color;
-            if (sizesJson != null) existing.sizes = parseSizes(sizesJson);
+            if (sizesJson != null) existing.sizes = parseStringArray(sizesJson);
             if (materialComposition != null) existing.materialComposition = materialComposition;
-            if (productType != null) existing.productType = productType;
+            if (productType != null) existing.productType = parseStringArray(productType);
             if (sku != null) existing.sku = sku;
             if (unitCostStr != null) existing.unitCost = new BigDecimal(unitCostStr);
             if (activeStr != null) existing.active = Boolean.parseBoolean(activeStr);
@@ -154,9 +154,9 @@ public class MaterialStreamConsumer {
             mat.brand = brand;
             mat.substrateType = substrateType;
             mat.color = color;
-            mat.sizes = parseSizes(sizesJson);
+            mat.sizes = parseStringArray(sizesJson);
             mat.materialComposition = materialComposition;
-            mat.productType = productType;
+            mat.productType = parseStringArray(productType);
             mat.sku = sku;
             mat.unitCost = unitCostStr != null ? new BigDecimal(unitCostStr) : null;
             mat.active = activeStr != null ? Boolean.parseBoolean(activeStr) : true;
@@ -184,13 +184,22 @@ public class MaterialStreamConsumer {
                         e -> LOG.warnf("Failed to ACK message %s: %s", messageId, e.getMessage()));
     }
 
-    String[] parseSizes(String sizesJson) {
-        if (sizesJson == null || sizesJson.isBlank()) {
+    /**
+     * The values of a JSON array field of the event.
+     *
+     * <p>Cost-book publishes the sizes and the product types of a material as
+     * JSON arrays. A field that carries a single value instead of an array is
+     * read as a one-element array, so the column always holds the list the
+     * producer meant (issue #186).
+     */
+    String[] parseStringArray(String json) {
+        if (json == null || json.isBlank()) {
             return null;
         }
-        String trimmed = sizesJson.trim();
+        String trimmed = json.trim();
         if (!trimmed.startsWith("[")) {
-            return null;
+            String single = trimmed.replaceAll("^\"|\"$", "").trim();
+            return single.isEmpty() ? null : new String[] { single };
         }
         trimmed = trimmed.substring(1, trimmed.length() - 1);
         if (trimmed.isBlank()) {

@@ -485,6 +485,33 @@ class TestCurateSeeds:
         assert result["status"] == "error"
         assert "qwen38_briefs" in result["error"]
 
+    def test_reads_a_response_the_model_appended_something_to(self) -> None:
+        # The model answered with the decisions and then another object; the
+        # parser read two values as one and lost the batch (issue #209).
+        candidates = [_candidate(1, "hoodie")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            _eval_response([{"id": 1, "action": "PROMOTE", "reasoning": "good hook"}])
+            + "\n"
+            + json.dumps({"notes": {"summary": "a second object"}})
+        )
+
+        result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["status"] == "success"
+        assert result["promoted"] == 1
+
+    def test_an_unreadable_answer_is_a_failure_not_an_empty_run(self) -> None:
+        # A parse failure used to look like a run that decided nothing
+        # (issue #209).
+        candidates = [_candidate(1, "hoodie")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm("I could not do it.")
+
+        result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["status"] == "error"
+
     def test_archives_used_seeds_before_fresh_ones(self, monkeypatch) -> None:
         # The brief task needs fresh seeds; a seed that already produced a
         # brief is the first thing to archive when the pool is over cap.
