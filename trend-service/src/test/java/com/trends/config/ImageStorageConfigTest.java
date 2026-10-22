@@ -3,6 +3,7 @@ package com.trends.config;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -12,7 +13,7 @@ class ImageStorageConfigTest {
         ImageStorageConfig config = new ImageStorageConfig();
         Field endpointField = ImageStorageConfig.class.getDeclaredField("endpointUrl");
         endpointField.setAccessible(true);
-        endpointField.set(config, endpointUrl);
+        endpointField.set(config, Optional.ofNullable(endpointUrl));
         Field bucketField = ImageStorageConfig.class.getDeclaredField("bucket");
         bucketField.setAccessible(true);
         bucketField.set(config, bucket);

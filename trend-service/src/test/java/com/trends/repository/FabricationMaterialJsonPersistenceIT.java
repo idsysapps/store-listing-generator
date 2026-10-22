@@ -190,12 +190,12 @@ class FabricationMaterialJsonPersistenceIT {
 
     @Test
     void shouldFindMaterialsByAnyOfTheirProductTypes() throws SQLException {
-        Integer id = persistMaterial(ATTRIBUTES);
+        persistMaterial(ATTRIBUTES);
 
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement(
                      "SELECT external_id FROM fabrication_materials "
-                             + "WHERE active = true AND ?1 = ANY(product_type)")) {
+                             + "WHERE active = true AND ? = ANY(product_type)")) {
             statement.setString(1, "dtf_apparel");
             try (ResultSet result = statement.executeQuery()) {
                 assertNotNull(result.next(), "the material serves dtf_apparel");
@@ -206,14 +206,12 @@ class FabricationMaterialJsonPersistenceIT {
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement(
                      "SELECT external_id FROM fabrication_materials "
-                             + "WHERE active = true AND ?1 = ANY(product_type)")) {
+                             + "WHERE active = true AND ? = ANY(product_type)")) {
             statement.setString(1, "sublimation");
             try (ResultSet result = statement.executeQuery()) {
                 assertFalse(result.next(), "the material does not serve sublimation");
             }
         }
-
-        assertNotNull(id);
     }
 
     /**

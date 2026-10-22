@@ -112,7 +112,8 @@ public class TrendQueryResolver {
     }
 
     @Query("topTrends")
-    public List<TrendSummary> getTopTrends(int limit, boolean hasDesignBriefs) throws GraphQLException {
+    public List<TrendSummary> getTopTrends(
+            int limit, @DefaultValue("false") boolean hasDesignBriefs) throws GraphQLException {
         requireAuthentication();
         LOG.debugf("Fetching top trends: limit=%d, hasDesignBriefs=%s", (Object) limit, hasDesignBriefs);
 

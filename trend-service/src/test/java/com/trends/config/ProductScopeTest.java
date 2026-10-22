@@ -10,6 +10,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
@@ -27,13 +28,13 @@ class ProductScopeTest {
         MockitoAnnotations.openMocks(this);
         Field envField = ProductScope.class.getDeclaredField("envValue");
         envField.setAccessible(true);
-        envField.set(scope, "");
+        envField.set(scope, Optional.empty());
     }
 
     private void withEnvironment(String value) throws Exception {
         Field envField = ProductScope.class.getDeclaredField("envValue");
         envField.setAccessible(true);
-        envField.set(scope, value);
+        envField.set(scope, Optional.ofNullable(value));
     }
 
     private void withStoredScope(String value) {

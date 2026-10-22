@@ -1,5 +1,7 @@
 package com.trends.resolver;
 
+import com.trends.config.PostgresTestResource;
+import io.quarkus.test.common.WithTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.security.TestSecurity;
 import io.restassured.http.ContentType;
@@ -11,6 +13,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
+@WithTestResource(PostgresTestResource.class)
 class TrendGraphQLApiIT {
 
     @Test
@@ -58,5 +61,35 @@ class TrendGraphQLApiIT {
                 .statusCode(200)
                 .body("data.topTrends", nullValue())
                 .body("errors[0].message", notNullValue());
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = "admin")
+    void shouldExposeTheEnabledProductTypes() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"query":"query { enabledProductTypes }"}
+                        """)
+                .when()
+                .post("/graphql")
+                .then()
+                .statusCode(200)
+                .body("data.enabledProductTypes", notNullValue());
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = "admin")
+    void shouldExposeTheMaterialCatalogue() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"query":"query { fabricationMaterials(productType: \\"dtf_apparel\\", limit: 10) { externalId name productTypes } }"}
+                        """)
+                .when()
+                .post("/graphql")
+                .then()
+                .statusCode(200)
+                .body("data.fabricationMaterials", notNullValue());
     }
 }

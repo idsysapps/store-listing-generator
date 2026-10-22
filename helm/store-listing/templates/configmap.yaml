@@ -30,7 +30,9 @@ data:
   LLM_BRIEFS_SCHEDULE: {{ .Values.config.llmBriefsSchedule | default "0 7 * * *" | quote }}
   LLM_IMAGE_GEN_SCHEDULE: {{ .Values.config.llmImageGenSchedule | default "30 7 * * *" | quote }}
   LLM_RERANK_SCHEDULE: {{ .Values.config.llmRerankSchedule | default "0 8 * * *" | quote }}
-  ENABLED_PRODUCT_TYPES: {{ .Values.config.enabledProductTypes | default "" | quote }}
+  {{- if .Values.config.enabledProductTypes }}
+  ENABLED_PRODUCT_TYPES: {{ .Values.config.enabledProductTypes | quote }}
+  {{- end }}
 ---
 kind: ConfigMap
 apiVersion: v1
