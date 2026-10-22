@@ -46,6 +46,15 @@ public class MaterialResolver {
         List<FabricationMaterial> materials;
         if (productType != null && !productType.isEmpty()) {
             materials = materialRepository.findByProductType(productType, effectiveLimit);
+            if (materials.isEmpty()) {
+                // cost-book publishes a material without a product type, so the
+                // typed list can be empty while the catalogue is full. An empty
+                // list shows the client a store without substrates
+                // (issue #236).
+                LOG.warnf("No material serves the product type %s, offering every active material",
+                        productType);
+                materials = materialRepository.findAllActive(effectiveLimit);
+            }
         } else {
             materials = materialRepository.findAllActive(effectiveLimit);
         }

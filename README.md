@@ -423,6 +423,13 @@ A material can serve several product types, so `productTypes` is a list. A
 recommendation the model invented, or one that does not serve the product type
 of the brief, is dropped when the brief is read.
 
+The material list is filtered by the product type in production, and when that
+filter matches nothing the list falls back to every active material. Cost-book
+publishes a material without a product type, so the typed list can be empty
+while the catalogue is full - and a brief without a substrate is a brief nobody
+can print. Both the prompt and the query fall back the same way, and both say
+so in the log.
+
 ### Seed pool and brief mix
 | Variable | Default | Description |
 |----------|---------|-------------|

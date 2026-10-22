@@ -53,6 +53,31 @@ def _response(briefs: list[dict]) -> str:
     return json.dumps({"briefs": briefs})
 
 
+def _material() -> dict:
+    return {
+        "external_id": "c9924c1b-cherry-blossom",
+        "name": "Core Adult",
+        "brand": "Port & Company",
+        "substrate_type": "dtf-apparel",
+        "color": "Cherry Blossom",
+        "sizes": ["S", "M", "L"],
+        "material_composition": "100% cotton",
+        "product_type": None,
+        "sku": "C9924C1B",
+        "unit_cost": 4.5,
+    }
+
+
+def _recommendation() -> dict:
+    return {
+        "external_id": "c9924c1b-cherry-blossom",
+        "name": "Core Adult",
+        "color": "Cherry Blossom",
+        "substrate_type": "dtf-apparel",
+        "unit_cost": 4.5,
+    }
+
+
 class TestProductCatalog:
     def test_the_catalog_lists_the_types_in_production(self) -> None:
         catalog = product_catalog(["dtf_apparel"]).lower()
@@ -250,7 +275,7 @@ class TestGenerateDesignBriefs:
         return llm
 
     def test_the_materials_of_the_types_in_production_are_offered(self) -> None:
-        db = self._mock_db()
+        db = self._mock_db(materials=[_material()])
         llm = self._mock_llm(_response([_brief()]))
 
         generate_design_briefs(
@@ -258,6 +283,46 @@ class TestGenerateDesignBriefs:
         )
 
         db.list_active_materials.assert_called_once_with(product_type="dtf_apparel")
+
+    def test_every_material_is_offered_when_the_type_in_production_has_none(self) -> None:
+        db = self._mock_db()
+        db.list_active_materials.side_effect = [[], [_material()]]
+        llm = self._mock_llm(_response([_brief()]))
+
+        generate_design_briefs(
+            db, llm, "test-model", today=date(2026, 10, 1), enabled=["dtf_apparel"]
+        )
+
+        calls = db.list_active_materials.call_args_list
+        assert calls[0].kwargs == {"product_type": "dtf_apparel"}
+        assert calls[1].kwargs == {}
+
+    def test_the_materials_are_offered_to_the_model_when_the_type_has_none(self) -> None:
+        db = self._mock_db()
+        db.list_active_materials.side_effect = [[], [_material()]]
+        llm = self._mock_llm(_response([_brief()]))
+
+        generate_design_briefs(
+            db, llm, "test-model", today=date(2026, 10, 1), enabled=["dtf_apparel"]
+        )
+
+        messages = llm.with_raw_response.create.call_args.kwargs["messages"]
+        assert "Core Adult" in messages[1]["content"]
+
+    def test_a_recommendation_survives_when_the_type_in_production_has_none(self) -> None:
+        db = self._mock_db()
+        db.list_active_materials.side_effect = [[], [_material()]]
+        llm = self._mock_llm(
+            _response([{**_brief(), "recommended_materials": [_recommendation()]}])
+        )
+
+        result = generate_design_briefs(
+            db, llm, "test-model", today=date(2026, 10, 1), enabled=["dtf_apparel"]
+        )
+
+        assert result["briefs_created"] == 1
+        call_kwargs = db.insert_design_brief.call_args.kwargs
+        assert call_kwargs["recommended_materials"] == [_recommendation()]
 
     def test_every_material_is_offered_when_several_types_are_in_production(self) -> None:
         db = self._mock_db()

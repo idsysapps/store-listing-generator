@@ -522,6 +522,36 @@ def parse_brief_response(text: str) -> list[DesignBrief]:
     return briefs
 
 
+def offered_materials(
+    db_client: DesignBriefDBClient,
+    product_type: str | None,
+) -> list[dict[str, Any]]:
+    """The materials the model is offered.
+
+    The catalogue is filtered by the product type in production, because a
+    brief of one type cannot be printed on the substrate of another
+    (issue #215).
+
+    When the filter matches nothing the model is offered every active
+    material instead: cost-book publishes a material without a product type,
+    so the typed list can be empty while the catalogue is full. An empty list
+    would leave the briefs without a substrate and drop every recommendation
+    (issue #236).
+    """
+    if not product_type:
+        return db_client.list_active_materials()
+
+    materials = db_client.list_active_materials(product_type=product_type)
+    if materials:
+        return materials
+
+    logger.warning(
+        "No material serves the product type %s, offering every active material instead",
+        product_type,
+    )
+    return db_client.list_active_materials()
+
+
 def generate_design_briefs(
     db_client: DesignBriefDBClient,
     llm_completions: Any,
@@ -544,10 +574,7 @@ def generate_design_briefs(
     # The materials of the types in production: a brief of another type
     # cannot be printed on them (issue #215).
     material_type = enabled[0] if enabled and len(enabled) == 1 else None
-    if material_type:
-        materials = db_client.list_active_materials(product_type=material_type)
-    else:
-        materials = db_client.list_active_materials()
+    materials = offered_materials(db_client, material_type)
     context = get_upcoming_events(today)
     messages = build_brief_prompt(candidates, context, today, materials=materials, enabled=enabled)
 
