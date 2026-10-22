@@ -493,6 +493,26 @@ It talks to the ComfyUI on the DGX, so it runs where the DGX runs. The report
 lands in `benchmark-output/report.json` next to the images, and the numbers
 belong in issue #210.
 
+## Material events (cost-book)
+
+The materials the cost book offers arrive as events on the Redis stream
+`materials:events`, and the trend-service consumer stores them in the
+`fabrication_materials` table.
+
+A message that fails to process is not acknowledged, so it stays pending and
+is claimed again after a minute (`XAUTOCLAIM`) - a transient database error
+no longer costs the material. A message that fails five times is moved to
+`materials:events:dead` with its fields and acknowledged, so the pending list
+cannot grow without bound. The number of pending messages is logged on every
+poll.
+
+To see what is waiting, and to replay a message that was moved aside:
+
+```bash
+redis-cli XPENDING materials:events trend-service
+redis-cli XRANGE materials:events:dead - + COUNT 10
+redis-cli XADD materials:events '*' action upsert external_id bc3001-white name "Bella Canvas 3001"
+```
 ## Source Health & Free-Path-First Harvesting
 
 Each scheduled harvest task records an outcome (`success` / `failure` / `empty`)
