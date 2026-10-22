@@ -31,6 +31,7 @@ def _brief_response(
     tagline_text: str | None = None,
     font_color: str | None = "#FFFFFF",
     scene_description: str | None = "a small child in a baseball cap holding a glove",
+    voice: str | None = None,
 ) -> str:
     return json.dumps(
         {
@@ -47,6 +48,7 @@ def _brief_response(
                 "tagline_text": tagline_text,
                 "font_color": font_color,
                 "scene_description": scene_description,
+                "voice": voice,
             }
         }
     )
@@ -424,3 +426,40 @@ class TestPersonalUsePrompt:
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
         assert "disney shirt for family trip" in messages[1]["content"]
+
+
+class TestTheVoiceOfTheCustomBrief:
+    def test_the_prompt_asks_for_a_voice(self) -> None:
+        messages = build_custom_brief_prompt("test idea", "dtf_apparel")
+        system_msg = messages[0]["content"]
+        assert "voice" in system_msg.lower()
+        for voice in ("deadpan", "loud", "cozy"):
+            assert voice in system_msg.lower()
+
+    def test_the_voice_is_parsed(self) -> None:
+        response = _brief_response(headline_text="Gobble Til The Drawbridge Drops", voice="loud")
+
+        brief = parse_custom_brief_response(response)
+
+        assert brief is not None
+        assert brief.voice == "loud"
+
+    def test_a_headline_that_names_a_brand_is_dropped(self) -> None:
+        # The design that started this (issue #225).
+        response = _brief_response(headline_text="Thanksgiving in the Magic Kingdom")
+
+        assert parse_custom_brief_response(response) is None
+
+    def test_a_personal_use_brief_may_name_a_franchise(self) -> None:
+        # A brief for personal use is allowed to be about a franchise.
+        response = _brief_response(headline_text="A Weekend At The Magic Kingdom")
+
+        brief = parse_custom_brief_response(response, personal_use=True)
+
+        assert brief is not None
+        assert brief.headline_text == "A Weekend At The Magic Kingdom"
+
+    def test_a_noun_list_is_dropped(self) -> None:
+        response = _brief_response(headline_text="Feast, fun, and fireworks")
+
+        assert parse_custom_brief_response(response) is None

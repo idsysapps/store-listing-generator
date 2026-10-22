@@ -12,8 +12,10 @@ import requests
 from pytrends.exceptions import ResponseError
 from pytrends.request import TrendReq
 
+from store_listing.orchestration.brand_guard import licensed_brand
 from store_listing.orchestration.brief_reranking import RerankableBrief
 from store_listing.orchestration.design_briefs import BriefableCandidate
+from store_listing.orchestration.headline_voice import DEFAULT_VOICE
 from store_listing.orchestration.promotion import (
     BRIEF_SEED_COOLDOWN_DAYS,
     ORIGIN_TREND,
@@ -27,11 +29,8 @@ from .schemas import QueryType, TrendHarvestRequest, TrendResult
 
 logger = logging.getLogger(__name__)
 
-_LICENSED_IP_RE = re.compile(
-    r"taylor swift|beyonce|drake|nike|disney|marvel|pokemon|"
-    r"star wars|harry potter|nfl\b|nba\b|mlb\b",
-    re.IGNORECASE,
-)
+# The names a seed may not carry. The guard is shared with the text the brief
+# model writes, so a brand cannot slip in through the text (issue #225).
 _CANDIDATE_NOISE_RE = re.compile(
     r"^(how to\b|tutorial\b|diy\b|recipe\b|review\b|unboxing\b)",
     re.IGNORECASE,
@@ -46,7 +45,7 @@ def _is_candidate_noise(query: str) -> bool:
         return True
     if "&#" in query or "http" in query or "www." in query or "@" in query:
         return True
-    if _LICENSED_IP_RE.search(query):
+    if licensed_brand(query):
         return True
     return bool(_CANDIDATE_NOISE_RE.search(query))
 
@@ -537,6 +536,7 @@ class DatabaseClient:
         scene_description: str | None = None,
         personal_use: bool = False,
         recommended_materials: list[dict[str, Any]] | None = None,
+        voice: str = DEFAULT_VOICE,
     ) -> int:
         import json as _json
 
@@ -548,8 +548,8 @@ class DatabaseClient:
                     (concept, product_type, specific_products, audience,
                      visual_style, confidence, reasoning, llm_model, batch_id,
                      layout_type, headline_text, tagline_text, font_color,
-                     scene_description, personal_use, recommended_materials)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     scene_description, personal_use, recommended_materials, voice)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -569,6 +569,7 @@ class DatabaseClient:
                     scene_description,
                     personal_use,
                     materials_json,
+                    voice,
                 ),
             )
             result = cur.fetchone()

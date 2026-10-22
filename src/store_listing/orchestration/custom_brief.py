@@ -12,6 +12,7 @@ from store_listing.orchestration.brief_prompts import (
     layout_rules,
     product_belongs_to,
     product_catalog,
+    voice_rules,
 )
 from store_listing.orchestration.design_briefs import (
     VALID_LAYOUT_TYPES,
@@ -19,6 +20,7 @@ from store_listing.orchestration.design_briefs import (
     DesignBriefDBClient,
     headline_for_text_only,
 )
+from store_listing.orchestration.headline_voice import normalise_voice, screen_text
 from store_listing.orchestration.json_response import extract_json_objects
 from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.scene_text import strip_lettering
@@ -77,10 +79,12 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         'or null if full_bleed",\n'
         '  "tagline_text": "secondary text or null",\n'
         '  "font_color": "#FFFFFF",\n'
+        '  "voice": "deadpan | loud | cozy",\n'
         '  "scene_description": "concise visual description of the illustration only, '
-        'no text. Under 20 words."\n'
+        'no text. Under 35 words."\n'
         "}}\n\n"
         f"{layout_rules(types)}\n"
+        f"{voice_rules()}\n"
         f"{DESIGN_ONLY_RULES}\n"
         f"{ip_rules}"
     )
@@ -110,6 +114,7 @@ def build_custom_brief_prompt(
 def _brief_from(
     b: dict[str, Any],
     enabled: Sequence[str] | None = None,
+    personal_use: bool = False,
 ) -> DesignBrief | None:
     """The brief in one answer object, or None when it is not usable."""
     concept = b.get("concept", "")
@@ -171,6 +176,22 @@ def _brief_from(
             logger.warning("A text_only design needs a headline: %r", concept)
             return None
 
+    voice = normalise_voice(b.get("voice") if isinstance(b.get("voice"), str) else None)
+
+    # The text of a design is the part the buyer reads, so it is the part that
+    # has to be good. A brief for personal use may name a franchise on
+    # purpose, so the brand is not screened there (issue #225).
+    reason = screen_text(
+        headline_text,
+        tagline=tagline_text,
+        scene=scene_description,
+        voice=voice,
+        allow_brands=personal_use,
+    )
+    if reason is not None:
+        logger.warning("Skipping the custom brief %r: %s", concept, reason)
+        return None
+
     return DesignBrief(
         concept=concept,
         product_type=product_type,
@@ -185,12 +206,14 @@ def _brief_from(
         tagline_text=tagline_text,
         font_color=font_color,
         scene_description=scene_description,
+        voice=voice,
     )
 
 
 def parse_custom_brief_response(
     text: str,
     enabled: Sequence[str] | None = None,
+    personal_use: bool = False,
 ) -> DesignBrief | None:
     """The brief in the answer, or None when it cannot be read.
 
@@ -202,7 +225,7 @@ def parse_custom_brief_response(
         b = obj.get("brief")
         if not isinstance(b, dict):
             continue
-        brief = _brief_from(b, enabled)
+        brief = _brief_from(b, enabled, personal_use)
         if brief is not None:
             return brief
     return None
@@ -252,7 +275,7 @@ def create_custom_brief(
             logger.warning("Custom brief LLM call failed: %s", e)
         return {"status": "error", "error": message}
 
-    brief = parse_custom_brief_response(content, enabled)
+    brief = parse_custom_brief_response(content, enabled, personal_use)
     if brief is None:
         # The raw answer is the only way to see what the model actually sent.
         logger.error("The LLM custom brief response could not be read")
@@ -275,6 +298,7 @@ def create_custom_brief(
         font_color=brief.font_color,
         scene_description=brief.scene_description,
         personal_use=personal_use,
+        voice=brief.voice,
     )
 
     return {"status": "success", "brief_id": brief_id, "personal_use": personal_use}

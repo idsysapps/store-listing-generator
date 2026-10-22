@@ -30,8 +30,10 @@ from store_listing.orchestration.brief_prompts import (
     layout_rules,
     product_belongs_to,
     product_catalog,
+    voice_rules,
 )
 from store_listing.orchestration.context_seeds import get_upcoming_events
+from store_listing.orchestration.headline_voice import DEFAULT_VOICE, normalise_voice, screen_text
 from store_listing.orchestration.json_response import (
     LLMResponseParseError,
     extract_json_objects,
@@ -46,6 +48,12 @@ logger = logging.getLogger(__name__)
 
 MAX_SEEDS_PER_BRIEF = int(os.environ.get("LLM_MAX_BRIEF_SEEDS", "20"))
 MAX_BRIEFS = int(os.environ.get("LLM_MAX_BRIEFS", "8"))
+# Whether a batch whose text was rejected is asked for again with the reason.
+BRIEF_TEXT_REGENERATE_ONCE = os.environ.get("LLM_BRIEF_TEXT_REGENERATE", "true").lower() not in (
+    "0",
+    "false",
+    "no",
+)
 
 
 def system_prompt(enabled: Sequence[str] | None = None) -> str:
@@ -75,6 +83,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         "trend signals)\n"
         "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
         f"{layout_rules(types)}\n"
+        f"{voice_rules()}\n"
         f"{DESIGN_ONLY_RULES}\n"
         "MATERIALS — picking the right substrate:\n"
         "- recommended_materials: array of objects from the available_materials list, each with "
@@ -91,6 +100,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         '"reasoning": "...", "source_seed_ids": [id1, id2], '
         '"layout_type": "text_top", "headline_text": "...", '
         '"tagline_text": "...", "font_color": "#000000", '
+        '"voice": "deadpan | loud | cozy", '
         '"scene_description": "...", '
         '"recommended_materials": [{"external_id": "...", "name": "...", '
         '"color": "...", "substrate_type": "...", "unit_cost": 0.00}]}]}'
@@ -150,6 +160,8 @@ class DesignBrief:
     regeneration_feedback: str | None = None
     scene_description: str | None = None
     recommended_materials: list[dict[str, Any]] | None = None
+    # The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
+    voice: str = DEFAULT_VOICE
 
 
 class DesignBriefDBClient(Protocol):
@@ -180,6 +192,7 @@ class DesignBriefDBClient(Protocol):
         scene_description: str | None = None,
         personal_use: bool = False,
         recommended_materials: list[dict[str, Any]] | None = None,
+        voice: str = DEFAULT_VOICE,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -253,6 +266,7 @@ def _brief_from(
     b: dict[str, Any],
     enabled: Sequence[str] | None = None,
     materials: list[dict[str, Any]] | None = None,
+    rejections: list[str] | None = None,
 ) -> DesignBrief | None:
     """The brief in one answer object, or None when it is not usable."""
     concept = b.get("concept", "")
@@ -334,6 +348,24 @@ def _brief_from(
             logger.warning("Skipping brief %r: a text_only design needs a headline", concept)
             return None
 
+    voice = normalise_voice(b.get("voice") if isinstance(b.get("voice"), str) else None)
+
+    # The text of a design is the part the buyer reads, so it is the part that
+    # has to be good. A headline that names a brand, that lists three nouns or
+    # that only restates the picture is dropped and the batch asks again
+    # (issue #225).
+    reason = screen_text(
+        headline_text,
+        tagline=tagline_text,
+        scene=scene_description,
+        voice=voice,
+    )
+    if reason is not None:
+        logger.warning("Skipping brief %r: %s", concept, reason)
+        if rejections is not None:
+            rejections.append(f"{reason} (headline: {headline_text!r})")
+        return None
+
     recommended_materials = b.get("recommended_materials")
     if recommended_materials is not None and not isinstance(recommended_materials, list):
         recommended_materials = None
@@ -355,6 +387,7 @@ def _brief_from(
         font_color=font_color,
         scene_description=scene_description,
         recommended_materials=recommended_materials,
+        voice=voice,
     )
 
 
@@ -406,6 +439,7 @@ def read_brief_response(
     text: str,
     enabled: Sequence[str] | None = None,
     materials: list[dict[str, Any]] | None = None,
+    rejections: list[str] | None = None,
 ) -> tuple[list[DesignBrief], str | None]:
     """The briefs in the answer, and the reason the answer could not be read.
 
@@ -413,6 +447,9 @@ def read_brief_response(
     repeats the batch, or splits it in two. The answer is read value by
     value and the batches are merged, because a parser that read two values
     as one threw the whole batch away (issue #209).
+
+    ``rejections`` collects the reasons the briefs were dropped for, so the
+    batch can ask again with the reason in the prompt (issue #225).
     """
     objects = extract_json_objects(text)
     if not objects:
@@ -426,7 +463,7 @@ def read_brief_response(
     result: list[DesignBrief] = []
     seen: set[tuple[str, str]] = set()
     for b in raw_briefs:
-        brief = _brief_from(b, enabled, materials)
+        brief = _brief_from(b, enabled, materials, rejections)
         if brief is None:
             continue
         # A repeated batch must not become two briefs.
@@ -474,9 +511,42 @@ def generate_design_briefs(
     context = get_upcoming_events(today)
     messages = build_brief_prompt(candidates, context, today, materials=materials, enabled=enabled)
 
-    briefs, error = _request_briefs_with_retry(llm_completions, model, messages, enabled, materials)
+    rejections: list[str] = []
+    briefs, error = _request_briefs_with_retry(
+        llm_completions, model, messages, enabled, materials, rejections
+    )
     if briefs is None:
         return {"status": "error", "error": error or "LLM brief generation failed"}
+
+    if rejections and BRIEF_TEXT_REGENERATE_ONCE:
+        # The text of some briefs was rejected. Ask once more and say what was
+        # wrong, because a brief with a bad headline is a design nobody wears
+        # and a batch that is a batch is worth more than a batch that is short
+        # (issue #225).
+        logger.info("Asking for the briefs again: %d texts were rejected", len(rejections))
+        retry_messages = build_brief_prompt(
+            candidates,
+            context,
+            today,
+            materials=materials,
+            enabled=enabled,
+            extra_instructions=[
+                (
+                    f"The previous answer had {len(rejections)} briefs whose text was "
+                    f"rejected: {'; '.join(rejections[:5])}. Write new briefs whose headline "
+                    "is a line a buyer would wear: it says something in the voice of the "
+                    "brief, it is not a caption of the picture, it is not a list of nouns "
+                    "and it names no brand or franchise."
+                ),
+            ],
+        )
+        retry_briefs, retry_error = _request_briefs(
+            llm_completions, model, retry_messages, enabled, materials, []
+        )
+        if retry_error:
+            logger.warning("The second brief attempt failed: %s", retry_error)
+        if retry_briefs:
+            briefs = _merge_briefs(briefs, retry_briefs)
 
     valid_ids = {c.active_seed_id for c in candidates}
     batch_id = today.isoformat()
@@ -551,6 +621,7 @@ def generate_design_briefs(
             font_color=brief.font_color,
             scene_description=brief.scene_description,
             recommended_materials=brief.recommended_materials,
+            voice=brief.voice,
         )
         linked = 0
         for seed_id in brief.source_seed_ids:
@@ -577,12 +648,30 @@ def generate_design_briefs(
     }
 
 
+def _merge_briefs(first: list[DesignBrief], second: list[DesignBrief]) -> list[DesignBrief]:
+    """Two batches of briefs as one, without the repeats.
+
+    The second attempt answers for the same seeds, so it can repeat a brief
+    the first answer already gave.
+    """
+    merged = list(first)
+    seen = {(brief.concept, brief.product_type) for brief in first}
+    for brief in second:
+        key = (brief.concept, brief.product_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(brief)
+    return merged
+
+
 def _request_briefs_with_retry(
     llm_completions: Any,
     model: str,
     messages: list[dict[str, str]],
     enabled: Sequence[str] | None = None,
     materials: list[dict[str, Any]] | None = None,
+    rejections: list[str] | None = None,
 ) -> tuple[list[DesignBrief] | None, str | None]:
     """Ask for a batch of briefs, and ask again when the answer was unreadable.
 
@@ -595,7 +684,9 @@ def _request_briefs_with_retry(
     error: str | None = None
     for attempt in (1, 2):
         try:
-            briefs, error = _request_briefs(llm_completions, model, messages, enabled, materials)
+            briefs, error = _request_briefs(
+                llm_completions, model, messages, enabled, materials, rejections
+            )
             break
         except LLMResponseParseError as e:
             error = str(e)
@@ -610,6 +701,7 @@ def _request_briefs(
     messages: list[dict[str, str]],
     enabled: Sequence[str] | None = None,
     materials: list[dict[str, Any]] | None = None,
+    rejections: list[str] | None = None,
 ) -> tuple[list[DesignBrief] | None, str | None]:
     """Ask the model for a batch of briefs: (briefs, error).
 
@@ -639,7 +731,7 @@ def _request_briefs(
             logger.warning("LLM brief generation call failed: %s", e)
         return None, message
 
-    briefs, parse_error = read_brief_response(content, enabled, materials)
+    briefs, parse_error = read_brief_response(content, enabled, materials, rejections)
     if parse_error is not None:
         logger.error("The LLM brief response could not be read: %s", parse_error)
         # The raw answer is the only way to see what the model actually sent.

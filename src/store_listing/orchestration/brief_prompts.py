@@ -28,9 +28,11 @@ __all__ = [
     "PRODUCT_CATALOG",
     "PRODUCT_CATALOG_BY_TYPE",
     "SEASONAL_WORDS",
+    "VOICE_RULES",
     "layout_rules",
     "product_belongs_to",
     "product_catalog",
+    "voice_rules",
 ]
 
 PRODUCT_CATALOG_BY_TYPE: Final[dict[str, str]] = {
@@ -138,18 +140,58 @@ def layout_rules(enabled: Sequence[str] | None = None) -> str:
 
 LAYOUT_RULES: Final[str] = layout_rules()
 
+
+# The store sells three voices and every brief picks one. The operator curates
+# afterwards, so a batch carries a spread of them rather than one house style.
+#
+# The examples are deliberately evergreen. A seasonal example anchors every
+# brief in the batch, which is what happened when the rules taught the
+# design-vs-product rule with a holiday example (issue #200), so nothing in
+# here names a calendar event.
+VOICE_RULES: Final[str] = (
+    "VOICE - every brief picks one of the three voices the store sells:\n"
+    "- voice: 'deadpan' (dry and understated - the joke is in what is not said), "
+    "'loud' (big, declarative, all caps energy) or 'cozy' (warm, handmade, "
+    "affectionate).\n"
+    "- The headline is what the buyer would wear. It is never a caption of the "
+    "picture and never a list of three nouns: it says something, in the voice of "
+    "the brief.\n"
+    "- The tagline names the occasion or the setting. The headline carries the "
+    "joke and the tagline never repeats the headline.\n"
+    "- Words only - no emoji, no symbols, no punctuation-only text. At most 6 "
+    "words.\n"
+    "\n"
+    "EXAMPLES - what a line looks like in each voice:\n"
+    "deadpan - GOOD: 'Sleep Is For Other People' | BAD: 'Sweet Treats To Brighten Your Day'\n"
+    "deadpan - GOOD: 'I Brought Snacks' | BAD: 'Cozy Nights And Warm Memories'\n"
+    "loud - GOOD: 'Crush The Day' | BAD: 'Make Every Moment Count'\n"
+    "loud - GOOD: 'Loud And Proud' | BAD: 'Embrace Your Unique Journey'\n"
+    "cozy - GOOD: 'Made With Soup And Patience' | BAD: 'Live Your Best Life Today'\n"
+    "cozy - GOOD: 'Home Is Where The Kettle Is' | BAD: 'Success Is Coming Soon'\n"
+)
+
+
+def voice_rules() -> str:
+    """The voice rules, for the prompts that write the text of a design."""
+    return VOICE_RULES
+
+
 DESIGN_ONLY_RULES: Final[str] = (
     "DESIGN vs PRODUCT - the design is the artwork, never the product it is printed on:\n"
     "- concept: the design idea, NOT the product. Bad: 'Weekend Tote with Coffee Beans'. "
     "Good: 'Coffee Beans' - the bag itself belongs in specific_products.\n"
     "- scene_description: a concise visual description of ONLY the illustration to draw "
-    "(no text, no slogans, no words - just the visual scene). Under 20 words. It is what "
+    "(no text, no slogans, no words - just the visual scene). Under 35 words. It is what "
     "the image generator sees, so it has to be the print artwork itself, not a photo of a "
     "product. Bad: 'a tote bag full of coffee beans'. Good: 'scattered roasted coffee "
     "beans in a flat graphic'. Never mention a bag, tote, pouch, shirt, "
     "hoodie, mug, tumbler, phone case, pillow, blanket, sticker sheet, mockup or blank - "
     "if the design is for a bag, describe the graphic printed on it, not the bag. "
     "A mockup cannot be printed.\n"
+    "- The scene carries ONE idea, not a list of objects: something unexpected, "
+    "something transformed or something happening. A raccoon where the gargoyle "
+    "belongs, a teapot as a lighthouse, a dragon made of paper cranes. 'A castle with "
+    "trees and leaves' is a list of objects and it reads as clip art.\n"
     "- Never put words in the scene: no quoted text, no speech bubble, no sign, banner or "
     "label that carries writing, and no 'saying' or 'reading' clauses. The image model "
     "cannot spell - a scene that asks it to draw the punchline comes back misspelled "
