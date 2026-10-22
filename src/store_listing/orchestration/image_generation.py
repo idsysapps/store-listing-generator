@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from store_listing.orchestration.art_direction import negative_for, preset_for, prompt_for
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.scene_text import strip_lettering
@@ -50,6 +51,37 @@ NO_MOCKUP = (
     "no mug, no tumbler, no phone case, no pillow, no blanket, no sticker sheet, "
     "no photo of a printed item"
 )
+
+# The space the text is drawn in, per layout. The text is composited onto the
+# artwork afterwards, so the artwork has to leave the room for it - otherwise
+# the text is drawn over the picture (issue #227).
+LAYOUT_RESERVES: dict[str, str] = {
+    "text_top": (
+        "Leave the top of the canvas clear and empty: plain background only, nothing in that area."
+    ),
+    "text_top_bottom": (
+        "Leave the top and the bottom of the canvas clear and empty: plain background "
+        "only, nothing in those areas."
+    ),
+    "badge": (
+        "Draw the artwork as a compact centred emblem with an empty margin all around "
+        "it, and leave a clear band at the top and a clear band at the bottom of the "
+        "canvas: plain background only in those bands."
+    ),
+    "banner": (
+        "Draw the artwork to fill the whole canvas, and leave a clear horizontal band "
+        "across the middle of the canvas: plain background only in that band."
+    ),
+    "arch": (
+        "Draw the artwork as a tall arch shape in the middle of the canvas, and leave "
+        "the top of the arch and the bottom of the canvas clear and empty: plain "
+        "background only in those areas."
+    ),
+    "stack_side": (
+        "Draw the artwork on the left half of the canvas and leave the whole right "
+        "side of the canvas clear and empty: plain background only on the right."
+    ),
+}
 
 # The image is the graphic that gets printed, not the thing it is printed on.
 # A scene that names the product - a trick-or-treat bag, a hoodie - makes the
@@ -169,21 +201,20 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     parts: list[str] = []
 
     parts.append(f"{DESIGN_ONLY}: {scene}.")
-    parts.append(f"{brief.visual_style}, {product_context}, {NO_MOCKUP}.")
+    # The look of the design is a preset, not the free text of the brief: free
+    # text made every design come out as the same flat vector clip-art
+    # (issue #227). A brief that was written before the presets existed keeps
+    # its own style.
+    look = prompt_for(preset_for(brief.style_preset)) or brief.visual_style
+    parts.append(f"{look}, {product_context}, {NO_MOCKUP}.")
 
     if layout_type == "full_bleed":
         parts.append("Do not include any text or lettering.")
     else:
         parts.append("Print artwork without any lettering: no text, no words, no watermark.")
-        if layout_type == "text_top_bottom":
-            parts.append(
-                "Leave the top and the bottom of the canvas empty: plain background only, "
-                "nothing in those areas."
-            )
-        else:
-            parts.append(
-                "Leave the top of the canvas empty: plain background only, nothing in that area."
-            )
+        reserve = LAYOUT_RESERVES.get(layout_type)
+        if reserve:
+            parts.append(reserve)
 
     parts.append("Do not draw anything else.")
 
@@ -195,6 +226,16 @@ def build_flux_prompt(brief: DesignBrief) -> str:
         parts.append(feedback.strip())
 
     return " ".join(parts)
+
+
+def build_negative_prompt(brief: DesignBrief) -> str:
+    """What the image model is told not to draw.
+
+    The negative prompt keeps the look of the design and keeps the paper
+    clean: a texture that is painted on the background would survive the DTF
+    cutout as a grey rectangle and would wreck the despill (issue #227).
+    """
+    return negative_for(preset_for(brief.style_preset))
 
 
 def generate_image(
@@ -218,8 +259,11 @@ def generate_image(
 
     if extra_prompt:
         prompt = f"{prompt} {extra_prompt}"
+    negative_prompt = build_negative_prompt(brief)
     try:
-        result = comfyui_client.generate_image(prompt=prompt, seed=seed)
+        result = comfyui_client.generate_image(
+            prompt=prompt, seed=seed, negative_prompt=negative_prompt
+        )
     except ComfyUIError as e:
         logger.warning("ComfyUI image generation failed: %s", e)
         return ImageResult(image_bytes=None, prompt=prompt, error=str(e))

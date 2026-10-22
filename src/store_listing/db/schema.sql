@@ -173,7 +173,9 @@ CREATE TABLE design_briefs (
     -- The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
     voice VARCHAR(20) DEFAULT 'deadpan',
     -- The family the text of the design is drawn in.
-    font_family VARCHAR(40)
+    font_family VARCHAR(40),
+    -- The look the design is drawn in.
+    style_preset VARCHAR(40)
 );
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);

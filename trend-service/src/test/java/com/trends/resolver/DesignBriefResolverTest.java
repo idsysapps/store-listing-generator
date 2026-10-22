@@ -320,7 +320,7 @@ class DesignBriefResolverTest {
         when(designBriefRepository.findById(1L)).thenReturn(brief);
 
         DesignBriefSummary result = designBriefResolver.requestRegeneration(
-                1, "Make the skeleton more cartoonish, use brighter colors");
+                1, "Make the skeleton more cartoonish, use brighter colors", null, null);
 
         assertNotNull(result);
         assertNull(brief.imageKeyRaw);
@@ -331,11 +331,66 @@ class DesignBriefResolverTest {
     }
 
     @Test
+    void testGetDesignBriefs_ExposesTheLookTheVoiceAndTheType() throws GraphQLException {
+        // The operator picks the designs they like out of a spread, and the
+        // spread is told apart by the look and the voice (issue #228).
+        DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
+        brief.voice = "deadpan";
+        brief.stylePreset = "halftone_comic";
+        brief.fontFamily = "anton";
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = queryBriefs(null, null, 10);
+
+        DesignBriefSummary summary = result.getItems().get(0);
+        assertEquals("deadpan", summary.getVoice());
+        assertEquals("halftone_comic", summary.getStylePreset());
+        assertEquals("anton", summary.getFontFamily());
+    }
+
+    @Test
+    void testRequestRegeneration_ChangesTheLookAndTheVoice() throws GraphQLException {
+        // The same design in another look is a render away, so the curation
+        // can compare them (issue #228).
+        DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
+        brief.voice = "deadpan";
+        brief.stylePreset = "halftone_comic";
+        brief.fontFamily = "anton";
+        when(designBriefRepository.findById(1L)).thenReturn(brief);
+
+        designBriefResolver.requestRegeneration(1, "another look", "art_nouveau", "cozy");
+
+        assertEquals("art_nouveau", brief.stylePreset);
+        assertEquals("cozy", brief.voice);
+        // The type follows the look, so the family that was stored is not the
+        // family that will be drawn.
+        assertNull(brief.fontFamily);
+        verify(designBriefRepository).persist(brief);
+    }
+
+    @Test
+    void testRequestRegeneration_KeepsTheLookWhenNoneIsGiven() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
+        brief.voice = "deadpan";
+        brief.stylePreset = "halftone_comic";
+        brief.fontFamily = "anton";
+        when(designBriefRepository.findById(1L)).thenReturn(brief);
+
+        designBriefResolver.requestRegeneration(1, "brighter colours", null, null);
+
+        assertEquals("halftone_comic", brief.stylePreset);
+        assertEquals("deadpan", brief.voice);
+        assertEquals("anton", brief.fontFamily);
+    }
+
+    @Test
     void testRequestRegeneration_ReturnsNullForMissingBrief() throws GraphQLException {
         when(designBriefRepository.findById(999L)).thenReturn(null);
 
         DesignBriefSummary result = designBriefResolver.requestRegeneration(
-                999, "some feedback");
+                999, "some feedback", null, null);
 
         assertNull(result);
     }
@@ -348,7 +403,7 @@ class DesignBriefResolverTest {
 
         when(designBriefRepository.findById(1L)).thenReturn(brief);
 
-        designBriefResolver.requestRegeneration(1, "brighter colors");
+        designBriefResolver.requestRegeneration(1, "brighter colors", null, null);
 
         verify(celeryTaskDispatcher).dispatchGenerateSingleBriefImage(1);
     }
@@ -357,7 +412,7 @@ class DesignBriefResolverTest {
     void testRequestRegeneration_DoesNotDispatchForMissingBrief() throws GraphQLException {
         when(designBriefRepository.findById(999L)).thenReturn(null);
 
-        designBriefResolver.requestRegeneration(999, "some feedback");
+        designBriefResolver.requestRegeneration(999, "some feedback", null, null);
 
         verify(celeryTaskDispatcher, never()).dispatchGenerateSingleBriefImage(anyInt());
     }
@@ -369,7 +424,7 @@ class DesignBriefResolverTest {
 
         when(designBriefRepository.findById(1L)).thenReturn(brief);
 
-        DesignBriefSummary result = designBriefResolver.requestRegeneration(1, null);
+        DesignBriefSummary result = designBriefResolver.requestRegeneration(1, null, null, null);
 
         assertNotNull(result);
         assertNull(brief.imageKeyRaw);
@@ -627,7 +682,7 @@ class DesignBriefResolverTest {
         when(securityIdentity.isAnonymous()).thenReturn(true);
 
         GraphQLException ex = assertThrows(GraphQLException.class,
-                () -> designBriefResolver.requestRegeneration(1, "feedback"));
+                () -> designBriefResolver.requestRegeneration(1, "feedback", null, null));
         assertEquals("Authentication required", ex.getMessage());
     }
 }

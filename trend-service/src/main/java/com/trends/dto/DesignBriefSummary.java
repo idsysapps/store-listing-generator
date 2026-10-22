@@ -25,6 +25,9 @@ public class DesignBriefSummary {
     private String taglineText;
     private String fontColor;
     private String sceneDescription;
+    private String voice;
+    private String stylePreset;
+    private String fontFamily;
     private Boolean personalUse;
     private List<MaterialRecommendation> recommendedMaterials;
 
@@ -113,6 +116,15 @@ public class DesignBriefSummary {
 
     public String getSceneDescription() { return sceneDescription; }
     public void setSceneDescription(String sceneDescription) { this.sceneDescription = sceneDescription; }
+
+    public String getVoice() { return voice; }
+    public void setVoice(String voice) { this.voice = voice; }
+
+    public String getStylePreset() { return stylePreset; }
+    public void setStylePreset(String stylePreset) { this.stylePreset = stylePreset; }
+
+    public String getFontFamily() { return fontFamily; }
+    public void setFontFamily(String fontFamily) { this.fontFamily = fontFamily; }
 
     public Boolean getPersonalUse() { return personalUse; }
     public void setPersonalUse(Boolean personalUse) { this.personalUse = personalUse; }

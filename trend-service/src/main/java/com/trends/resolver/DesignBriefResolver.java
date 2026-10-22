@@ -136,7 +136,8 @@ public class DesignBriefResolver {
 
     @Mutation("requestRegeneration")
     @Transactional
-    public DesignBriefSummary requestRegeneration(int briefId, String feedback) throws GraphQLException {
+    public DesignBriefSummary requestRegeneration(int briefId, String feedback, String stylePreset,
+            String voice) throws GraphQLException {
         requireAuthentication();
         DesignBrief brief = designBriefRepository.findById((long) briefId);
         if (brief == null) {
@@ -146,6 +147,20 @@ public class DesignBriefResolver {
         brief.imageKeyRaw = null;
         brief.imageKeyTransparent = null;
         brief.regenerationFeedback = feedback;
+
+        // The same design in another look is a render away, so the curation
+        // can compare them side by side (issue #228).
+        if (stylePreset != null && !stylePreset.isBlank()) {
+            brief.stylePreset = stylePreset;
+            // The type follows the look, so the family that was stored is not
+            // the family that will be drawn.
+            brief.fontFamily = null;
+        }
+        if (voice != null && !voice.isBlank()) {
+            brief.voice = voice;
+            brief.fontFamily = null;
+        }
+
         designBriefRepository.persist(brief);
 
         celeryTaskDispatcher.dispatchGenerateSingleBriefImage(briefId)
@@ -187,6 +202,9 @@ public class DesignBriefResolver {
         summary.setTaglineText(brief.taglineText);
         summary.setFontColor(brief.fontColor);
         summary.setSceneDescription(brief.sceneDescription);
+        summary.setVoice(brief.voice);
+        summary.setStylePreset(brief.stylePreset);
+        summary.setFontFamily(brief.fontFamily);
         summary.setPersonalUse(brief.personalUse);
         summary.setRecommendedMaterials(
                 materialRecommendationReader.read(brief.recommendedMaterials));

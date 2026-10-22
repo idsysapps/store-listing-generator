@@ -7,8 +7,10 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from store_listing.orchestration.art_direction import family_for, preset_for
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
+    art_direction_rules,
     layout_rules,
     product_belongs_to,
     product_catalog,
@@ -25,7 +27,6 @@ from store_listing.orchestration.json_response import extract_json_objects
 from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
-from store_listing.orchestration.typography import family_for_voice
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +82,15 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         '  "tagline_text": "secondary text or null",\n'
         '  "font_color": "#FFFFFF",\n'
         '  "voice": "deadpan | loud | cozy",\n'
+        '  "style_preset": "vintage_screenprint | seventies_retro | halftone_comic | '
+        "riso_two_color | hand_inked_woodcut | kawaii_flat | art_nouveau | "
+        'distressed_band_tee",\n'
         '  "scene_description": "concise visual description of the illustration only, '
         'no text. Under 35 words."\n'
         "}}\n\n"
         f"{layout_rules(types)}\n"
         f"{voice_rules()}\n"
+        f"{art_direction_rules()}\n"
         f"{DESIGN_ONLY_RULES}\n"
         f"{ip_rules}"
     )
@@ -178,9 +183,17 @@ def _brief_from(
             return None
 
     voice = normalise_voice(b.get("voice") if isinstance(b.get("voice"), str) else None)
+    # The look of the design. A brief that names a look we do not print has no
+    # look, and the voice decides the type then (issue #227).
+    style_preset = b.get("style_preset")
+    if not isinstance(style_preset, str):
+        style_preset = None
+    preset = preset_for(style_preset)
+    if preset is None:
+        style_preset = None
     # The family of the type is decided here, not by the model: the model picks
     # a tone, and the type follows the art direction (issue #226).
-    font_family = family_for_voice(voice)
+    font_family = family_for(preset, voice)
 
     # The text of a design is the part the buyer reads, so it is the part that
     # has to be good. A brief for personal use may name a franchise on
@@ -212,6 +225,7 @@ def _brief_from(
         scene_description=scene_description,
         voice=voice,
         font_family=font_family,
+        style_preset=style_preset,
     )
 
 
@@ -305,6 +319,7 @@ def create_custom_brief(
         personal_use=personal_use,
         voice=brief.voice,
         font_family=brief.font_family,
+        style_preset=brief.style_preset,
     )
 
     return {"status": "success", "brief_id": brief_id, "personal_use": personal_use}
