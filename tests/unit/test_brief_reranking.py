@@ -12,6 +12,14 @@ from store_listing.orchestration.brief_reranking import (
 )
 
 
+class _ApiError(Exception):
+    """An error that carries an HTTP status, like the OpenAI SDK raises."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def _rerank_response(
     evaluations: list[dict] | None = None,
 ) -> str:
@@ -185,6 +193,21 @@ class TestRerankBriefs:
         assert result["status"] == "success"
         assert result["reranked"] == 2
         assert db.update_brief_confidence.call_count == 2
+
+    def test_a_model_the_endpoint_does_not_serve_is_reported_clearly(self) -> None:
+        # The cluster pointed at a model the DGX proxy does not serve, so
+        # every rerank call failed with a generic LLM error (issue #194).
+        db = self._mock_db()
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = _ApiError(
+            400,
+            "Unknown model: qwen2.5. Available: ['qwen38_briefs', 'qwen_vl_ocr']",
+        )
+
+        result = rerank_briefs(db, llm, "qwen2.5:32b-instruct-q4_K_M")
+
+        assert result["status"] == "error"
+        assert "qwen38_briefs" in result["error"]
 
     def test_passes_correct_values_to_db_update(self) -> None:
         db = self._mock_db()

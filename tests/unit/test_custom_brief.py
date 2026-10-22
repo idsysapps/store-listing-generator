@@ -10,6 +10,14 @@ from store_listing.orchestration.custom_brief import (
 )
 
 
+class _ApiError(Exception):
+    """An error that carries an HTTP status, like the OpenAI SDK raises."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def _brief_response(
     concept: str = "First Baseball Game Tee",
     product_type: str = "dtf_apparel",
@@ -264,6 +272,24 @@ class TestCreateCustomBrief:
         llm.with_raw_response.create.side_effect = RuntimeError("API down")
         result = create_custom_brief(db, llm, "model-x", "test idea", "dtf_apparel")
         assert result["status"] == "error"
+        db.insert_design_brief.assert_not_called()
+
+    def test_a_model_the_endpoint_does_not_serve_is_reported_clearly(self) -> None:
+        # The cluster pointed at a model the DGX proxy does not serve, so
+        # every custom brief call failed with a generic LLM error (issue #194).
+        db = self._mock_db()
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = _ApiError(
+            400,
+            "Unknown model: qwen2.5. Available: ['qwen38_briefs', 'qwen_vl_ocr']",
+        )
+
+        result = create_custom_brief(
+            db, llm, "qwen2.5:32b-instruct-q4_K_M", "test idea", "dtf_apparel"
+        )
+
+        assert result["status"] == "error"
+        assert "qwen38_briefs" in result["error"]
         db.insert_design_brief.assert_not_called()
 
     def test_returns_error_on_empty_choices(self) -> None:

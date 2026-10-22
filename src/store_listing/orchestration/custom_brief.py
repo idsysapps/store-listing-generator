@@ -18,6 +18,7 @@ from store_listing.orchestration.design_briefs import (
     DesignBriefDBClient,
     headline_for_text_only,
 )
+from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
@@ -203,8 +204,12 @@ def create_custom_brief(
             return {"status": "error", "error": "LLM returned empty choices"}
         content = response.choices[0].message.content or ""
     except Exception as e:  # noqa: BLE001
-        logger.warning("Custom brief LLM call failed: %s", e)
-        return {"status": "error", "error": str(e)}
+        message = model_error_message(e, model)
+        if is_model_missing_error(e):
+            logger.error("Custom brief LLM call failed: %s", message)
+        else:
+            logger.warning("Custom brief LLM call failed: %s", e)
+        return {"status": "error", "error": message}
 
     brief = parse_custom_brief_response(content)
     if brief is None:

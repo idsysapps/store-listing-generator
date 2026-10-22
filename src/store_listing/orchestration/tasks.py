@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Sequence
 from typing import Any
@@ -24,6 +25,8 @@ from store_listing.orchestration.promotion import (
     compute_promotion_score,
 )
 from store_listing.orchestration.source_health import build_tracker, with_source_health
+
+logger = logging.getLogger(__name__)
 
 celery_app = Celery(
     "store_listing",
@@ -83,6 +86,21 @@ def _build_artwork_validator() -> Any:
     from store_listing.orchestration.llm_client import get_artwork_vision_model, get_vision_client
 
     return ArtworkValidator(client=get_vision_client(), model=get_artwork_vision_model())
+
+
+def _check_llm_model(client: Any, model: str) -> str:
+    """Log the models the endpoint serves when the configured one is missing.
+
+    The cluster pointed at a model the DGX proxy does not serve, so every
+    brief and curation call failed and the logs never said which model was
+    missing (issue #194).
+    """
+    from store_listing.orchestration.llm_client import check_model_available
+
+    message = check_model_available(client, model)
+    if message:
+        logger.error("The configured LLM model is not served: %s", message)
+    return message
 
 
 def _artwork_text_validation_enabled() -> bool:
@@ -456,7 +474,10 @@ def curate_seeds_task(chain_depth: int = 0) -> dict:
         return {"status": "skipped", "reason": "LLM_API_KEY not set"}
 
     client = get_llm_client()
-    result = curate_seeds(DatabaseClient(), client.chat.completions, get_llm_curation_model())
+    model = get_llm_curation_model()
+    _check_llm_model(client, model)
+    result = curate_seeds(DatabaseClient(), client.chat.completions, model)
+    result["llm_model"] = model
 
     remaining = result.get("remaining", 0)
     daily_capacity = _daily_curation_capacity()
@@ -485,14 +506,17 @@ def create_custom_brief_task(
         return {"status": "skipped", "reason": "LLM_API_KEY not set"}
 
     client = get_llm_client()
+    model = get_llm_model()
+    _check_llm_model(client, model)
     result = create_custom_brief(
         DatabaseClient(),
         client.chat.completions,
-        get_llm_model(),
+        model,
         description,
         product_type,
         personal_use=personal_use,
     )
+    result["llm_model"] = model
 
     if result.get("status") == "success" and result.get("brief_id"):
         generate_single_brief_image_task.apply_async(  # type: ignore[attr-defined]
@@ -513,7 +537,11 @@ def generate_design_briefs_task() -> dict:
         return {"status": "skipped", "reason": "LLM_API_KEY not set"}
 
     client = get_llm_client()
-    return generate_design_briefs(DatabaseClient(), client.chat.completions, get_llm_model())
+    model = get_llm_model()
+    _check_llm_model(client, model)
+    result = generate_design_briefs(DatabaseClient(), client.chat.completions, model)
+    result["llm_model"] = model
+    return result
 
 
 @celery_app.task
@@ -530,7 +558,11 @@ def rerank_design_briefs_task() -> dict:
         return {"status": "skipped", "reason": "LLM_API_KEY not set"}
 
     client = get_llm_client()
-    return rerank_briefs(DatabaseClient(), client.chat.completions, get_llm_curation_model())
+    model = get_llm_curation_model()
+    _check_llm_model(client, model)
+    result = rerank_briefs(DatabaseClient(), client.chat.completions, model)
+    result["llm_model"] = model
+    return result
 
 
 @celery_app.task

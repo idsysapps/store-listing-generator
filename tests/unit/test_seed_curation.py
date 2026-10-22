@@ -264,6 +264,14 @@ class TestParseCurationResponse:
         assert result.evaluations[0].action == "PROMOTE"
 
 
+class _ApiError(Exception):
+    """An error that carries an HTTP status, like the OpenAI SDK raises."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class TestCurateSeeds:
     def _mock_db(self, candidates=None, active_seeds=None) -> MagicMock:
         db = MagicMock()
@@ -459,6 +467,23 @@ class TestCurateSeeds:
 
         assert result["status"] == "error"
         assert "API down" in result["error"]
+
+    def test_a_model_the_endpoint_does_not_serve_is_reported_clearly(self) -> None:
+        # The cluster pointed at a model the DGX proxy does not serve, so
+        # every curation call failed with a generic LLM error that did not say
+        # which model was missing (issue #194).
+        candidates = [_candidate(1, "hoodie")]
+        db = self._mock_db(candidates=candidates)
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = _ApiError(
+            400,
+            "Unknown model: qwen2.5. Available: ['qwen38_briefs', 'qwen_vl_ocr']",
+        )
+
+        result = curate_seeds(db, llm, "qwen2.5:32b-instruct-q4_K_M", today=date(2026, 10, 1))
+
+        assert result["status"] == "error"
+        assert "qwen38_briefs" in result["error"]
 
     def test_archives_used_seeds_before_fresh_ones(self, monkeypatch) -> None:
         # The brief task needs fresh seeds; a seed that already produced a

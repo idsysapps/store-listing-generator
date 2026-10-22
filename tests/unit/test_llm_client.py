@@ -5,23 +5,32 @@ empty string". The chart ships the model names empty when a cluster does not
 override them, and `os.environ.get(name, default)` lets the empty value win
 over the default: the artwork gate then asked the proxy for the model "" and
 got a 400 on every image, so the gate was off (issue #213).
+
+The tests at the end cover the model check: the cluster pointed at a model the
+DGX proxy does not serve, so every brief and curation call failed with a
+generic LLM error and nothing said which model was missing (issue #194).
 """
 
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from store_listing.orchestration.llm_client import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
     DEFAULT_VISION_MODEL,
+    check_model_available,
     get_artwork_vision_model,
     get_llm_client,
     get_llm_curation_model,
     get_llm_model,
     get_vision_client,
     get_vision_model,
+    is_model_missing_error,
+    list_served_models,
+    model_error_message,
 )
 
 
@@ -121,3 +130,99 @@ class TestLLMClient:
             client = get_llm_client()
 
         assert str(client.base_url).rstrip("/") == "http://proxy:9000/v1"
+
+
+class _ApiError(Exception):
+    """An error that carries an HTTP status, like the OpenAI SDK raises."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _client_serving(*model_ids: str) -> MagicMock:
+    client = MagicMock()
+    client.models.list.return_value = SimpleNamespace(
+        data=[SimpleNamespace(id=model_id) for model_id in model_ids]
+    )
+    return client
+
+
+class TestServedModels:
+    def test_lists_the_model_ids_the_endpoint_serves(self) -> None:
+        client = _client_serving("qwen38_briefs", "qwen_vl_ocr")
+
+        assert list_served_models(client) == ["qwen38_briefs", "qwen_vl_ocr"]
+
+    def test_an_endpoint_that_cannot_list_its_models_is_not_a_failure(self) -> None:
+        client = MagicMock()
+        client.models.list.side_effect = RuntimeError("no /models here")
+
+        assert list_served_models(client) == []
+
+    def test_a_model_the_endpoint_serves_is_reported_as_usable(self) -> None:
+        client = _client_serving("qwen38_briefs")
+
+        assert check_model_available(client, "qwen38_briefs") == ""
+
+    def test_a_model_the_endpoint_does_not_serve_names_the_ones_it_does(self) -> None:
+        # The cluster pointed at a model the proxy does not serve, so every
+        # brief and curation call failed (issue #194).
+        client = _client_serving("qwen38_briefs", "qwen_vl_ocr")
+
+        message = check_model_available(client, "qwen2.5:32b-instruct-q4_K_M")
+
+        assert "qwen2.5:32b-instruct-q4_K_M" in message
+        assert "qwen38_briefs" in message
+        assert "qwen_vl_ocr" in message
+
+    def test_an_endpoint_without_a_model_list_cannot_confirm_the_model(self) -> None:
+        # The check is advisory: not being able to ask is not a failure.
+        client = MagicMock()
+        client.models.list.side_effect = RuntimeError("no /models here")
+
+        assert check_model_available(client, "qwen38_briefs") == ""
+
+
+class TestModelErrors:
+    def test_a_404_about_a_model_is_a_missing_model(self) -> None:
+        assert is_model_missing_error(_ApiError(404, "Error code: 404 - model not found"))
+
+    def test_the_proxy_unknown_model_message_is_a_missing_model(self) -> None:
+        error = _ApiError(
+            400,
+            "Error code: 400 - {'error': {'message': "
+            "\"Unknown model: qwen2.5. Available: ['qwen38_briefs', 'qwen_vl_ocr']\"}}",
+        )
+
+        assert is_model_missing_error(error)
+
+    def test_a_rate_limit_is_not_a_missing_model(self) -> None:
+        assert not is_model_missing_error(_ApiError(429, "Error code: 429 - rate limit"))
+
+    def test_an_unrelated_error_is_not_a_missing_model(self) -> None:
+        assert not is_model_missing_error(RuntimeError("API down"))
+
+    def test_the_message_names_the_models_the_endpoint_serves(self) -> None:
+        error = _ApiError(
+            400,
+            "Unknown model: qwen2.5. Available: ['qwen38_briefs', 'qwen_vl_ocr']",
+        )
+
+        message = model_error_message(error, "qwen2.5:32b-instruct-q4_K_M")
+
+        assert "qwen2.5:32b-instruct-q4_K_M" in message
+        assert "qwen38_briefs" in message
+        assert "qwen_vl_ocr" in message
+
+    def test_a_missing_model_without_a_list_still_names_the_model(self) -> None:
+        error = _ApiError(404, "Error code: 404 - model not found")
+
+        message = model_error_message(error, "qwen2.5:32b-instruct-q4_K_M")
+
+        assert "qwen2.5:32b-instruct-q4_K_M" in message
+
+    def test_other_errors_keep_their_own_message(self) -> None:
+        error = _ApiError(429, "Error code: 429 - rate limit exceeded")
+
+        assert model_error_message(error, "qwen38_briefs") == str(error)

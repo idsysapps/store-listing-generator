@@ -30,6 +30,7 @@ from store_listing.orchestration.brief_prompts import (
     PRODUCT_CATALOG,
 )
 from store_listing.orchestration.context_seeds import get_upcoming_events
+from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
@@ -476,7 +477,11 @@ def _request_briefs(
             return None, "LLM returned empty choices"
         content = response.choices[0].message.content or ""
     except Exception as e:  # noqa: BLE001
-        logger.warning("LLM brief generation call failed: %s", e)
-        return None, str(e)
+        message = model_error_message(e, model)
+        if is_model_missing_error(e):
+            logger.error("LLM brief generation failed: %s", message)
+        else:
+            logger.warning("LLM brief generation call failed: %s", e)
+        return None, message
 
     return parse_brief_response(content), None

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -154,3 +156,55 @@ class TestVisionClient:
         with patch.dict(os.environ, {"VISION_LLM_BASE_URL": "http://vision:8003/v1"}):
             client = get_vision_client()
         assert str(client.base_url).rstrip("/") == "http://vision:8003/v1"
+
+
+class TestLlmModelCheck:
+    """The configured model is checked against the models the endpoint serves.
+
+    The cluster pointed at a model the DGX proxy does not serve, so every
+    brief and curation call failed and the logs never said which model was
+    missing (issue #194).
+    """
+
+    def _run_brief_task(
+        self,
+        tasks,
+        served_models: list[str],
+        model: str,
+        caplog: pytest.LogCaptureFixture,
+    ) -> dict:
+        client = MagicMock()
+        client.models.list.return_value = SimpleNamespace(
+            data=[SimpleNamespace(id=served) for served in served_models]
+        )
+        briefs = MagicMock(return_value={"status": "success", "briefs_created": 3})
+        caplog.set_level(logging.ERROR)
+        with (
+            patch.dict(os.environ, {"LLM_API_KEY": "key", "LLM_MODEL": model}),
+            patch("store_listing.orchestration.llm_client.get_llm_client", return_value=client),
+            patch("store_listing.orchestration.design_briefs.generate_design_briefs", briefs),
+        ):
+            result = tasks.generate_design_briefs_task.run()
+        return result
+
+    def test_a_model_the_endpoint_does_not_serve_is_logged_with_the_served_ones(
+        self, tasks, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        self._run_brief_task(tasks, ["qwen38_briefs", "qwen_vl_ocr"], "qwen2.5:32b", caplog)
+
+        assert "qwen38_briefs" in caplog.text
+        assert "qwen_vl_ocr" in caplog.text
+
+    def test_a_served_model_is_not_complained_about(
+        self, tasks, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        self._run_brief_task(tasks, ["qwen38_briefs"], "qwen38_briefs", caplog)
+
+        assert "does not serve" not in caplog.text
+
+    def test_the_result_says_which_model_was_asked(
+        self, tasks, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        result = self._run_brief_task(tasks, ["qwen38_briefs"], "qwen38_briefs", caplog)
+
+        assert result["llm_model"] == "qwen38_briefs"
