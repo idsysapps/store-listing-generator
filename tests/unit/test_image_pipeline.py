@@ -1029,3 +1029,50 @@ class TestTheTextureOfTheDesign:
         colours = plain.getcolors(maxcolors=1_000_000) or []
         white = sum(count for count, colour in colours if colour == (255, 255, 255))
         assert white > 0
+
+
+class TestTheLookOfARender:
+    def test_the_type_follows_the_look(self) -> None:
+        # The operator can render the same design in another look, and the
+        # type follows the look (issue #228).
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    layout_type="text_top",
+                    headline_text="GOBBLE TIL THE BELL",
+                    style_preset="halftone_comic",
+                )
+            ]
+        )
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=_real_png()),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        body = s3.put_object.call_args.kwargs["Body"]
+        comic = Image.open(BytesIO(body)).convert("RGB")
+
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    layout_type="text_top",
+                    headline_text="GOBBLE TIL THE BELL",
+                    style_preset="art_nouveau",
+                )
+            ]
+        )
+        s3 = MagicMock()
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=_real_png()),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+        body = s3.put_object.call_args.kwargs["Body"]
+        nouveau = Image.open(BytesIO(body)).convert("RGB")
+
+        assert comic.tobytes() != nouveau.tobytes()

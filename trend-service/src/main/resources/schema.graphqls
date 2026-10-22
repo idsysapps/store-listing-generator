@@ -78,6 +78,9 @@ type DesignBriefSummary {
   imageKeyTransparent: String
   imageUrl: String
   imageTransparentUrl: String
+  voice: String
+  stylePreset: String
+  fontFamily: String
 }
 
 type Query {

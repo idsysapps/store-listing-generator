@@ -19,7 +19,7 @@ import os
 import random
 from typing import Any
 
-from store_listing.orchestration.art_direction import preset_for
+from store_listing.orchestration.art_direction import family_for, preset_for
 from store_listing.orchestration.artwork_validation import (
     ArtworkTextValidator,
     ArtworkValidator,
@@ -88,6 +88,11 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
     # scene that is only words leaves nothing to draw, and the design falls
     # back to typography (issue #208).
     scene = strip_lettering((brief_row.get("scene_description") or "").strip())
+    voice = brief_row.get("voice") or DEFAULT_VOICE
+    # The type follows the look, so a design that is rendered in another look
+    # is drawn in the type of that look (issue #228).
+    preset = preset_for(brief_row.get("style_preset"))
+    font_family = family_for(preset, voice) if preset else brief_row.get("font_family")
     return DesignBrief(
         concept=brief_row["concept"],
         product_type=brief_row["product_type"],
@@ -103,8 +108,8 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         font_color=brief_row.get("font_color"),
         regeneration_feedback=brief_row.get("regeneration_feedback"),
         scene_description=scene or None,
-        voice=brief_row.get("voice") or DEFAULT_VOICE,
-        font_family=brief_row.get("font_family"),
+        voice=voice,
+        font_family=font_family,
         style_preset=brief_row.get("style_preset"),
     )
 
