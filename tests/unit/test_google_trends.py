@@ -269,6 +269,43 @@ class TestDatabaseClient:
 
         assert materials[0]["product_type"] == ["substrate", "dtf_apparel"]
 
+    def test_get_app_setting_returns_the_stored_value(self) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = ("dtf_apparel",)
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            value = DatabaseClient().get_app_setting("enabled_product_types")
+
+        assert value == "dtf_apparel"
+
+    def test_get_app_setting_returns_none_when_it_was_never_stored(self) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = None
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            value = DatabaseClient().get_app_setting("enabled_product_types")
+
+        assert value is None
+
+    def test_set_app_setting_stores_the_value(self) -> None:
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            DatabaseClient().set_app_setting("enabled_product_types", "dtf_apparel")
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "INSERT INTO app_settings" in sql
+        assert mock_cursor.execute.call_args[0][1] == ("enabled_product_types", "dtf_apparel")
+
 
 class TestPytrendsHardening:
     @pytest.fixture

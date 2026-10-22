@@ -710,6 +710,26 @@ class DatabaseClient:
                 for row in cur.fetchall()
             ]
 
+    def get_app_setting(self, key: str) -> str | None:
+        """The value of a setting, or None when it was never stored."""
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_settings WHERE key = %s", (key,))
+            row = cur.fetchone()
+            return row[0] if row else None
+
+    def set_app_setting(self, key: str, value: str) -> None:
+        """Store a setting, replacing the value it had."""
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (key) DO UPDATE
+                    SET value = EXCLUDED.value, updated_at = NOW()
+                """,
+                (key, value),
+            )
+
     def list_briefs_for_reranking(self) -> list[RerankableBrief]:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(

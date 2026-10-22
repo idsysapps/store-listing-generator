@@ -41,6 +41,9 @@ config:
   artworkTextValidationEnabled: "true"
   maxLetteringRegenerationAttempts: "1"
   requireTaglineText: "false"
+  # The product types the pipeline produces right now. Empty means every
+  # known type; a stored setting in app_settings wins over this value.
+  enabledProductTypes: ""
 
 secrets:
   databaseUser: store_listing
