@@ -1,12 +1,14 @@
 package com.trends.resolver;
 
 import com.trends.config.ImageStorageConfig;
+import com.trends.config.MaterialRecommendationReader;
 import com.trends.domain.ActiveSeed;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefConnection;
 import com.trends.dto.DesignBriefOrderBy;
 import com.trends.dto.DesignBriefSummary;
+import com.trends.dto.MaterialRecommendation;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -33,6 +35,9 @@ class DesignBriefResolverTest {
     ImageStorageConfig imageStorageConfig;
 
     @Mock
+    MaterialRecommendationReader materialRecommendationReader;
+
+    @Mock
     CeleryTaskDispatcher celeryTaskDispatcher;
 
     @Mock
@@ -47,6 +52,8 @@ class DesignBriefResolverTest {
         when(celeryTaskDispatcher.dispatchGenerateSingleBriefImage(anyInt()))
                 .thenReturn(Uni.createFrom().voidItem());
         when(securityIdentity.isAnonymous()).thenReturn(false);
+        when(materialRecommendationReader.read(any()))
+                .thenReturn(List.of());
     }
 
     private DesignBrief makeBrief(int id, String concept, String productType) {
@@ -88,6 +95,41 @@ class DesignBriefResolverTest {
         assertEquals(1, result.getPageInfo().getTotalCount());
         assertFalse(result.getPageInfo().getHasNextPage());
         assertFalse(result.getPageInfo().getHasPreviousPage());
+    }
+
+    @Test
+    void testGetDesignBriefs_ReturnsTheRecommendedMaterials() throws GraphQLException {
+        // The substrates a brief should be printed on were stored with the
+        // brief and dropped on the way to the client (issue #215).
+        DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
+        brief.recommendedMaterials = "[{\"external_id\":\"bc3001-white\"}]";
+        MaterialRecommendation recommendation =
+                new MaterialRecommendation("bc3001-white", "Bella Canvas 3001", "White", "t-shirt", 4.5);
+        when(materialRecommendationReader.read(brief.recommendedMaterials))
+                .thenReturn(List.of(recommendation));
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = queryBriefs(null, null, 10);
+
+        List<MaterialRecommendation> materials = result.getItems().get(0).getRecommendedMaterials();
+        assertEquals(1, materials.size());
+        assertEquals("bc3001-white", materials.get(0).getExternalId());
+        assertEquals("Bella Canvas 3001", materials.get(0).getName());
+    }
+
+    @Test
+    void testGetDesignBriefs_WithoutRecommendedMaterialsReturnsAnEmptyList()
+            throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = queryBriefs(null, null, 10);
+
+        assertTrue(result.getItems().get(0).getRecommendedMaterials().isEmpty());
     }
 
     @Test

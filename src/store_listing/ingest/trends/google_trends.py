@@ -591,22 +591,41 @@ class DatabaseClient:
             row = cur.fetchone()
             return None if row is None else row[0]
 
-    def list_briefs_without_images(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_briefs_without_images(
+        self,
+        limit: int = 20,
+        product_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         import json as _json
 
         with self.connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, concept, product_type, audience, visual_style,
-                       layout_type, headline_text, tagline_text, font_color,
-                       regeneration_feedback, scene_description, recommended_materials
-                FROM design_briefs
-                WHERE image_key_raw IS NULL
-                ORDER BY created_at DESC
-                LIMIT %s
-                """,
-                (limit,),
-            )
+            if product_types:
+                cur.execute(
+                    """
+                    SELECT id, concept, product_type, audience, visual_style,
+                           layout_type, headline_text, tagline_text, font_color,
+                           regeneration_feedback, scene_description, recommended_materials
+                    FROM design_briefs
+                    WHERE image_key_raw IS NULL
+                      AND product_type = ANY(%s)
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (product_types, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, concept, product_type, audience, visual_style,
+                           layout_type, headline_text, tagline_text, font_color,
+                           regeneration_feedback, scene_description, recommended_materials
+                    FROM design_briefs
+                    WHERE image_key_raw IS NULL
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
             return [
                 {
                     "id": row[0],

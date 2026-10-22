@@ -106,6 +106,20 @@ class TestGenerateImagesForBriefs:
         )
         assert result["images_generated"] == 0
 
+    def test_the_sweep_only_takes_the_briefs_of_the_types_in_production(self) -> None:
+        # A store that focuses on DTF apparel does not spend GPU time on the
+        # old sublimation briefs (issue #215).
+        db = _mock_db_client(briefs=[])
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=MagicMock(),
+            product_types=["dtf_apparel"],
+        )
+
+        db.list_briefs_without_images.assert_called_once_with(20, ["dtf_apparel"])
+
     def test_generates_and_stores_the_image(self) -> None:
         db = _mock_db_client(briefs=[_brief()])
         s3 = MagicMock()

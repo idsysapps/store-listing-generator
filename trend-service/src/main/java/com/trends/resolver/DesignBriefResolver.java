@@ -1,6 +1,7 @@
 package com.trends.resolver;
 
 import com.trends.config.ImageStorageConfig;
+import com.trends.config.MaterialRecommendationReader;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefConnection;
@@ -35,6 +36,9 @@ public class DesignBriefResolver {
 
     @Inject
     ImageStorageConfig imageStorageConfig;
+
+    @Inject
+    MaterialRecommendationReader materialRecommendationReader;
 
     @Inject
     CeleryTaskDispatcher celeryTaskDispatcher;
@@ -184,6 +188,8 @@ public class DesignBriefResolver {
         summary.setFontColor(brief.fontColor);
         summary.setSceneDescription(brief.sceneDescription);
         summary.setPersonalUse(brief.personalUse);
+        summary.setRecommendedMaterials(
+                materialRecommendationReader.read(brief.recommendedMaterials));
         return summary;
     }
 }

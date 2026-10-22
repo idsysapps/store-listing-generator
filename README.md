@@ -383,6 +383,46 @@ SELECT key, value, updated_at FROM app_settings;
 A name the pipeline does not know is ignored with a warning, and a scope that
 names nothing usable falls back to the environment.
 
+### The materials of a brief
+
+A design brief says which substrate it should be printed on, and the client
+can read that recommendation and the catalogue it comes from:
+
+```graphql
+query {
+  designBriefs(productType: "dtf_apparel") {
+    items {
+      concept
+      productType
+      recommendedMaterials {
+        externalId
+        name
+        color
+        substrateType
+        unitCost
+      }
+    }
+  }
+}
+
+query {
+  fabricationMaterials(productType: "dtf_apparel") {
+    externalId
+    name
+    brand
+    substrateType
+    color
+    sizes
+    productTypes
+    unitCost
+  }
+}
+```
+
+A material can serve several product types, so `productTypes` is a list. A
+recommendation the model invented, or one that does not serve the product type
+of the brief, is dropped when the brief is read.
+
 ### Seed pool and brief mix
 | Variable | Default | Description |
 |----------|---------|-------------|

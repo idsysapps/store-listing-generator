@@ -26,6 +26,7 @@ public class DesignBriefSummary {
     private String fontColor;
     private String sceneDescription;
     private Boolean personalUse;
+    private List<MaterialRecommendation> recommendedMaterials;
 
     public DesignBriefSummary() {}
 
@@ -115,4 +116,9 @@ public class DesignBriefSummary {
 
     public Boolean getPersonalUse() { return personalUse; }
     public void setPersonalUse(Boolean personalUse) { this.personalUse = personalUse; }
+
+    public List<MaterialRecommendation> getRecommendedMaterials() { return recommendedMaterials; }
+    public void setRecommendedMaterials(List<MaterialRecommendation> recommendedMaterials) {
+        this.recommendedMaterials = recommendedMaterials;
+    }
 }

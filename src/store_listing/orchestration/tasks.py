@@ -516,6 +516,7 @@ def create_custom_brief_task(
         description,
         product_type,
         personal_use=personal_use,
+        enabled=enabled_product_types(DatabaseClient()),
     )
     result["llm_model"] = model
 
@@ -540,11 +541,13 @@ def generate_design_briefs_task() -> dict:
     client = get_llm_client()
     model = get_llm_model()
     _check_llm_model(client, model)
-    logger.info(
-        "Product types in production: %s", ", ".join(enabled_product_types(DatabaseClient()))
+    enabled = enabled_product_types(DatabaseClient())
+    logger.info("Product types in production: %s", ", ".join(enabled))
+    result = generate_design_briefs(
+        DatabaseClient(), client.chat.completions, model, enabled=enabled
     )
-    result = generate_design_briefs(DatabaseClient(), client.chat.completions, model)
     result["llm_model"] = model
+    result["product_types"] = enabled
     return result
 
 
@@ -614,6 +617,7 @@ def generate_design_images_task() -> dict:
         text_validator=text_validator,
         artwork_validator=_build_artwork_validator(),
         artwork_text_validator=_build_artwork_text_validator(),
+        product_types=enabled_product_types(DatabaseClient()),
     )
 
 
