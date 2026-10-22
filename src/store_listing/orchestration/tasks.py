@@ -89,6 +89,36 @@ def _build_artwork_validator() -> Any:
     return ArtworkValidator(client=get_vision_client(), model=get_artwork_vision_model())
 
 
+def _comfyui_steps() -> int:
+    """The step count the image model runs with.
+
+    Flux Schnell is distilled for 4 steps, but the count is a setting, so a
+    run can be tuned without a code change (issue #210).
+    """
+    from store_listing.orchestration.comfyui_client import DEFAULT_STEPS
+
+    try:
+        return int(os.environ.get("COMFYUI_STEPS", str(DEFAULT_STEPS)))
+    except ValueError:
+        logger.warning("COMFYUI_STEPS is not a number, using %d", DEFAULT_STEPS)
+        return DEFAULT_STEPS
+
+
+def _comfyui_cfg() -> float:
+    """The cfg the image model runs with.
+
+    Flux ignores the negative prompt at cfg 1, so the value matters when the
+    model is not the distilled one (issue #210).
+    """
+    from store_listing.orchestration.comfyui_client import DEFAULT_CFG
+
+    try:
+        return float(os.environ.get("COMFYUI_CFG", str(DEFAULT_CFG)))
+    except ValueError:
+        logger.warning("COMFYUI_CFG is not a number, using %s", DEFAULT_CFG)
+        return DEFAULT_CFG
+
+
 def _check_llm_model(client: Any, model: str) -> str:
     """Log the models the endpoint serves when the configured one is missing.
 
@@ -600,6 +630,8 @@ def generate_design_images_task() -> dict:
         alpha_black_point=int(os.environ.get("COMFYUI_BG_ALPHA_BLACK", "24")),
         alpha_white_point=int(os.environ.get("COMFYUI_BG_ALPHA_WHITE", "240")),
         alpha_erode_pixels=int(os.environ.get("COMFYUI_BG_ERODE_PIXELS", "1")),
+        steps=_comfyui_steps(),
+        cfg=_comfyui_cfg(),
     )
     text_validator = TextValidator(
         client=get_vision_client(),
@@ -649,6 +681,8 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         alpha_black_point=int(os.environ.get("COMFYUI_BG_ALPHA_BLACK", "24")),
         alpha_white_point=int(os.environ.get("COMFYUI_BG_ALPHA_WHITE", "240")),
         alpha_erode_pixels=int(os.environ.get("COMFYUI_BG_ERODE_PIXELS", "1")),
+        steps=_comfyui_steps(),
+        cfg=_comfyui_cfg(),
     )
     text_validator = TextValidator(
         client=get_vision_client(),
