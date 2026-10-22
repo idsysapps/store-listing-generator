@@ -59,6 +59,8 @@ ZONE_PADDING = 0.2
 SHADOW_RATIO = 0.045
 # The empty space around a word that is drawn in the accent colour.
 BLOCK_PADDING = 0.18
+# The margin the text keeps inside a band, as a share of the band.
+BAND_INSET = 0.08
 
 # A typography-only design has no artwork to make room for, so the text sits
 # in the middle of the canvas instead of at its edges.
@@ -108,7 +110,7 @@ PLACEMENTS: dict[str, TextPlacement] = {
     ),
     # A ribbon across the middle of the art.
     "banner": TextPlacement(
-        headline=(0.00, 0.36, 1.00, 0.22), tagline=(0.05, 0.88, 0.90, 0.12), bar=True
+        headline=(0.06, 0.36, 0.88, 0.22), tagline=(0.05, 0.88, 0.90, 0.12), bar=True
     ),
     # A tall arch with the headline in the head of the arch.
     "arch": TextPlacement(
@@ -505,7 +507,10 @@ def _draw_text(
         return
 
     x, y, width, height = box
-    font, lines = _fit(draw, text, width, int(height * (1 - ZONE_PADDING)), family, treatment)
+    # The text on a band keeps a margin inside it, so it does not touch the
+    # edge of the band.
+    fit_width = int(width * (1 - BAND_INSET)) if bar is not None else width
+    font, lines = _fit(draw, text, fit_width, int(height * (1 - ZONE_PADDING)), family, treatment)
 
     if bar is not None:
         color = _contrast_colour(bar)
