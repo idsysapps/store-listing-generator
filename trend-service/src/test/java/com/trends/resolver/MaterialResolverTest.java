@@ -81,6 +81,23 @@ class MaterialResolverTest {
     }
 
     @Test
+    void testGetFabricationMaterials_FallsBackToEveryActiveMaterialWhenTheTypeHasNone()
+            throws GraphQLException {
+        // cost-book publishes a material without a product type, so the typed
+        // list can be empty while the catalogue is full (issue #236).
+        when(securityIdentity.isAnonymous()).thenReturn(false);
+        when(materialRepository.findByProductType("dtf_apparel", 50)).thenReturn(List.of());
+        when(materialRepository.findAllActive(50)).thenReturn(List.of(material()));
+
+        List<FabricationMaterialSummary> result =
+                resolver.getFabricationMaterials("dtf_apparel", 50);
+
+        assertEquals(1, result.size());
+        assertEquals("bc3001-white", result.get(0).getExternalId());
+        verify(materialRepository).findAllActive(50);
+    }
+
+    @Test
     void testGetFabricationMaterials_RequiresAuthentication() {
         when(securityIdentity.isAnonymous()).thenReturn(true);
 
