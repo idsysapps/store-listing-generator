@@ -1,6 +1,7 @@
 """Unit tests for LLM-driven design brief generation."""
 
 import json
+import logging
 from datetime import date
 from typing import Any
 from unittest.mock import MagicMock
@@ -212,6 +213,103 @@ class TestParseBriefResponse:
     def test_handles_malformed_json(self) -> None:
         result = parse_brief_response("this is not json at all")
         assert result == []
+
+    def test_reads_a_batch_the_model_appended_something_to(self) -> None:
+        # The model answered with the batch and then another object. The
+        # parser sliced from the first "{" to the last "}", read two values as
+        # one and threw the whole batch away (issue #209).
+        response = (
+            json.dumps(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Coffee Beans",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                        }
+                    ]
+                }
+            )
+            + "\n"
+            + json.dumps({"notes": {"summary": "a second object"}})
+        )
+
+        result = parse_brief_response(response)
+
+        assert len(result) == 1
+        assert result[0].concept == "Coffee Beans"
+
+    def test_reads_a_batch_the_model_appended_prose_to(self) -> None:
+        response = (
+            json.dumps(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Coffee Beans",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                        }
+                    ]
+                }
+            )
+            + "\nI also wrote a note {like this}."
+        )
+
+        result = parse_brief_response(response)
+
+        assert len(result) == 1
+        assert result[0].concept == "Coffee Beans"
+
+    def test_merges_a_batch_the_model_split_in_two(self) -> None:
+        first = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "One",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                    }
+                ]
+            }
+        )
+        second = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Two",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(first + "\n" + second)
+
+        assert {brief.concept for brief in result} == {"One", "Two"}
+
+    def test_does_not_duplicate_briefs_when_the_batch_was_repeated(self) -> None:
+        batch = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "One",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(batch + "\n" + batch)
+
+        assert len(result) == 1
+        assert result[0].concept == "One"
 
     def test_handles_empty_response(self) -> None:
         result = parse_brief_response("")
@@ -585,6 +683,15 @@ class TestGenerateDesignBriefs:
         raw.parse.return_value = parsed
         return raw
 
+    def _raw_text(self, content: str) -> MagicMock:
+        choice = MagicMock()
+        choice.message.content = content
+        parsed = MagicMock(choices=[choice])
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = parsed
+        return raw
+
     def test_no_candidates_returns_early(self) -> None:
         db = self._mock_db()
         llm = MagicMock()
@@ -632,6 +739,82 @@ class TestGenerateDesignBriefs:
 
         assert result["status"] == "error"
         assert "boom" in result["error"]
+
+    def test_an_unreadable_answer_is_a_failure_not_an_empty_batch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A parse failure used to look like a successful batch of zero
+        # briefs, so the whole run was silently lost (issue #209).
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        db = self._mock_db([_briefable(1, "funny t-shirt")])
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = self._raw_text("I could not do it.")
+
+        result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["status"] == "error"
+
+    def test_an_unreadable_answer_is_asked_again_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        db = self._mock_db([_briefable(1, "funny t-shirt")])
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = self._raw_text("I could not do it.")
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert llm.with_raw_response.create.call_count == 2
+
+    def test_the_second_attempt_can_recover_the_batch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        db = self._mock_db([_briefable(1, "funny t-shirt")])
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw_text("I could not do it."),
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Coffee Beans",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                        }
+                    ]
+                }
+            ),
+        ]
+
+        result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["status"] == "success"
+        assert result["briefs_created"] == 1
+
+    def test_the_raw_answer_is_logged_when_it_cannot_be_read(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The raw answer is the only way to see what the model actually sent
+        # (issue #209).
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        db = self._mock_db([_briefable(1, "funny t-shirt")])
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = self._raw_text("I could not do it.")
+
+        with caplog.at_level(logging.ERROR):
+            generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert "I could not do it." in caplog.text
 
     def test_reports_how_many_seeds_were_available(self) -> None:
         candidates = [_briefable(42, "dad jokes shirt")]

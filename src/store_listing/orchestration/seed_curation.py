@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
 from store_listing.orchestration.context_seeds import SEASONAL_EVENT_THEME, get_upcoming_events
+from store_listing.orchestration.json_response import extract_json_objects, merge_items
 from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.promotion import (
     DISCOVERY_SOURCE,
@@ -206,38 +207,37 @@ def _filter_tags(raw: Any) -> list[str]:
     return [t for t in raw if isinstance(t, str) and t in PRODUCT_TAGS]
 
 
-def parse_curation_response(text: str) -> CurationResult:
-    try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start < 0 or end <= start:
-            logger.warning("No JSON object found in LLM response")
-            return CurationResult()
-        fragment = text[start:end]
-        try:
-            data = json.loads(fragment)
-        except json.JSONDecodeError:
-            if '"' not in fragment:
-                data = json.loads(fragment.replace("'", '"'))
-            else:
-                raise
-    except json.JSONDecodeError as e:
-        logger.warning(
-            "Failed to parse LLM curation response: %s\n---RAW (last 500)---\n%s\n---RAW (first 2000)---\n%s",
-            e,
-            text[-500:],
-            text[:2000],
-        )
-        return CurationResult()
+def read_curation_response(text: str) -> tuple[CurationResult, str | None]:
+    """The decisions in the answer, and the reason the answer could not be read.
 
-    evaluations = []
-    for ev in data.get("evaluations", []):
+    The model does not always answer with only JSON: it appends a note,
+    repeats the answer, or splits it in two. The answer is read value by
+    value and the decisions are merged, because a parser that read two values
+    as one threw the whole answer away (issue #209).
+    """
+    objects = extract_json_objects(text)
+    if not objects:
+        return CurationResult(), "no JSON object in the LLM response"
+
+    if not any(
+        isinstance(obj.get("evaluations"), list) or isinstance(obj.get("event_seeds"), list)
+        for obj in objects
+    ):
+        return CurationResult(), "the LLM response has no 'evaluations' array"
+
+    evaluations: list[CurationEvaluation] = []
+    seen_ids: set[int] = set()
+    for ev in merge_items(objects, "evaluations"):
         if not isinstance(ev, dict):
             continue
         cid = ev.get("id")
         action = ev.get("action", "").upper()
         if not isinstance(cid, int) or action not in VALID_ACTIONS:
             continue
+        # A repeated answer must not decide the same candidate twice.
+        if cid in seen_ids:
+            continue
+        seen_ids.add(cid)
         evaluations.append(
             CurationEvaluation(
                 id=cid,
@@ -249,17 +249,30 @@ def parse_curation_response(text: str) -> CurationResult:
             )
         )
 
-    event_seeds = [
-        EventSeed(
-            seed=e.get("seed", ""),
-            product_tags=_filter_tags(e.get("product_tags", [])),
-            design_style=e.get("design_style"),
+    event_seeds: list[EventSeed] = []
+    seen_seeds: set[str] = set()
+    for e in merge_items(objects, "event_seeds"):
+        if not isinstance(e, dict):
+            continue
+        seed = e.get("seed", "")
+        if not seed or seed in seen_seeds:
+            continue
+        seen_seeds.add(seed)
+        event_seeds.append(
+            EventSeed(
+                seed=seed,
+                product_tags=_filter_tags(e.get("product_tags", [])),
+                design_style=e.get("design_style"),
+            )
         )
-        for e in data.get("event_seeds", [])
-        if isinstance(e, dict) and e.get("seed")
-    ]
 
-    return CurationResult(evaluations=evaluations, event_seeds=event_seeds)
+    return CurationResult(evaluations=evaluations, event_seeds=event_seeds), None
+
+
+def parse_curation_response(text: str) -> CurationResult:
+    """The decisions in the answer, or an empty result when it cannot be read."""
+    result, _ = read_curation_response(text)
+    return result
 
 
 def curate_seeds(
@@ -322,7 +335,13 @@ def curate_seeds(
             logger.warning("LLM curation call failed: %s", e)
         return {"status": "error", "error": message}
 
-    result = parse_curation_response(content)
+    result, parse_error = read_curation_response(content)
+    if parse_error is not None:
+        # The raw answer is the only way to see what the model actually sent.
+        logger.error("The LLM curation response could not be read: %s", parse_error)
+        logger.error("Raw LLM curation response: %s", content)
+        return {"status": "error", "error": parse_error}
+
     by_id = {c.id: c for c in candidates}
 
     promoted = 0

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final, Protocol
 
+from store_listing.orchestration.json_response import extract_json_objects, merge_items
 from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.seed_curation import _log_llm_response
 
@@ -100,29 +101,34 @@ def build_rerank_prompt(
 VALID_DIRECTIONS: set[str] = {"up", "down", "hold"}
 
 
-def parse_rerank_response(text: str) -> list[dict[str, Any]]:
-    try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start < 0 or end <= start:
-            return []
-        data = json.loads(text[start:end])
-    except json.JSONDecodeError:
-        logger.warning("Failed to parse rerank response")
-        return []
+def read_rerank_response(text: str) -> tuple[list[dict[str, Any]], str | None]:
+    """The evaluations in the answer, and the reason the answer could not be read.
 
-    evaluations = data.get("evaluations", [])
-    if not isinstance(evaluations, list):
-        return []
+    The model does not always answer with only JSON: it appends a note,
+    repeats the answer, or splits it in two. The answer is read value by
+    value and the evaluations are merged, because a parser that read two
+    values as one threw the whole answer away (issue #209).
+    """
+    objects = extract_json_objects(text)
+    if not objects:
+        return [], "no JSON object in the LLM response"
+
+    if not any(isinstance(obj.get("evaluations"), list) for obj in objects):
+        return [], "the LLM response has no 'evaluations' array"
 
     result: list[dict[str, Any]] = []
-    for ev in evaluations:
+    seen: set[int] = set()
+    for ev in merge_items(objects, "evaluations"):
         if not isinstance(ev, dict):
             continue
 
         brief_id = ev.get("brief_id")
         if not isinstance(brief_id, int):
             continue
+        # A repeated answer must not score the same brief twice.
+        if brief_id in seen:
+            continue
+        seen.add(brief_id)
 
         new_confidence = ev.get("new_confidence", 0)
         if not isinstance(new_confidence, int):
@@ -144,7 +150,13 @@ def parse_rerank_response(text: str) -> list[dict[str, Any]]:
             }
         )
 
-    return result
+    return result, None
+
+
+def parse_rerank_response(text: str) -> list[dict[str, Any]]:
+    """The evaluations in the answer, or an empty list when it cannot be read."""
+    evaluations, _ = read_rerank_response(text)
+    return evaluations
 
 
 def rerank_briefs(
@@ -185,7 +197,13 @@ def rerank_briefs(
             logger.warning("Reranking LLM call failed: %s", e)
         return {"status": "error", "error": message}
 
-    evaluations = parse_rerank_response(content)
+    evaluations, parse_error = read_rerank_response(content)
+    if parse_error is not None:
+        # The raw answer is the only way to see what the model actually sent.
+        logger.error("The LLM rerank response could not be read: %s", parse_error)
+        logger.error("Raw LLM rerank response: %s", content)
+        return {"status": "error", "error": parse_error}
+
     valid_ids = {b.id for b in briefs}
 
     updated = 0

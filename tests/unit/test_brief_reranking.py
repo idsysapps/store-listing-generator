@@ -209,6 +209,29 @@ class TestRerankBriefs:
         assert result["status"] == "error"
         assert "qwen38_briefs" in result["error"]
 
+    def test_reads_a_response_the_model_appended_something_to(self) -> None:
+        # The model answered with the evaluations and then another object;
+        # the parser read two values as one and lost them (issue #209).
+        db = self._mock_db()
+        llm = self._mock_llm(
+            _rerank_response() + "\n" + json.dumps({"notes": {"summary": "a second object"}})
+        )
+
+        result = rerank_briefs(db, llm, "model-x")
+
+        assert result["status"] == "success"
+        assert result["reranked"] == 2
+
+    def test_an_unreadable_answer_is_a_failure_not_an_empty_run(self) -> None:
+        # A parse failure used to look like a run that reranked nothing
+        # (issue #209).
+        db = self._mock_db()
+        llm = self._mock_llm("I could not do it.")
+
+        result = rerank_briefs(db, llm, "model-x")
+
+        assert result["status"] == "error"
+
     def test_passes_correct_values_to_db_update(self) -> None:
         db = self._mock_db()
         llm = self._mock_llm(_rerank_response())
@@ -267,8 +290,9 @@ class TestRerankBriefs:
         assert result["status"] == "error"
 
     def test_returns_error_on_unparseable_response(self) -> None:
+        # An unreadable answer used to look like a run that reranked nothing
+        # (issue #209).
         db = self._mock_db()
         llm = self._mock_llm("not valid json at all")
         result = rerank_briefs(db, llm, "model-x")
-        assert result["status"] == "success"
-        assert result["reranked"] == 0
+        assert result["status"] == "error"
