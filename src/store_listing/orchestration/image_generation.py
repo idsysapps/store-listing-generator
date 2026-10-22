@@ -12,8 +12,12 @@ from dataclasses import dataclass
 from store_listing.orchestration.art_direction import negative_for, preset_for, prompt_for
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
 from store_listing.orchestration.design_briefs import DesignBrief
+from store_listing.orchestration.design_templates import (
+    canvas_size,
+    composition_for,
+    resolve_template,
+)
 from store_listing.orchestration.scene_text import strip_lettering
-from store_listing.orchestration.text_compositor import resolve_layout
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +27,10 @@ PRODUCT_TYPE_CONTEXT: dict[str, str] = {
     # A dark background does not work: the background removal then fills the
     # enclosed counters of letters like O, R and A instead of cutting them out.
     # Magenta also keeps white artwork and white text visible. See issue #111.
-    "dtf_apparel": (
-        "sticker illustration, bold outlines, flat colors, compact centered composition, "
-        "DTF transfer print"
-    ),
+    #
+    # The composition is not described here: it belongs to the template, so
+    # the prompt does not ask for a centred object every time (issue #238).
+    "dtf_apparel": ("sticker illustration, bold outlines, flat colors, DTF transfer print"),
     # These are printed full-bleed, so their background is kept and has to be
     # white - it becomes the paper.
     "sublimation": "full-color sublimation print, seamless edges, vibrant colors",
@@ -51,37 +55,6 @@ NO_MOCKUP = (
     "no mug, no tumbler, no phone case, no pillow, no blanket, no sticker sheet, "
     "no photo of a printed item"
 )
-
-# The space the text is drawn in, per layout. The text is composited onto the
-# artwork afterwards, so the artwork has to leave the room for it - otherwise
-# the text is drawn over the picture (issue #227).
-LAYOUT_RESERVES: dict[str, str] = {
-    "text_top": (
-        "Leave the top of the canvas clear and empty: plain background only, nothing in that area."
-    ),
-    "text_top_bottom": (
-        "Leave the top and the bottom of the canvas clear and empty: plain background "
-        "only, nothing in those areas."
-    ),
-    "badge": (
-        "Draw the artwork as a compact centred emblem with an empty margin all around "
-        "it, and leave a clear band at the top and a clear band at the bottom of the "
-        "canvas: plain background only in those bands."
-    ),
-    "banner": (
-        "Draw the artwork to fill the whole canvas, and leave a clear horizontal band "
-        "across the middle of the canvas: plain background only in that band."
-    ),
-    "arch": (
-        "Draw the artwork as a tall arch shape in the middle of the canvas, and leave "
-        "the top of the arch and the bottom of the canvas clear and empty: plain "
-        "background only in those areas."
-    ),
-    "stack_side": (
-        "Draw the artwork on the left half of the canvas and leave the whole right "
-        "side of the canvas clear and empty: plain background only on the right."
-    ),
-}
 
 # The image is the graphic that gets printed, not the thing it is printed on.
 # A scene that names the product - a trick-or-treat bag, a hoodie - makes the
@@ -165,36 +138,33 @@ def font_colour(brief: DesignBrief) -> str:
 
 
 def build_flux_prompt(brief: DesignBrief) -> str:
-    """Build the Flux prompt for a brief, folding the layout fields in.
+    """Build the Flux prompt for a brief, folding the template in.
 
     The prompt carries the artwork only. The headline and the tagline are
     composited onto the artwork afterwards, because the model cannot spell
     (issue #187) and because a colour in a prompt is not a colour.
 
-    full_bleed       -> the scene only, explicitly no lettering
-    text_top         -> the scene, with room for a headline at the top
-    text_top_bottom  -> the scene, with room for a headline at the top and a
-                        tagline at the bottom
-    text_only        -> not an image at all: the design is the text, and it is
-                        drawn on a blank canvas without the image model
+    The composition belongs to the template, not to this function: a template
+    asks for a scene, a pattern, a tower or a roundel, and says where the text
+    goes. A design whose text is the whole design is not sent to the model.
     """
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
     background = BACKGROUND_INSTRUCTIONS.get(brief.product_type, "plain background")
     feedback = _feedback_section(brief)
-    layout_type = resolve_layout(
+    template_id = resolve_template(
         brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
     )
 
-    if layout_type == "text_only":
+    if template_id == "text_only":
         raise PromptBuildError("a text_only brief is drawn without the image model")
 
     scene = _scene_for_prompt(brief)
     if not scene:
         raise PromptBuildError("the brief has no scene_description")
 
-    if layout_type == "full_bleed" and brief.headline_text:
+    if template_id == "full_bleed" and brief.headline_text:
         logger.warning(
-            "Brief has layout_type 'full_bleed' but a headline (%r) - rendering without text",
+            "Brief has an art-only layout but a headline (%r) - rendering without text",
             brief.headline_text,
         )
 
@@ -208,15 +178,15 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     look = prompt_for(preset_for(brief.style_preset)) or brief.visual_style
     parts.append(f"{look}, {product_context}, {NO_MOCKUP}.")
 
-    if layout_type == "full_bleed":
+    if template_id == "full_bleed":
         parts.append("Do not include any text or lettering.")
     else:
         parts.append("Print artwork without any lettering: no text, no words, no watermark.")
-        reserve = LAYOUT_RESERVES.get(layout_type)
-        if reserve:
-            parts.append(reserve)
 
-    parts.append("Do not draw anything else.")
+    # The composition of the template, including the space the text needs. It
+    # replaced the fixed "compact centered composition" that made every design
+    # an object in the middle (issue #238).
+    parts.append(composition_for(template_id, brief.concept))
 
     # The background comes last so that it survives a visual style that asks
     # for something else (issue #188).
@@ -260,9 +230,17 @@ def generate_image(
     if extra_prompt:
         prompt = f"{prompt} {extra_prompt}"
     negative_prompt = build_negative_prompt(brief)
+    template_id = resolve_template(
+        brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
+    )
+    width, height = canvas_size(template_id)
     try:
         result = comfyui_client.generate_image(
-            prompt=prompt, seed=seed, negative_prompt=negative_prompt
+            prompt=prompt,
+            seed=seed,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
         )
     except ComfyUIError as e:
         logger.warning("ComfyUI image generation failed: %s", e)

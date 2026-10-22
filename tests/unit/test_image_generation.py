@@ -9,6 +9,11 @@ import pytest
 
 from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.design_briefs import DesignBrief
+from store_listing.orchestration.design_templates import (
+    ART_TEMPLATE_IDS,
+    FULL_BLEED_COMPOSITIONS,
+    TEMPLATES,
+)
 from store_listing.orchestration.image_generation import (
     PromptBuildError,
     build_flux_prompt,
@@ -134,7 +139,7 @@ class TestBuildFluxPrompt:
         )
         prompt = build_flux_prompt(brief)
 
-        assert prompt.index("white background") > prompt.index("Do not draw anything else")
+        assert prompt.index("white background") > prompt.index("print artwork only")
 
     def test_the_prompt_forbids_a_product_mockup(self) -> None:
         brief = _make_brief(product_type="dtf_apparel", layout_type="full_bleed")
@@ -241,11 +246,13 @@ class TestBuildFluxPrompt:
 
         assert "more vibrant colors please" in prompt
 
-    def test_never_asks_for_extra_elements(self) -> None:
+    def test_the_prompt_does_not_tell_the_model_to_stop(self) -> None:
+        # "Do not draw anything else" was the last thing the model read, and
+        # every design came back as one small centred object (issue #238).
         brief = _make_brief(layout_type="full_bleed", headline_text=None)
         prompt = build_flux_prompt(brief)
 
-        assert "Do not draw anything else." in prompt
+        assert "Do not draw anything else." not in prompt
 
 
 class TestGenerateImage:
@@ -411,7 +418,7 @@ class TestTheNewLayouts:
 
         prompt = build_flux_prompt(brief).lower()
 
-        assert "band across the middle" in prompt
+        assert "across the middle" in prompt
 
     def test_a_stack_side_reserves_the_right_of_the_canvas(self) -> None:
         brief = _make_brief(layout_type="stack_side", headline_text="GOBBLE")
@@ -420,9 +427,87 @@ class TestTheNewLayouts:
 
         assert "right side" in prompt
 
-    def test_a_badge_reserves_a_band_at_the_top_and_the_bottom(self) -> None:
+    def test_a_badge_is_drawn_as_a_roundel(self) -> None:
         brief = _make_brief(layout_type="badge", headline_text="GOBBLE")
 
         prompt = build_flux_prompt(brief).lower()
 
-        assert "compact centred emblem" in prompt
+        assert "bold circle" in prompt
+
+
+class TestTheTemplates:
+    def test_no_template_asks_for_a_centred_composition(self) -> None:
+        # "compact centered composition" was in every prompt, which is why
+        # every design was an object in the middle of the canvas (issue #238).
+        for template_id in ART_TEMPLATE_IDS:
+            brief = _make_brief(
+                layout_type=template_id,
+                headline_text="GOBBLE",
+                tagline_text="TILL THE BELL",
+            )
+
+            prompt = build_flux_prompt(brief).lower()
+
+            assert "centered composition" not in prompt, template_id
+            assert "centred composition" not in prompt, template_id
+
+    def test_the_composition_of_the_template_is_in_the_prompt(self) -> None:
+        for template_id in ART_TEMPLATE_IDS:
+            brief = _make_brief(
+                layout_type=template_id,
+                headline_text="GOBBLE",
+                tagline_text="TILL THE BELL",
+            )
+
+            prompt = build_flux_prompt(brief)
+
+            assert TEMPLATES[template_id].composition in prompt, template_id
+
+    def test_an_art_only_design_gets_a_full_bleed_composition(self) -> None:
+        brief = _make_brief(
+            layout_type="full_bleed",
+            headline_text=None,
+            tagline_text=None,
+            concept="a raccoon king",
+        )
+
+        prompt = build_flux_prompt(brief)
+
+        assert any(composition in prompt for composition in FULL_BLEED_COMPOSITIONS)
+
+    def test_two_art_only_designs_can_get_different_compositions(self) -> None:
+        prompts = {
+            build_flux_prompt(
+                _make_brief(
+                    concept=f"concept {index}",
+                    layout_type="full_bleed",
+                    headline_text=None,
+                    tagline_text=None,
+                )
+            )
+            for index in range(20)
+        }
+
+        assert len(prompts) > 1
+
+    def test_the_template_size_reaches_the_model(self) -> None:
+        client = _client()
+
+        generate_image(
+            _make_brief(layout_type="wide_scene", headline_text="GOBBLE"),
+            comfyui_client=client,
+        )
+
+        assert client.generate_image.call_args.kwargs["width"] == 1216
+        assert client.generate_image.call_args.kwargs["height"] == 832
+
+    def test_a_square_template_is_rendered_square(self) -> None:
+        client = _client()
+
+        generate_image(
+            _make_brief(layout_type="roundel", headline_text="GOBBLE"),
+            comfyui_client=client,
+        )
+
+        assert client.generate_image.call_args.kwargs["width"] == 1024
+        assert client.generate_image.call_args.kwargs["height"] == 1024

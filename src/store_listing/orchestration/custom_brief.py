@@ -20,6 +20,7 @@ from store_listing.orchestration.design_briefs import (
     VALID_LAYOUT_TYPES,
     DesignBrief,
     DesignBriefDBClient,
+    assign_batch_templates,
     headline_for_text_only,
 )
 from store_listing.orchestration.headline_voice import normalise_voice, screen_text
@@ -80,7 +81,7 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         '  "visual_style": "art direction (colors, style, typography). No text/slogans here.",\n'
         '  "confidence": 0-100,\n'
         '  "reasoning": "why this design works",\n'
-        '  "layout_type": "full_bleed | text_top | text_top_bottom | text_only",\n'
+        '  "layout_type": "auto | full_bleed | text_only",\n'
         '  "headline_text": "short punchy text (1-6 words, words only, no emoji) '
         'or null if full_bleed",\n'
         '  "tagline_text": "secondary text or null",\n'
@@ -349,6 +350,10 @@ def create_custom_brief(
         # better than blaming the parser (issue #232).
         logger.error("The LLM custom brief was dropped: %s", reason)
         return {"status": "error", "error": f"The brief was not created: {reason}"}
+
+    # A single brief still gets a template, so the custom path does not always
+    # come back as the same centred emblem (issue #238).
+    brief = assign_batch_templates([brief], f"custom:{brief.concept}")[0]
 
     brief_id = db_client.insert_design_brief(
         concept=brief.concept,

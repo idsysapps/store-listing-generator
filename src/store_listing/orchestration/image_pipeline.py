@@ -19,17 +19,17 @@ import os
 import random
 from typing import Any
 
-from store_listing.orchestration.art_direction import family_for, preset_for
+from store_listing.orchestration.art_direction import family_for, preset_for, tagline_family_for
 from store_listing.orchestration.artwork_validation import (
     ArtworkTextValidator,
     ArtworkValidator,
 )
 from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.design_briefs import DesignBrief
+from store_listing.orchestration.design_templates import composition_for, resolve_template
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE
 from store_listing.orchestration.image_generation import (
     ARTWORK_RETRY_HINT,
-    LAYOUT_RESERVES,
     NO_LETTERING_RETRY_HINT,
     ImageResult,
     font_colour,
@@ -147,11 +147,10 @@ def _retry_hint(brief: DesignBrief) -> str:
     The text is composited onto the artwork, so a retry cannot ask the model
     to spell it - it can only ask for a clearer area to put it in.
     """
-    layout_type = brief.layout_type or "full_bleed"
-    reserve = LAYOUT_RESERVES.get(layout_type)
-    if reserve:
-        return reserve
-    return "Render the requested scene more clearly."
+    template_id = resolve_template(brief.layout_type, brief.headline_text, brief.tagline_text)
+    if template_id in ("full_bleed", "text_only"):
+        return "Render the requested scene more clearly."
+    return composition_for(template_id, brief.concept)
 
 
 def generate_images_for_briefs(
@@ -260,12 +259,16 @@ def _generate_single_brief(
     brief = _brief_from_row(brief_row)
     brief_id = brief_row["id"]
     is_dtf = brief_row["product_type"] == "dtf_apparel"
+    preset = preset_for(brief.style_preset)
     layout = LayoutSpec(
-        layout_type=brief.layout_type or "full_bleed",
+        layout_type=resolve_template(
+            brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
+        ),
         headline_text=brief.headline_text,
         tagline_text=brief.tagline_text,
         font_color=font_colour(brief),
         font_family=brief.font_family,
+        tagline_font_family=tagline_family_for(preset, brief.voice) if preset else None,
         voice=brief.voice,
     )
     needs_text_check = layout.needs_text
