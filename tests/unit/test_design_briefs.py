@@ -17,6 +17,7 @@ from store_listing.orchestration.design_briefs import (
     parse_brief_response,
     read_brief_response,
 )
+from store_listing.orchestration.typography import family_for_voice
 
 
 def _briefable(
@@ -1537,3 +1538,70 @@ class TestTheTextIsAskedForAgain:
         generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
 
         assert db.insert_design_brief.call_args.kwargs["voice"] == "loud"
+
+
+class TestTheTypeOfTheBrief:
+    def _raw(self, response_json: dict) -> MagicMock:
+        choice = MagicMock()
+        choice.message.content = json.dumps(response_json)
+        parsed = MagicMock(choices=[choice])
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = parsed
+        return raw
+
+    def test_the_font_family_follows_the_voice(self) -> None:
+        # The model picks a tone, the type follows the art direction. The
+        # model never picks a font file (issue #226).
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "A Design",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_top",
+                        "headline_text": "Gobble Til The Drawbridge Drops",
+                        "scene_description": "a stone castle with a wide gate",
+                        "voice": "loud",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].font_family == family_for_voice("loud")
+
+    def test_the_font_family_is_stored_with_the_brief(self) -> None:
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "A Castle Design",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                            "layout_type": "text_top",
+                            "headline_text": "Gobble Til The Drawbridge Drops",
+                            "scene_description": "a stone castle with a wide gate",
+                            "voice": "cozy",
+                        }
+                    ]
+                }
+            )
+        ]
+        db = MagicMock()
+        db.list_briefable_seeds.return_value = [_briefable(1, "funny t-shirt")]
+        db.list_active_materials.return_value = []
+        db.insert_design_brief.return_value = 1
+        db.insert_brief_source.return_value = 1
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        stored = db.insert_design_brief.call_args.kwargs
+        assert stored["voice"] == "cozy"
+        assert stored["font_family"] == family_for_voice("cozy")

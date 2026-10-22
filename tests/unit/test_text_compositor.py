@@ -21,6 +21,7 @@ from store_listing.orchestration.text_compositor import (
     blank_canvas,
     composite_text,
 )
+from store_listing.orchestration.typography import TextTreatment
 
 
 def _canvas(
@@ -277,3 +278,214 @@ class TestBlankCanvas:
         image = Image.open(io.BytesIO(blank_canvas("dtf_apparel")))
 
         assert image.size == (1024, 1024)
+
+
+def _drawn_box(data: bytes, top: bool) -> tuple[int, int, int, int] | None:
+    """The box the text was drawn in."""
+    image = _image(data)
+    width, height = image.size
+    if top:
+        box = (0, 0, width, int(height * HEADLINE_ZONE))
+    else:
+        box = (0, int(height * (1 - TAGLINE_ZONE)), width, height)
+    drawn = [
+        (x, y)
+        for y in range(box[1], box[3])
+        for x in range(box[0], box[2])
+        if image.getpixel((x, y)) != (255, 255, 255)
+    ]
+    if not drawn:
+        return None
+    return (
+        min(x for x, _ in drawn),
+        min(y for _, y in drawn),
+        max(x for x, _ in drawn),
+        max(y for _, y in drawn),
+    )
+
+
+class TestTheType:
+    def test_two_families_draw_different_text(self) -> None:
+        # One font for every design is why the shop looks like one shop.
+        one = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top", headline_text="GOBBLE TIL THE BELL", font_family="bebas"
+            ),
+        )
+        other = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top", headline_text="GOBBLE TIL THE BELL", font_family="anton"
+            ),
+        )
+
+        assert one != other
+
+    def test_the_text_stays_inside_the_zone_with_every_family(self) -> None:
+        headline = "Gobble Til The Drawbridge Drops"
+        for family in ("bebas", "anton", "alfa_slab", "pacifico", "bungee", "rye", "abril"):
+            result = composite_text(
+                _canvas(),
+                LayoutSpec(layout_type="text_top", headline_text=headline, font_family=family),
+            )
+
+            box = _drawn_box(result, top=True)
+            assert box is not None, f"{family} drew nothing"
+            width, height = _image(result).size
+            assert box[2] < width, f"{family} ran out of the canvas"
+            assert box[3] < int(height * HEADLINE_ZONE), f"{family} ran out of its zone"
+
+    def test_a_character_the_family_cannot_render_is_dropped(self) -> None:
+        # The script family has no emoji either.
+        result = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="🎃 GOBBLE",
+                font_family="pacifico",
+            ),
+        )
+
+        assert _drawn_box(result, top=True) is not None
+
+    def test_the_voice_uppercases_the_headline(self) -> None:
+        lower = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="gobble til the bell",
+                font_family="alfa_slab",
+                voice="deadpan",
+            ),
+        )
+        upper = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="GOBBLE TIL THE BELL",
+                font_family="alfa_slab",
+                voice="deadpan",
+            ),
+        )
+
+        assert lower == upper
+
+    def test_the_cozy_voice_keeps_the_case(self) -> None:
+        lower = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="gobble til the bell",
+                font_family="alfa_slab",
+                voice="cozy",
+            ),
+        )
+        upper = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="GOBBLE TIL THE BELL",
+                font_family="alfa_slab",
+                voice="cozy",
+            ),
+        )
+
+        assert lower != upper
+
+    def test_the_tracking_widens_the_text(self) -> None:
+        narrow = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="GOBBLE TIL THE BELL",
+                treatment_override=TextTreatment(uppercase=True, tracking=0.0),
+            ),
+        )
+        wide = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="GOBBLE TIL THE BELL",
+                treatment_override=TextTreatment(uppercase=True, tracking=0.12),
+            ),
+        )
+
+        narrow_box = _drawn_box(narrow, top=True)
+        wide_box = _drawn_box(wide, top=True)
+        assert narrow_box is not None
+        assert wide_box is not None
+        assert (wide_box[2] - wide_box[0]) > (narrow_box[2] - narrow_box[0])
+
+    def test_the_accent_word_is_drawn_in_the_accent_colour(self) -> None:
+        result = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="GOBBLE TIL THE BELL",
+                font_color="#101010",
+                treatment_override=TextTreatment(
+                    uppercase=True,
+                    tracking=0.04,
+                    style="shadow",
+                    accent_word=0,
+                    accent_color="#F2B233",
+                ),
+            ),
+        )
+
+        assert (242, 178, 51) in _zone_colours(result, top=True)
+
+    def test_the_block_style_draws_a_bar_behind_the_text(self) -> None:
+        result = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="GOBBLE TIL THE BELL",
+                font_color="#101010",
+                treatment_override=TextTreatment(
+                    uppercase=True,
+                    tracking=0.04,
+                    style="block",
+                    accent_color="#F2B233",
+                ),
+            ),
+        )
+
+        assert (242, 178, 51) in _zone_colours(result, top=True)
+
+    def test_the_text_is_readable_over_the_artwork(self) -> None:
+        # The OCR gate has to read the headline back, so the text needs to be
+        # lighter than the background it is drawn on.
+        result = composite_text(
+            _canvas(color=(255, 255, 255)),
+            LayoutSpec(
+                layout_type="text_top",
+                headline_text="GOBBLE TIL THE BELL",
+                font_color="#101010",
+            ),
+        )
+
+        colours = _zone_colours(result, top=True)
+        assert (16, 16, 16) in colours
+
+
+class TestEveryFamilyCanDraw:
+    def test_the_alphabet_is_drawn_in_every_family(self) -> None:
+        # The missing glyph of Anton has the same box as its capitals, so
+        # every headline came out empty until the glyphs were compared as
+        # bitmaps (issue #226).
+        for family in ("bebas", "anton", "alfa_slab", "pacifico", "bungee", "rye", "abril"):
+            result = composite_text(
+                _canvas(),
+                LayoutSpec(
+                    layout_type="text_top",
+                    headline_text="GOBBLE TIL THE BELL",
+                    font_family=family,
+                ),
+            )
+
+            box = _drawn_box(result, top=True)
+            assert box is not None, f"{family} drew nothing"
+            width = _image(result).size[0]
+            assert (box[2] - box[0]) > width * 0.3, f"{family} dropped most of the headline"

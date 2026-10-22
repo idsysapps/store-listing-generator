@@ -199,7 +199,9 @@ data:
         batch_id VARCHAR(50),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         -- The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
-        voice VARCHAR(20) DEFAULT 'deadpan'
+        voice VARCHAR(20) DEFAULT 'deadpan',
+        -- The family the text of the design is drawn in.
+        font_family VARCHAR(40)
     );
 
     CREATE INDEX IF NOT EXISTS idx_design_briefs_product_type ON design_briefs(product_type);
@@ -434,6 +436,8 @@ data:
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS last_reranked_at TIMESTAMP WITH TIME ZONE;
     -- The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS voice VARCHAR(20) DEFAULT 'deadpan';
+    -- The family the text of the design is drawn in.
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS font_family VARCHAR(40);
 
     -- Table: fabrication_materials (local cache of cost-book material availability)
     CREATE TABLE IF NOT EXISTS fabrication_materials (

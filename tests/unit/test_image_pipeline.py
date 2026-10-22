@@ -941,3 +941,48 @@ class TestArtworkGate:
         )
 
         validator.validate.assert_not_called()
+
+
+class TestTheTypeOfTheDesign:
+    def _rendered(self, **overrides: Any) -> bytes:
+        db = _mock_db_client(briefs=[_brief(**overrides)])
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=_real_png()),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        return s3.put_object.call_args.kwargs["Body"]
+
+    def test_the_font_family_of_the_brief_is_used(self) -> None:
+        # The family of the brief decides the type, so the whole shop does not
+        # look like one shop (issue #226).
+        one = self._rendered(
+            layout_type="text_top",
+            headline_text="GOBBLE TIL THE BELL",
+            font_family="rye",
+        )
+        other = self._rendered(
+            layout_type="text_top",
+            headline_text="GOBBLE TIL THE BELL",
+            font_family="bebas",
+        )
+
+        assert one != other
+
+    def test_a_brief_without_a_family_still_gets_a_headline(self) -> None:
+        # The briefs that were written before the column existed have no
+        # family, and they still have to be rendered.
+        body = self._rendered(
+            layout_type="text_top",
+            headline_text="GOBBLE TIL THE BELL",
+            font_family=None,
+        )
+
+        image = Image.open(BytesIO(body)).convert("RGB")
+        width, height = image.size
+        top_zone = image.crop((0, 0, width, int(height * 0.15)))
+        assert _distinct_colours(top_zone) != {(255, 255, 255)}

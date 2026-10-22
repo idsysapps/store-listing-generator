@@ -25,6 +25,7 @@ from store_listing.orchestration.json_response import extract_json_objects
 from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
+from store_listing.orchestration.typography import family_for_voice
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +178,9 @@ def _brief_from(
             return None
 
     voice = normalise_voice(b.get("voice") if isinstance(b.get("voice"), str) else None)
+    # The family of the type is decided here, not by the model: the model picks
+    # a tone, and the type follows the art direction (issue #226).
+    font_family = family_for_voice(voice)
 
     # The text of a design is the part the buyer reads, so it is the part that
     # has to be good. A brief for personal use may name a franchise on
@@ -207,6 +211,7 @@ def _brief_from(
         font_color=font_color,
         scene_description=scene_description,
         voice=voice,
+        font_family=font_family,
     )
 
 
@@ -299,6 +304,7 @@ def create_custom_brief(
         scene_description=brief.scene_description,
         personal_use=personal_use,
         voice=brief.voice,
+        font_family=brief.font_family,
     )
 
     return {"status": "success", "brief_id": brief_id, "personal_use": personal_use}
