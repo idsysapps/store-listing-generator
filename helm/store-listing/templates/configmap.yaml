@@ -30,6 +30,7 @@ data:
   LLM_BRIEFS_SCHEDULE: {{ .Values.config.llmBriefsSchedule | default "0 7 * * *" | quote }}
   LLM_IMAGE_GEN_SCHEDULE: {{ .Values.config.llmImageGenSchedule | default "30 7 * * *" | quote }}
   LLM_RERANK_SCHEDULE: {{ .Values.config.llmRerankSchedule | default "0 8 * * *" | quote }}
+  ENABLED_PRODUCT_TYPES: {{ .Values.config.enabledProductTypes | default "" | quote }}
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -237,6 +238,16 @@ data:
     CREATE INDEX IF NOT EXISTS idx_fab_materials_product_type ON fabrication_materials(product_type);
     CREATE INDEX IF NOT EXISTS idx_fab_materials_active ON fabrication_materials(active);
     CREATE INDEX IF NOT EXISTS idx_fab_materials_external_id ON fabrication_materials(external_id);
+
+    -- Table: app_settings
+    -- The settings the operator can change without a redeploy, e.g. which
+    -- product types the pipeline produces right now.
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_by TEXT
+    );
 ---
 kind: ConfigMap
 apiVersion: v1
@@ -468,6 +479,15 @@ data:
 
     -- Add recommended_materials to design_briefs
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS recommended_materials JSONB;
+
+    -- Table: app_settings (the settings the operator can change without a
+    -- redeploy, e.g. which product types the pipeline produces)
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_by TEXT
+    );
 
     -- Migration: split 'marketplace' source_health into 'amazon' and 'etsy'
     DELETE FROM source_health WHERE source = 'marketplace';

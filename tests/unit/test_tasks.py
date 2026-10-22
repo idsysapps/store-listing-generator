@@ -183,6 +183,10 @@ class TestLlmModelCheck:
             patch.dict(os.environ, {"LLM_API_KEY": "key", "LLM_MODEL": model}),
             patch("store_listing.orchestration.llm_client.get_llm_client", return_value=client),
             patch("store_listing.orchestration.design_briefs.generate_design_briefs", briefs),
+            patch(
+                "store_listing.orchestration.tasks.enabled_product_types",
+                return_value=["dtf_apparel"],
+            ),
         ):
             result = tasks.generate_design_briefs_task.run()
         return result
