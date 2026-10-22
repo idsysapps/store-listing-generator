@@ -665,6 +665,13 @@ class DatabaseClient:
         self,
         product_type: str | None = None,
     ) -> list[dict[str, Any]]:
+        """The materials the cost book offers.
+
+        A material can serve several product types, so the product types are
+        stored as an array and the filter matches any of them. An equality
+        comparison never matched, because the stored value was the whole
+        array (issue #186).
+        """
         with self.connect() as conn, conn.cursor() as cur:
             if product_type:
                 cur.execute(
@@ -672,7 +679,7 @@ class DatabaseClient:
                     SELECT external_id, name, brand, substrate_type, color,
                            sizes, material_composition, product_type, sku, unit_cost
                     FROM fabrication_materials
-                    WHERE active = TRUE AND product_type = %s
+                    WHERE active = TRUE AND %s = ANY(product_type)
                     ORDER BY name, color
                     """,
                     (product_type,),

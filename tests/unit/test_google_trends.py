@@ -226,6 +226,49 @@ class TestDatabaseClient:
 
             assert result == 99
 
+    def test_list_active_materials_matches_any_product_type(self) -> None:
+        # A material can serve several product types, so the column holds an
+        # array and the filter has to match any of them (issue #186). An
+        # equality comparison never matched, because the stored value was the
+        # whole array.
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            DatabaseClient().list_active_materials(product_type="dtf_apparel")
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "= ANY(product_type)" in sql
+        assert mock_cursor.execute.call_args[0][1] == ("dtf_apparel",)
+
+    def test_list_active_materials_returns_the_product_types_of_a_material(self) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            (
+                "bc3001-white",
+                "Bella Canvas 3001",
+                "Bella Canvas",
+                "t-shirt",
+                "White",
+                ["S", "M", "L"],
+                "100% cotton",
+                ["substrate", "dtf_apparel"],
+                "BC3001-WHT",
+                4.5,
+            )
+        ]
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            materials = DatabaseClient().list_active_materials(product_type="dtf_apparel")
+
+        assert materials[0]["product_type"] == ["substrate", "dtf_apparel"]
+
 
 class TestPytrendsHardening:
     @pytest.fixture

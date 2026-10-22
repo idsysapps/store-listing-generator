@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS fabrication_materials (
     color VARCHAR(100),
     sizes TEXT[],
     material_composition VARCHAR(255),
-    product_type VARCHAR(50),
+    product_type TEXT[],
     sku VARCHAR(100),
     unit_cost DECIMAL(10,2),
     active BOOLEAN NOT NULL DEFAULT TRUE,

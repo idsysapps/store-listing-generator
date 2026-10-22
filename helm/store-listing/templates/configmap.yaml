@@ -225,7 +225,7 @@ data:
         color VARCHAR(100),
         sizes TEXT[],
         material_composition VARCHAR(255),
-        product_type VARCHAR(50),
+        product_type TEXT[],
         sku VARCHAR(100),
         unit_cost DECIMAL(10,2),
         active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -428,7 +428,7 @@ data:
         color VARCHAR(100),
         sizes TEXT[],
         material_composition VARCHAR(255),
-        product_type VARCHAR(50),
+        product_type TEXT[],
         sku VARCHAR(100),
         unit_cost DECIMAL(10,2),
         active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -445,6 +445,26 @@ data:
     -- carries them, so both columns have to accept a null.
     ALTER TABLE fabrication_materials ALTER COLUMN substrate_type DROP NOT NULL;
     ALTER TABLE fabrication_materials ALTER COLUMN product_type DROP NOT NULL;
+
+    -- cost-book publishes the product types a material can serve as a JSON
+    -- array, so the column holds the array and a filter matches any of them
+    -- (issue #186). The old value was the raw JSON text, which does not cast,
+    -- and the table is a cache: it is refilled from the stream. The conversion
+    -- only runs while the column is not an array yet, so a redeploy does not
+    -- empty it again.
+    DO $$
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'fabrication_materials'
+              AND column_name = 'product_type'
+              AND data_type <> 'ARRAY'
+        ) THEN
+            UPDATE fabrication_materials SET product_type = NULL;
+            ALTER TABLE fabrication_materials
+                ALTER COLUMN product_type TYPE TEXT[] USING NULL::TEXT[];
+        END IF;
+    END $$;
 
     -- Add recommended_materials to design_briefs
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS recommended_materials JSONB;
