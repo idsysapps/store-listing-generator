@@ -667,7 +667,7 @@ class TestTheDesignTemplates:
             assert 0 <= box[0] and box[2] < width, template_id
             assert 0 <= box[1] and box[3] < height, template_id
 
-    def test_a_tower_draws_the_headline_up_the_left_side(self) -> None:
+    def test_a_tower_draws_the_headline_down_the_left_side(self) -> None:
         result = self._draw("tower", (832, 1216))
 
         image = _image(result)
@@ -675,12 +675,12 @@ class TestTheDesignTemplates:
         column = [
             (x, y)
             for y in range(height)
-            for x in range(int(width * 0.25))
+            for x in range(int(width * 0.4))
             if image.getpixel((x, y)) != (255, 255, 255)
         ]
-        assert column, "the headline should be drawn up the left side"
+        assert column, "the headline should be drawn down the left side"
         assert min(x for x, _ in column) < int(width * 0.1)
-        # A rotated headline runs the tall way round, not the wide way.
+        # The copy runs down the canvas, not across a single band.
         assert max(y for _, y in column) - min(y for _, y in column) > height * 0.2
 
     def test_a_side_column_draws_the_copy_on_the_right(self) -> None:

@@ -68,8 +68,6 @@ class DesignTemplate:
     bar: bool = False
     # "center" or "left".
     align: str = "center"
-    # A headline that runs up the side of the canvas instead of across it.
-    rotate_headline: bool = False
     # A tagline that follows the curve of a roundel. The tagline is secondary,
     # so a vision model that cannot read a curve does not fail the render.
     arc_tagline: bool = False
@@ -174,14 +172,14 @@ TEMPLATES: Final[dict[str, DesignTemplate]] = {
         id="tower",
         label="Tower",
         composition=(
-            "the motif stacked vertically as a tall column that is cropped by the top "
-            "and bottom edges, and the left edge of the canvas is clear and empty: "
-            "plain background only along the left edge"
+            "the motif stacked vertically as a tall column on the right of the canvas "
+            "that is cropped by the top and bottom edges, and the left third of the "
+            "canvas is clear and empty: plain background only on the left"
         ),
-        headline=(0.02, 0.10, 0.14, 0.72),
-        tagline=(0.20, 0.90, 0.70, 0.08),
+        headline=(0.03, 0.12, 0.30, 0.58),
+        tagline=(0.03, 0.74, 0.30, 0.14),
         size=(832, 1216),
-        rotate_headline=True,
+        align="left",
     ),
     "roundel": DesignTemplate(
         id="roundel",

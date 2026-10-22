@@ -325,12 +325,23 @@ def _fit(
     family: str,
     treatment: TextTreatment,
 ) -> tuple[ImageFont.FreeTypeFont, list[str]]:
-    """Find the biggest font size at which the text fits the zone."""
+    """Find the biggest font size at which the text fits the zone.
+
+    A word is never split down the middle: a narrow column shrinks the type
+    instead of breaking ``GOBBLE`` into ``GOBBL`` and ``E``, which reads as a
+    typo to the buyer and to the text gate.
+    """
+    words = text.split()
     size = max(MIN_FONT_SIZE, max_height)
     while size >= MIN_FONT_SIZE:
         font = _font(size, family)
-        lines = _wrap(draw, text, font, max_width, treatment.tracking * size)
-        if len(lines) * _line_height(font) <= max_height:
+        tracking = treatment.tracking * size
+        longest_word = max(
+            (_measure_run(draw, word, font, tracking) for word in words),
+            default=0.0,
+        )
+        lines = _wrap(draw, text, font, max_width, tracking)
+        if longest_word <= max_width and len(lines) * _line_height(font) <= max_height:
             return font, lines
         size -= 2
 
@@ -533,39 +544,6 @@ def _draw_text(
         word_index += len(line.split())
 
 
-def _draw_rotated_text(
-    overlay: Image.Image,
-    text: str,
-    *,
-    color: str,
-    box: tuple[int, int, int, int],
-    family: str = DEFAULT_FONT,
-    treatment: TextTreatment | None = None,
-    bar: str | None = None,
-) -> None:
-    """Draw the text up the side of the canvas.
-
-    The text is drawn horizontally on a layer the size of the rotated box and
-    then turned a quarter turn, so it runs from the bottom to the top of the
-    canvas. A ``tower`` design uses it for the headline.
-    """
-    x, y, width, height = box
-    if width < 1 or height < 1:
-        return
-    layer = Image.new("RGBA", (height, width), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    _draw_text(
-        draw,
-        text,
-        color=color,
-        box=(0, 0, height, width),
-        family=family,
-        treatment=treatment,
-        bar=bar,
-    )
-    overlay.alpha_composite(layer.rotate(90, expand=True), (x, y))
-
-
 def _draw_arc_text(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -664,27 +642,16 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
 
     if layout.headline_text and template.headline:
         box = _box(template.headline, width, height)
-        if template.rotate_headline:
-            _draw_rotated_text(
-                overlay,
-                layout.headline_text,
-                color=layout.font_color,
-                box=box,
-                family=layout.family,
-                treatment=treatment,
-                bar=bar,
-            )
-        else:
-            _draw_text(
-                draw,
-                layout.headline_text,
-                color=layout.font_color,
-                box=box,
-                family=layout.family,
-                treatment=treatment,
-                bar=bar,
-                align=template.align,
-            )
+        _draw_text(
+            draw,
+            layout.headline_text,
+            color=layout.font_color,
+            box=box,
+            family=layout.family,
+            treatment=treatment,
+            bar=bar,
+            align=template.align,
+        )
     if layout.tagline_text and template.tagline:
         box = _box(template.tagline, width, height)
         if template.arc_tagline:
