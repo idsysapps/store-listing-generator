@@ -81,19 +81,6 @@ DTF_KEY_COLOUR = (255, 0, 255)
 PAPER_COLOUR = (255, 255, 255)
 
 
-def resolve_layout(
-    layout_type: str, headline_text: str | None = None, tagline_text: str | None = None
-) -> str:
-    """The template that is actually drawn.
-
-    A template id is returned as it is, a legacy layout id is mapped to the
-    template that replaced it. The geometry lives in ``design_templates`` so
-    the prompt, the compositor and the gate agree on what is drawn (issue
-    #238).
-    """
-    return resolve_template(layout_type, headline_text, tagline_text)
-
-
 @dataclass
 class LayoutSpec:
     """What has to be drawn, and where.
