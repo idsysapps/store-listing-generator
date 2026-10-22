@@ -14,15 +14,31 @@ import org.jboss.logging.Logger;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @ApplicationScoped
 public class MaterialStreamConsumer {
 
     private static final Logger LOG = Logger.getLogger(MaterialStreamConsumer.class);
     private static final String STREAM_KEY = "materials:events";
+    private static final String DEAD_STREAM_KEY = "materials:events:dead";
     private static final String GROUP_NAME = "trend-service";
     private static final String CONSUMER_NAME = "consumer-1";
     private static final long POLL_INTERVAL_MS = 5000;
+
+    /**
+     * How long a message has to sit unprocessed before it is claimed again.
+     *
+     * <p>A failed message was never acknowledged, so it stayed in the pending
+     * list of the consumer group forever: the group only reads new messages
+     * with {@code >}, and the pending entries were never picked up again
+     * (issue #182).
+     */
+    private static final long MIN_IDLE_MS = 60_000;
+
+    /** How often a message is tried before it is put aside. */
+    private static final int MAX_DELIVERIES = 5;
 
     @Inject
     ReactiveRedisDataSource redis;
@@ -52,11 +68,112 @@ public class MaterialStreamConsumer {
     }
 
     void pollStream() {
+        claimPendingMessages();
         redis.execute("XREADGROUP", "GROUP", GROUP_NAME, CONSUMER_NAME,
                         "COUNT", "10", "STREAMS", STREAM_KEY, ">")
                 .subscribe().with(
                         this::processStreamResponse,
                         e -> LOG.debugf("Stream poll error (may be empty): %s", e.getMessage()));
+        logPendingBacklog();
+    }
+
+    /**
+     * Claims the messages that were delivered but never acknowledged.
+     *
+     * <p>A message that failed to process stays pending, and a pending message
+     * is never delivered again by a plain read. The claim takes the entries
+     * that have been idle long enough, so a transient database error does not
+     * cost the material forever (issue #182).
+     */
+    void claimPendingMessages() {
+        redis.execute("XAUTOCLAIM", STREAM_KEY, GROUP_NAME, CONSUMER_NAME,
+                        Long.toString(MIN_IDLE_MS), "0-0", "COUNT", "10")
+                .subscribe().with(
+                        this::processClaimedResponse,
+                        e -> LOG.debugf("Could not claim the pending material events: %s", e.getMessage()));
+    }
+
+    void processClaimedResponse(Response response) {
+        if (response == null || response.size() < 2) {
+            return;
+        }
+        Response entries = response.get(1);
+        if (entries == null) {
+            return;
+        }
+
+        for (int i = 0; i < entries.size(); i++) {
+            Response entry = entries.get(i);
+            String messageId = entry.get(0).toString();
+            long deliveries = deliveryCount(entry);
+
+            if (deliveries >= MAX_DELIVERIES) {
+                moveToDeadLetter(messageId, entry, deliveries);
+                continue;
+            }
+
+            LOG.infof("Retrying the material event %s (%d deliveries so far)", messageId, deliveries);
+            processEntry(messageId, entry.get(1));
+        }
+    }
+
+    /** How often the message was delivered to this consumer group. */
+    long deliveryCount(Response entry) {
+        if (entry.size() < 3 || entry.get(2) == null) {
+            return 1;
+        }
+        try {
+            return entry.get(2).toLong();
+        } catch (Exception e) { // noqa: BLE001
+            return 1;
+        }
+    }
+
+    /**
+     * Puts a message that keeps failing aside.
+     *
+     * <p>It is moved to a dead letter stream with its fields, so the event is
+     * not lost and can be replayed by hand, and it is acknowledged so the
+     * pending list does not grow without bound (issue #182).
+     */
+    void moveToDeadLetter(String messageId, Response entry, long deliveries) {
+        Response fields = entry.get(1);
+        List<String> args = new ArrayList<>();
+        args.add(DEAD_STREAM_KEY);
+        args.add("*");
+        if (fields != null) {
+            for (int i = 0; i < fields.size(); i++) {
+                args.add(fields.get(i).toString());
+            }
+        }
+        args.add("failed_deliveries");
+        args.add(Long.toString(deliveries));
+        args.add("failed_message_id");
+        args.add(messageId);
+
+        redis.execute("XADD", args.toArray(new String[0])).subscribe().with(
+                r -> {
+                    LOG.errorf("The material event %s failed %d times, moved to %s",
+                            messageId, deliveries, DEAD_STREAM_KEY);
+                    ackMessage(messageId);
+                },
+                e -> LOG.errorf("Could not move the material event %s aside: %s",
+                        messageId, e.getMessage()));
+    }
+
+    /** Logs how many events are waiting to be processed. */
+    void logPendingBacklog() {
+        redis.execute("XPENDING", STREAM_KEY, GROUP_NAME).subscribe().with(
+                response -> {
+                    if (response == null || response.size() == 0) {
+                        return;
+                    }
+                    long pending = response.get(0).toLong();
+                    if (pending > 0) {
+                        LOG.warnf("%d material events are pending and have not been processed", pending);
+                    }
+                },
+                e -> LOG.debugf("Could not read the pending material events: %s", e.getMessage()));
     }
 
     void processStreamResponse(Response response) {
@@ -85,6 +202,20 @@ public class MaterialStreamConsumer {
                     v -> {},
                     ex -> LOG.errorf(ex, "Failed to execute blocking for message %s", messageId));
         }
+    }
+
+    /** Processes one entry of the stream and acknowledges it when it worked. */
+    void processEntry(String messageId, Response fields) {
+        vertx.executeBlocking(() -> {
+            try {
+                processMessage(messageId, fields);
+            } catch (Exception ex) {
+                LOG.errorf(ex, "Failed to process message %s", messageId);
+            }
+            return null;
+        }).subscribe().with(
+                v -> {},
+                ex -> LOG.errorf(ex, "Failed to execute blocking for message %s", messageId));
     }
 
     void processMessage(String messageId, Response fields) {

@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.AdditionalMatchers.aryEq;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -212,5 +213,95 @@ class MaterialStreamConsumerTest {
         verify(materialRepository).persist(captor.capture());
 
         assertTrue(captor.getValue().active);
+    }
+
+    @Test
+    void testClaimPendingMessages_ClaimsTheEntriesThatWereNeverAcknowledged() {
+        // A message that failed to process stays pending, and a plain read
+        // never delivers a pending entry again, so the material was lost for
+        // good (issue #182).
+        when(redis.execute(eq("XAUTOCLAIM"), any(String[].class)))
+                .thenReturn(Uni.createFrom().nullItem());
+
+        consumer.claimPendingMessages();
+
+        verify(redis).execute(eq("XAUTOCLAIM"), eq("materials:events"), eq("trend-service"),
+                eq("consumer-1"), anyString(), eq("0-0"), eq("COUNT"), eq("10"));
+    }
+
+    @Test
+    void testProcessClaimedResponse_RetriesTheClaimedMessage() {
+        Response fields = mock(Response.class);
+        Response id = mock(Response.class);
+        when(id.toString()).thenReturn("1700000000000-0");
+        Response deliveries = mock(Response.class);
+        when(deliveries.toLong()).thenReturn(2L);
+
+        Response entry = mock(Response.class);
+        when(entry.get(0)).thenReturn(id);
+        when(entry.get(1)).thenReturn(fields);
+        when(entry.get(2)).thenReturn(deliveries);
+        when(entry.size()).thenReturn(3);
+
+        Response entries = mock(Response.class);
+        when(entries.size()).thenReturn(1);
+        when(entries.get(0)).thenReturn(entry);
+
+        Response claimed = mock(Response.class);
+        when(claimed.size()).thenReturn(3);
+        when(claimed.get(1)).thenReturn(entries);
+
+        consumer.processClaimedResponse(claimed);
+
+        verify(vertx).executeBlocking(any(java.util.concurrent.Callable.class));
+    }
+
+    @Test
+    void testProcessClaimedResponse_AMessageThatKeepsFailingIsMovedAside() {
+        // A poison message must not stay pending forever: it is moved to the
+        // dead letter stream and acknowledged (issue #182).
+        Response fields = mock(Response.class);
+        when(fields.size()).thenReturn(0);
+        Response id = mock(Response.class);
+        when(id.toString()).thenReturn("1700000000000-0");
+        Response deliveries = mock(Response.class);
+        when(deliveries.toLong()).thenReturn(9L);
+
+        Response entry = mock(Response.class);
+        when(entry.get(0)).thenReturn(id);
+        when(entry.get(1)).thenReturn(fields);
+        when(entry.get(2)).thenReturn(deliveries);
+        when(entry.size()).thenReturn(3);
+
+        Response entries = mock(Response.class);
+        when(entries.size()).thenReturn(1);
+        when(entries.get(0)).thenReturn(entry);
+
+        Response claimed = mock(Response.class);
+        when(claimed.size()).thenReturn(3);
+        when(claimed.get(1)).thenReturn(entries);
+
+        when(redis.execute(eq("XADD"), any(String[].class)))
+                .thenReturn(Uni.createFrom().nullItem());
+        when(redis.execute(eq("XACK"), any(String[].class)))
+                .thenReturn(Uni.createFrom().nullItem());
+
+        consumer.processClaimedResponse(claimed);
+
+        verify(redis).execute(eq("XADD"), aryEq(new String[] {
+                "materials:events:dead", "*", "failed_deliveries", "9",
+                "failed_message_id", "1700000000000-0" }));
+        verify(redis).execute(eq("XACK"), eq("materials:events"), eq("trend-service"),
+                eq("1700000000000-0"));
+    }
+
+    @Test
+    void testLogPendingBacklog_ReadsThePendingCount() {
+        when(redis.execute(eq("XPENDING"), any(String[].class)))
+                .thenReturn(Uni.createFrom().nullItem());
+
+        consumer.logPendingBacklog();
+
+        verify(redis).execute(eq("XPENDING"), eq("materials:events"), eq("trend-service"));
     }
 }
