@@ -76,6 +76,13 @@ spec:
                 configMapKeyRef:
                   name: {{ include "store-listing.fullname" . }}-config
                   key: REDIS_URL
+            {{- if .Values.config.enabledProductTypes }}
+            - name: ENABLED_PRODUCT_TYPES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-config
+                  key: ENABLED_PRODUCT_TYPES
+            {{- end }}
             - name: DESIGN_S3_BUCKET
               value: {{ .Values.config.designS3Bucket | default "store-listing-designs" | quote }}
             {{- if .Values.config.s3EndpointUrl }}
