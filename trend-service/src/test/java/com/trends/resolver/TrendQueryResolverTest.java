@@ -1,6 +1,7 @@
 package com.trends.resolver;
 
 import com.trends.config.ImageStorageConfig;
+import com.trends.config.MaterialRecommendationReader;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.TrendQuery;
 import com.trends.domain.TrendScore;
@@ -35,6 +36,9 @@ class TrendQueryResolverTest {
     ImageStorageConfig imageStorageConfig;
 
     @Mock
+    MaterialRecommendationReader materialRecommendationReader;
+
+    @Mock
     SecurityIdentity securityIdentity;
 
     @InjectMocks
@@ -45,6 +49,7 @@ class TrendQueryResolverTest {
         MockitoAnnotations.openMocks(this);
         when(designBriefRepository.findBySeedKeyword(anyString())).thenReturn(List.of());
         when(securityIdentity.isAnonymous()).thenReturn(false);
+        when(materialRecommendationReader.read(any())).thenReturn(List.of());
     }
 
     @Test

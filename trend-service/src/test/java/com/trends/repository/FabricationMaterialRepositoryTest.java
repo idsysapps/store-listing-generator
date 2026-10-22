@@ -47,9 +47,10 @@ class FabricationMaterialRepositoryTest {
         when(entityManager.createNativeQuery(anyString(), eq(FabricationMaterial.class)))
                 .thenReturn(mockQuery);
         when(mockQuery.setParameter(eq(1), eq("dtf_apparel"))).thenReturn(mockQuery);
+        when(mockQuery.setParameter(eq(2), eq(50))).thenReturn(mockQuery);
         when(mockQuery.getResultList()).thenReturn(List.of(mat));
 
-        List<FabricationMaterial> result = repository.findByProductType("dtf_apparel");
+        List<FabricationMaterial> result = repository.findByProductType("dtf_apparel", 50);
 
         assertEquals(1, result.size());
         assertEquals("bc3001-white", result.get(0).externalId);
@@ -100,9 +101,10 @@ class FabricationMaterialRepositoryTest {
         Query mockQuery = mock(Query.class);
         when(entityManager.createNativeQuery(anyString(), eq(FabricationMaterial.class)))
                 .thenReturn(mockQuery);
+        when(mockQuery.setParameter(eq(1), eq(50))).thenReturn(mockQuery);
         when(mockQuery.getResultList()).thenReturn(List.of(mat1, mat2));
 
-        List<FabricationMaterial> result = repository.findAllActive();
+        List<FabricationMaterial> result = repository.findAllActive(50);
 
         assertEquals(2, result.size());
     }

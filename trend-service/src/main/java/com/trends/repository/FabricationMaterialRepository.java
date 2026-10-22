@@ -21,13 +21,15 @@ public class FabricationMaterialRepository implements PanacheRepository<Fabricat
     @Inject
     EntityManager entityManager;
 
-    public List<FabricationMaterial> findByProductType(String productType) {
+    public List<FabricationMaterial> findByProductType(String productType, int limit) {
         return entityManager
                 .createNativeQuery(
                         "SELECT * FROM fabrication_materials "
-                                + "WHERE active = true AND ?1 = ANY(product_type) ORDER BY name, color",
+                                + "WHERE active = true AND ?1 = ANY(product_type) "
+                                + "ORDER BY name, color LIMIT ?2",
                         FabricationMaterial.class)
                 .setParameter(1, productType)
+                .setParameter(2, limit)
                 .getResultList();
     }
 
@@ -35,12 +37,13 @@ public class FabricationMaterialRepository implements PanacheRepository<Fabricat
         return find("externalId", externalId).firstResult();
     }
 
-    public List<FabricationMaterial> findAllActive() {
+    public List<FabricationMaterial> findAllActive(int limit) {
         return entityManager
                 .createNativeQuery(
                         "SELECT * FROM fabrication_materials "
-                                + "WHERE active = true ORDER BY product_type, name, color",
+                                + "WHERE active = true ORDER BY product_type, name, color LIMIT ?1",
                         FabricationMaterial.class)
+                .setParameter(1, limit)
                 .getResultList();
     }
 

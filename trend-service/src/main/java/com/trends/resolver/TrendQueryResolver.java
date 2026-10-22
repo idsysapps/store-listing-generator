@@ -1,6 +1,7 @@
 package com.trends.resolver;
 
 import com.trends.config.ImageStorageConfig;
+import com.trends.config.MaterialRecommendationReader;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.TrendQuery;
 import com.trends.domain.TrendScore;
@@ -37,6 +38,9 @@ public class TrendQueryResolver {
 
     @Inject
     ImageStorageConfig imageStorageConfig;
+
+    @Inject
+    MaterialRecommendationReader materialRecommendationReader;
 
     @Inject
     SecurityIdentity securityIdentity;
@@ -179,6 +183,8 @@ public class TrendQueryResolver {
                 brief.imageKeyRaw, brief.imageKeyTransparent);
         summary.setImageUrl(imageStorageConfig.buildUrl(brief.imageKeyRaw));
         summary.setImageTransparentUrl(imageStorageConfig.buildUrl(brief.imageKeyTransparent));
+        summary.setRecommendedMaterials(
+                materialRecommendationReader.read(brief.recommendedMaterials));
         return summary;
     }
 }
