@@ -43,6 +43,7 @@ from store_listing.orchestration.llm_client import is_model_missing_error, model
 from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
+from store_listing.orchestration.typography import family_for_voice
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,8 @@ class DesignBrief:
     recommended_materials: list[dict[str, Any]] | None = None
     # The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
     voice: str = DEFAULT_VOICE
+    # The family the text of the design is drawn in.
+    font_family: str | None = None
 
 
 class DesignBriefDBClient(Protocol):
@@ -193,6 +196,7 @@ class DesignBriefDBClient(Protocol):
         personal_use: bool = False,
         recommended_materials: list[dict[str, Any]] | None = None,
         voice: str = DEFAULT_VOICE,
+        font_family: str | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -349,6 +353,9 @@ def _brief_from(
             return None
 
     voice = normalise_voice(b.get("voice") if isinstance(b.get("voice"), str) else None)
+    # The family of the type is decided here, not by the model: the model picks
+    # a tone, and the type follows the art direction (issue #226).
+    font_family = family_for_voice(voice)
 
     # The text of a design is the part the buyer reads, so it is the part that
     # has to be good. A headline that names a brand, that lists three nouns or
@@ -388,6 +395,7 @@ def _brief_from(
         scene_description=scene_description,
         recommended_materials=recommended_materials,
         voice=voice,
+        font_family=font_family,
     )
 
 
@@ -622,6 +630,7 @@ def generate_design_briefs(
             scene_description=brief.scene_description,
             recommended_materials=brief.recommended_materials,
             voice=brief.voice,
+            font_family=brief.font_family,
         )
         linked = 0
         for seed_id in brief.source_seed_ids:

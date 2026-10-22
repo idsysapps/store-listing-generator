@@ -537,6 +537,7 @@ class DatabaseClient:
         personal_use: bool = False,
         recommended_materials: list[dict[str, Any]] | None = None,
         voice: str = DEFAULT_VOICE,
+        font_family: str | None = None,
     ) -> int:
         import json as _json
 
@@ -548,8 +549,9 @@ class DatabaseClient:
                     (concept, product_type, specific_products, audience,
                      visual_style, confidence, reasoning, llm_model, batch_id,
                      layout_type, headline_text, tagline_text, font_color,
-                     scene_description, personal_use, recommended_materials, voice)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     scene_description, personal_use, recommended_materials, voice,
+                     font_family)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -570,6 +572,7 @@ class DatabaseClient:
                     personal_use,
                     materials_json,
                     voice,
+                    font_family,
                 ),
             )
             result = cur.fetchone()
@@ -605,7 +608,8 @@ class DatabaseClient:
                     """
                     SELECT id, concept, product_type, audience, visual_style,
                            layout_type, headline_text, tagline_text, font_color,
-                           regeneration_feedback, scene_description, recommended_materials
+                           regeneration_feedback, scene_description, recommended_materials,
+                           voice, font_family
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND product_type = ANY(%s)
@@ -619,7 +623,8 @@ class DatabaseClient:
                     """
                     SELECT id, concept, product_type, audience, visual_style,
                            layout_type, headline_text, tagline_text, font_color,
-                           regeneration_feedback, scene_description, recommended_materials
+                           regeneration_feedback, scene_description, recommended_materials,
+                           voice, font_family
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                     ORDER BY created_at DESC
@@ -643,6 +648,8 @@ class DatabaseClient:
                     "recommended_materials": (
                         _json.loads(row[11]) if isinstance(row[11], str) else row[11]
                     ),
+                    "voice": row[12] or DEFAULT_VOICE,
+                    "font_family": row[13],
                 }
                 for row in cur.fetchall()
             ]

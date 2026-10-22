@@ -11,6 +11,11 @@ the OCR gate can read it back.
 
 A typography-only design has no artwork at all: the canvas is blank and only
 the text is drawn on it (issue #196).
+
+The type itself is decided in ``typography``: the family comes from the art
+direction and the treatment from the voice of the brief. The text used to be
+drawn in one font with an outline around it, which is the "meme font" look
+(issue #226).
 """
 
 from __future__ import annotations
@@ -19,8 +24,19 @@ import logging
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Any, cast
 
 from PIL import Image, ImageDraw, ImageFont
+
+from store_listing.orchestration.typography import (
+    DEFAULT_FONT,
+    TextTreatment,
+    accent_for,
+    family_for_voice,
+    font_path,
+    tagline_family_for_voice,
+    treatment_for_voice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +55,10 @@ LINE_SPACING = 1.15
 HALO_RATIO = 0.06
 # Share of the zone that stays empty around the text.
 ZONE_PADDING = 0.2
+# How far the shadow of the text sits from the text, as a share of the size.
+SHADOW_RATIO = 0.045
+# The empty space around a word that is drawn in the accent colour.
+BLOCK_PADDING = 0.18
 
 # A typography-only design has no artwork to make room for, so the text sits
 # in the middle of the canvas instead of at its edges.
@@ -90,6 +110,14 @@ class LayoutSpec:
     headline_text: str | None = None
     tagline_text: str | None = None
     font_color: str = "#000000"
+    # The family the headline is drawn in, and the one the tagline is drawn in.
+    # Without one the voice of the brief decides.
+    font_family: str | None = None
+    tagline_font_family: str | None = None
+    # The voice of the brief, which decides the treatment of the text.
+    voice: str = "deadpan"
+    # A treatment that replaces the one of the voice.
+    treatment_override: TextTreatment | None = None
 
     def __post_init__(self) -> None:
         self.layout_type = resolve_layout(self.layout_type, self.headline_text, self.tagline_text)
@@ -98,10 +126,31 @@ class LayoutSpec:
             self.tagline_text = None
         elif self.layout_type == "text_top":
             self.tagline_text = None
+        if not self.font_family:
+            self.font_family = family_for_voice(self.voice)
+        if not self.tagline_font_family:
+            self.tagline_font_family = tagline_family_for_voice(self.voice)
 
     @property
     def needs_text(self) -> bool:
         return bool(self.headline_text or self.tagline_text)
+
+    @property
+    def family(self) -> str:
+        """The family the headline is drawn in."""
+        return self.font_family or family_for_voice(self.voice)
+
+    @property
+    def tagline_family(self) -> str:
+        """The family the tagline is drawn in."""
+        return self.tagline_font_family or tagline_family_for_voice(self.voice)
+
+    @property
+    def treatment(self) -> TextTreatment:
+        """How the text is drawn: the case, the tracking, the colours."""
+        if self.treatment_override is not None:
+            return self.treatment_override
+        return treatment_for_voice(self.voice)
 
 
 def blank_canvas(
@@ -130,46 +179,95 @@ def blank_canvas(
     return buffer.getvalue()
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(FONT_PATH), size)
+def _font(size: int, family: str = DEFAULT_FONT) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(str(font_path(family)), size)
 
 
-def _missing_glyph(font: ImageFont.FreeTypeFont) -> tuple[float, float, float, float]:
-    """The bounding box the font draws for a character it has no glyph for.
+def _glyph_pixels(mask: Any) -> bytes:
+    """The pixels of a glyph mask.
 
-    The private use area is a safe probe: no font has a glyph there.
+    The mask is an image core, which carries its pixels as a buffer. The
+    stubs of Pillow do not say so, so the buffer is read through ``Any``.
     """
-    return font.getbbox("\ue000")
+    return bytes(cast(Any, mask))
 
 
-def _drop_unsupported(text: str) -> str:
+def _missing_glyph(font: ImageFont.FreeTypeFont) -> tuple[tuple[int, int], bytes]:
+    """The bitmap the font draws for a character it has no glyph for.
+
+    The private use area is a safe probe: no font has a glyph there. The
+    bitmap is compared and not the bounding box, because the box of the
+    missing glyph is the box of a real letter in some families - Anton drew
+    every capital letter as the missing glyph that way, and every headline
+    came out empty.
+    """
+    mask = font.getmask("\ue000", mode="L")
+    return (mask.size, _glyph_pixels(mask))
+
+
+def _drop_unsupported(text: str, family: str = DEFAULT_FONT) -> str:
     """Remove the characters the font cannot draw.
 
     A missing glyph is drawn as an empty box, which is worse than leaving the
-    character out. The vendored font has no emoji and no CJK.
+    character out. The vendored fonts have no emoji and no CJK.
     """
-    font = _font(32)
+    font = _font(32, family)
     missing = _missing_glyph(font)
     kept: list[str] = []
     for character in text:
         if character.isspace():
             kept.append(character)
-        elif font.getbbox(character) == missing:
+            continue
+        mask = font.getmask(character, mode="L")
+        if (mask.size, _glyph_pixels(mask)) == missing:
             logger.warning("Dropping %r from the text: the font has no glyph for it", character)
         else:
             kept.append(character)
     return "".join(kept)
 
 
+def _measure_run(
+    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, tracking: float
+) -> float:
+    """The width of a word, with the tracking between the letters."""
+    if not text:
+        return 0.0
+    if tracking <= 0:
+        return draw.textlength(text, font=font)
+    width = sum(draw.textlength(character, font=font) for character in text)
+    return width + tracking * (len(text) - 1)
+
+
+def _measure_line(
+    draw: ImageDraw.ImageDraw,
+    line: str,
+    font: ImageFont.FreeTypeFont,
+    tracking: float,
+) -> float:
+    """The width of a line, as it is drawn."""
+    words = line.split(" ")
+    if not words:
+        return 0.0
+    space = draw.textlength(" ", font=font) + tracking
+    width = _measure_run(draw, words[0], font, tracking)
+    for word in words[1:]:
+        width += space + _measure_run(draw, word, font, tracking)
+    return width
+
+
 def _break_to_width(
-    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+    tracking: float,
 ) -> list[str]:
     """Split a word that is wider than the line into pieces that fit."""
     pieces: list[str] = []
     current = ""
     for character in text:
         candidate = current + character
-        if current and draw.textlength(candidate, font=font) > max_width:
+        if current and _measure_run(draw, candidate, font, tracking) > max_width:
             pieces.append(current)
             current = character
         else:
@@ -180,7 +278,11 @@ def _break_to_width(
 
 
 def _wrap(
-    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+    tracking: float,
 ) -> list[str]:
     """Break the text into lines that fit the width."""
     words = text.split()
@@ -191,7 +293,7 @@ def _wrap(
     current = words[0]
     for word in words[1:]:
         candidate = f"{current} {word}"
-        if draw.textlength(candidate, font=font) <= max_width:
+        if _measure_line(draw, candidate, font, tracking) <= max_width:
             current = candidate
             continue
         lines.append(current)
@@ -200,27 +302,42 @@ def _wrap(
 
     wrapped: list[str] = []
     for line in lines:
-        if draw.textlength(line, font=font) <= max_width:
+        if _measure_line(draw, line, font, tracking) <= max_width:
             wrapped.append(line)
         else:
-            wrapped.extend(_break_to_width(draw, line, font, max_width))
+            wrapped.extend(_break_to_width(draw, line, font, max_width, tracking))
     return wrapped
 
 
+def _line_height(font: ImageFont.FreeTypeFont) -> int:
+    """The height of a line of text, from the metrics of the family.
+
+    A script family has long ascenders and descenders, so the height of a
+    line is taken from the font instead of from its size.
+    """
+    ascent, descent = font.getmetrics()
+    return max(1, int((ascent + descent) * LINE_SPACING))
+
+
 def _fit(
-    draw: ImageDraw.ImageDraw, text: str, max_width: int, max_height: int
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    max_width: int,
+    max_height: int,
+    family: str,
+    treatment: TextTreatment,
 ) -> tuple[ImageFont.FreeTypeFont, list[str]]:
     """Find the biggest font size at which the text fits the zone."""
     size = max(MIN_FONT_SIZE, max_height)
     while size >= MIN_FONT_SIZE:
-        font = _font(size)
-        lines = _wrap(draw, text, font, max_width)
-        if len(lines) * size * LINE_SPACING <= max_height:
+        font = _font(size, family)
+        lines = _wrap(draw, text, font, max_width, treatment.tracking * size)
+        if len(lines) * _line_height(font) <= max_height:
             return font, lines
         size -= 2
 
-    font = _font(MIN_FONT_SIZE)
-    return font, _wrap(draw, text, font, max_width)
+    font = _font(MIN_FONT_SIZE, family)
+    return font, _wrap(draw, text, font, max_width, treatment.tracking * MIN_FONT_SIZE)
 
 
 def _halo_colour(color: str) -> str:
@@ -243,39 +360,158 @@ def _halo_colour(color: str) -> str:
     return "#000000" if brightness > 0.5 else "#FFFFFF"
 
 
+def _contrast_colour(color: str) -> str:
+    """The colour that stands out against the given colour."""
+    return _halo_colour(color)
+
+
+def _segments(line: str, start_word: int, accent_word: int | None) -> list[tuple[str, bool]]:
+    """The words of a line, and which of them is the accent word."""
+    segments: list[tuple[str, bool]] = []
+    index = start_word
+    for word in line.split(" "):
+        segments.append((word, accent_word is not None and index == accent_word))
+        index += 1
+    return segments
+
+
+def _draw_run(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: int,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: str,
+    tracking: float,
+    halo: int = 0,
+    halo_fill: str = "#000000",
+) -> float:
+    """Draw a word, letter by letter so the tracking can be applied."""
+    for index, character in enumerate(text):
+        draw.text(
+            (x, y),
+            character,
+            font=font,
+            fill=fill,
+            stroke_width=halo,
+            stroke_fill=halo_fill,
+        )
+        x += draw.textlength(character, font=font)
+        if index < len(text) - 1:
+            x += tracking
+    return x
+
+
+def _draw_line(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: int,
+    line: str,
+    font: ImageFont.FreeTypeFont,
+    *,
+    fill_for,
+    tracking: float,
+    start_word: int,
+    accent_word: int | None,
+    halo: int = 0,
+    halo_fill: str = "#000000",
+) -> None:
+    """Draw one line of text, word by word."""
+    space = draw.textlength(" ", font=font) + tracking
+    for index, (word, is_accent) in enumerate(_segments(line, start_word, accent_word)):
+        if index:
+            x += space
+        x = _draw_run(
+            draw,
+            x,
+            y,
+            word,
+            font,
+            fill_for(is_accent),
+            tracking,
+            halo,
+            halo_fill,
+        )
+
+
 def _draw_text(
     draw: ImageDraw.ImageDraw,
     text: str,
     *,
     color: str,
     box: tuple[int, int, int, int],
+    family: str = DEFAULT_FONT,
+    treatment: TextTreatment | None = None,
 ) -> None:
     """Draw the text centred in the given box."""
-    text = _drop_unsupported(text.strip())
+    treatment = treatment or TextTreatment()
+    text = text.strip()
+    if treatment.uppercase:
+        text = text.upper()
+    text = _drop_unsupported(text, family)
     if not text:
         return
 
     x, y, width, height = box
-    font, lines = _fit(draw, text, width, int(height * (1 - ZONE_PADDING)))
+    font, lines = _fit(draw, text, width, int(height * (1 - ZONE_PADDING)), family, treatment)
 
-    line_height = int(font.size * LINE_SPACING)
+    line_height = _line_height(font)
     total_height = line_height * len(lines)
     top = y + max(0, (height - total_height) // 2)
 
-    halo = max(1, int(font.size * HALO_RATIO))
-    halo_color = _halo_colour(color)
+    tracking = treatment.tracking * font.size
+    accent = treatment.accent_color or accent_for(color)
+    shadow_color = _halo_colour(color)
+    offset = max(1, int(font.size * SHADOW_RATIO))
+    halo = max(1, int(font.size * HALO_RATIO)) if treatment.style == "halo" else 0
+
+    def fill_for(is_accent: bool) -> str:
+        return accent if is_accent else color
+
+    word_index = 0
     for index, line in enumerate(lines):
-        line_width = draw.textlength(line, font=font)
+        line_width = _measure_line(draw, line, font, tracking)
         line_x = int(x + (width - line_width) / 2)
         line_y = top + index * line_height
-        draw.text(
-            (line_x, line_y),
+
+        if treatment.style == "block":
+            padding = int(font.size * BLOCK_PADDING)
+            draw.rectangle(
+                [
+                    line_x - padding,
+                    line_y - padding // 2,
+                    line_x + line_width + padding,
+                    line_y + line_height - padding // 2,
+                ],
+                fill=accent,
+            )
+        elif treatment.style == "shadow":
+            _draw_line(
+                draw,
+                line_x + offset,
+                line_y + offset,
+                line,
+                font,
+                fill_for=lambda _is_accent: shadow_color,
+                tracking=tracking,
+                start_word=word_index,
+                accent_word=treatment.accent_word,
+            )
+
+        _draw_line(
+            draw,
+            line_x,
+            line_y,
             line,
-            font=font,
-            fill=color,
-            stroke_width=halo,
-            stroke_fill=halo_color,
+            font,
+            fill_for=fill_for,
+            tracking=tracking,
+            start_word=word_index,
+            accent_word=treatment.accent_word,
+            halo=halo,
+            halo_fill=shadow_color,
         )
+        word_index += len(line.split())
 
 
 def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
@@ -295,6 +531,7 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
 
     margin_x = int(width * MARGIN_X)
     text_width = width - 2 * margin_x
+    treatment = layout.treatment
 
     if layout.layout_type == "text_only":
         _draw_text_only(draw, layout, margin_x=margin_x, text_width=text_width, height=height)
@@ -305,6 +542,8 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
                 layout.headline_text,
                 color=layout.font_color,
                 box=(margin_x, 0, text_width, int(height * HEADLINE_ZONE)),
+                family=layout.family,
+                treatment=treatment,
             )
         if layout.tagline_text:
             _draw_text(
@@ -317,6 +556,8 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
                     text_width,
                     int(height * TAGLINE_ZONE),
                 ),
+                family=layout.tagline_family,
+                treatment=treatment,
             )
 
     result = Image.alpha_composite(image, overlay)
@@ -338,6 +579,7 @@ def _draw_text_only(
     There is no artwork to leave room for, so the headline sits above the
     middle of the canvas and the tagline below it.
     """
+    treatment = layout.treatment
     if layout.headline_text:
         _draw_text(
             draw,
@@ -349,6 +591,8 @@ def _draw_text_only(
                 text_width,
                 int(height * TEXT_ONLY_HEADLINE_HEIGHT),
             ),
+            family=layout.family,
+            treatment=treatment,
         )
     if layout.tagline_text:
         _draw_text(
@@ -361,4 +605,6 @@ def _draw_text_only(
                 text_width,
                 int(height * TEXT_ONLY_TAGLINE_HEIGHT),
             ),
+            family=layout.tagline_family,
+            treatment=treatment,
         )

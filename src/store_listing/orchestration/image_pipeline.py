@@ -25,6 +25,7 @@ from store_listing.orchestration.artwork_validation import (
 )
 from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.design_briefs import DesignBrief
+from store_listing.orchestration.headline_voice import DEFAULT_VOICE
 from store_listing.orchestration.image_generation import (
     ARTWORK_RETRY_HINT,
     NO_LETTERING_RETRY_HINT,
@@ -97,6 +98,8 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         font_color=brief_row.get("font_color"),
         regeneration_feedback=brief_row.get("regeneration_feedback"),
         scene_description=scene or None,
+        voice=brief_row.get("voice") or DEFAULT_VOICE,
+        font_family=brief_row.get("font_family"),
     )
 
 
@@ -225,6 +228,8 @@ def _generate_single_brief(
         headline_text=brief.headline_text,
         tagline_text=brief.tagline_text,
         font_color=font_colour(brief),
+        font_family=brief.font_family,
+        voice=brief.voice,
     )
     needs_text_check = layout.needs_text
     max_retries = _max_text_retries()
