@@ -125,8 +125,11 @@ def generate_images_for_briefs(
     text_validator: TextValidator | None = None,
     artwork_validator: ArtworkValidator | None = None,
     artwork_text_validator: ArtworkTextValidator | None = None,
+    product_types: list[str] | None = None,
 ) -> dict[str, Any]:
-    briefs = db_client.list_briefs_without_images(limit)
+    # A store that focuses on one production method does not spend GPU time
+    # on the briefs of the others (issue #215).
+    briefs = db_client.list_briefs_without_images(limit, product_types)
     if not briefs:
         return {"status": "success", "images_generated": 0, "errors": 0}
 

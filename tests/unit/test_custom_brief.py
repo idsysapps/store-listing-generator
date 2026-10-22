@@ -303,6 +303,52 @@ class TestCreateCustomBrief:
         assert result["status"] == "success"
         assert result["brief_id"] == 42
 
+    def test_a_brief_of_a_type_that_is_not_in_production_is_coerced(self) -> None:
+        # A store that focuses on DTF apparel still gets a brief, and it is a
+        # DTF brief (issue #215).
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response(product_type="sublimation"))
+
+        result = create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "test idea",
+            "sublimation",
+            enabled=["dtf_apparel"],
+        )
+
+        assert result["status"] == "success"
+        assert db.insert_design_brief.call_args.kwargs["product_type"] == "dtf_apparel"
+
+    def test_a_brief_of_a_type_that_is_not_in_production_is_refused(self) -> None:
+        # With more than one type in production there is no single type to
+        # fall back to, so the request is refused (issue #215).
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response())
+
+        result = create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "test idea",
+            "sublimation",
+            enabled=["dtf_apparel", "sticker_vinyl"],
+        )
+
+        assert result["status"] == "error"
+        db.insert_design_brief.assert_not_called()
+
+    def test_the_prompt_offers_only_the_types_in_production(self) -> None:
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response())
+
+        create_custom_brief(db, llm, "model-x", "test idea", "dtf_apparel", enabled=["dtf_apparel"])
+
+        system = llm.with_raw_response.create.call_args.kwargs["messages"][0]["content"].lower()
+        assert "sublimation" not in system
+        assert "sticker_vinyl" not in system
+
     def test_returns_error_on_empty_choices(self) -> None:
         db = self._mock_db()
         llm = MagicMock()

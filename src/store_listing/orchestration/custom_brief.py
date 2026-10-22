@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any
 
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
-    LAYOUT_RULES,
-    PRODUCT_CATALOG,
+    layout_rules,
+    product_belongs_to,
+    product_catalog,
 )
 from store_listing.orchestration.design_briefs import (
     VALID_LAYOUT_TYPES,
@@ -24,69 +26,74 @@ from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_res
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT: Final[str] = (
-    "You are a print-on-demand design strategist. A customer has described a design "
-    "idea. Turn it into one actionable design brief that a graphic designer can "
-    "immediately execute.\n\n"
-    f"{PRODUCT_CATALOG}\n"
-    "Return a single JSON object with this structure:\n"
-    '{"brief": {\n'
-    '  "concept": "design-ready phrase or visual idea",\n'
-    '  "product_type": "dtf_apparel | sublimation | sticker_vinyl",\n'
-    '  "specific_products": ["t-shirts"],\n'
-    '  "audience": "who would buy this",\n'
-    '  "visual_style": "art direction (colors, style, typography). No text/slogans here.",\n'
-    '  "confidence": 0-100,\n'
-    '  "reasoning": "why this design works",\n'
-    '  "layout_type": "full_bleed | text_top | text_top_bottom | text_only",\n'
-    '  "headline_text": "short punchy text (1-6 words, words only, no emoji) '
-    'or null if full_bleed",\n'
-    '  "tagline_text": "secondary text or null",\n'
-    '  "font_color": "#FFFFFF",\n'
-    '  "scene_description": "concise visual description of the illustration only, '
-    'no text. Under 20 words."\n'
-    "}}\n\n"
-    f"{LAYOUT_RULES}\n"
-    f"{DESIGN_ONLY_RULES}\n"
-    "IMPORTANT: Do not use licensed IP (movie characters, team logos, brand names). "
-    "Create original concepts. Respond ONLY with valid JSON."
-)
 
-PERSONAL_USE_SYSTEM_PROMPT: Final[str] = (
-    "You are a print-on-demand design strategist. A customer has described a design "
-    "idea for PERSONAL USE ONLY (not for resale). Turn it into one actionable design "
-    "brief that a graphic designer can immediately execute.\n\n"
-    "Since this is for personal use only, you MAY reference specific franchises, "
-    "characters, brands, team logos, or other IP in the design concept. The customer "
-    "wants a design inspired by or featuring these elements for their own private use.\n\n"
-    f"{PRODUCT_CATALOG}\n"
-    "Return a single JSON object with this structure:\n"
-    '{"brief": {\n'
-    '  "concept": "design-ready phrase or visual idea",\n'
-    '  "product_type": "dtf_apparel | sublimation | sticker_vinyl",\n'
-    '  "specific_products": ["t-shirts"],\n'
-    '  "audience": "who would buy this",\n'
-    '  "visual_style": "art direction (colors, style, typography). No text/slogans here.",\n'
-    '  "confidence": 0-100,\n'
-    '  "reasoning": "why this design works",\n'
-    '  "layout_type": "full_bleed | text_top | text_top_bottom | text_only",\n'
-    '  "headline_text": "short punchy text (1-6 words, words only, no emoji) '
-    'or null if full_bleed",\n'
-    '  "tagline_text": "secondary text or null",\n'
-    '  "font_color": "#FFFFFF",\n'
-    '  "scene_description": "concise visual description of the illustration only, '
-    'no text. Under 20 words."\n'
-    "}}\n\n"
-    f"{LAYOUT_RULES}\n"
-    f"{DESIGN_ONLY_RULES}\n"
-    "Respond ONLY with valid JSON."
-)
+def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
+    """The prompt for a custom brief, offering only what is in production.
+
+    The catalog names the product types that are in production right now, so
+    a store that focuses on DTF apparel is never offered mugs (issue #215).
+    """
+    types = list(enabled) if enabled else sorted(PRODUCT_TAGS)
+    product_types = ", ".join(f"'{t}'" for t in types)
+
+    personal_use_rules = ""
+    introduction = (
+        "You are a print-on-demand design strategist. A customer has described a design "
+        "idea. Turn it into one actionable design brief that a graphic designer can "
+        "immediately execute.\n\n"
+    )
+    ip_rules = (
+        "IMPORTANT: Do not use licensed IP (movie characters, team logos, brand names). "
+        "Create original concepts. Respond ONLY with valid JSON."
+    )
+    if personal_use:
+        introduction = (
+            "You are a print-on-demand design strategist. A customer has described a design "
+            "idea for PERSONAL USE ONLY (not for resale). Turn it into one actionable design "
+            "brief that a graphic designer can immediately execute.\n\n"
+        )
+        personal_use_rules = (
+            "Since this is for personal use only, you MAY reference specific franchises, "
+            "characters, brands, team logos, or other IP in the design concept. The customer "
+            "wants a design inspired by or featuring these elements for their own private use.\n\n"
+        )
+        ip_rules = "Respond ONLY with valid JSON."
+
+    return (
+        f"{introduction}"
+        f"{personal_use_rules}"
+        f"{product_catalog(types)}\n"
+        "Return a single JSON object with this structure:\n"
+        '{"brief": {\n'
+        '  "concept": "design-ready phrase or visual idea",\n'
+        f'  "product_type": "{product_types}",\n'
+        '  "specific_products": ["t-shirts"],\n'
+        '  "audience": "who would buy this",\n'
+        '  "visual_style": "art direction (colors, style, typography). No text/slogans here.",\n'
+        '  "confidence": 0-100,\n'
+        '  "reasoning": "why this design works",\n'
+        '  "layout_type": "full_bleed | text_top | text_top_bottom | text_only",\n'
+        '  "headline_text": "short punchy text (1-6 words, words only, no emoji) '
+        'or null if full_bleed",\n'
+        '  "tagline_text": "secondary text or null",\n'
+        '  "font_color": "#FFFFFF",\n'
+        '  "scene_description": "concise visual description of the illustration only, '
+        'no text. Under 20 words."\n'
+        "}}\n\n"
+        f"{layout_rules(types)}\n"
+        f"{DESIGN_ONLY_RULES}\n"
+        f"{ip_rules}"
+    )
 
 
 def build_custom_brief_prompt(
-    description: str, product_type: str, *, personal_use: bool = False
+    description: str,
+    product_type: str,
+    *,
+    personal_use: bool = False,
+    enabled: Sequence[str] | None = None,
 ) -> list[dict[str, str]]:
-    prompt = PERSONAL_USE_SYSTEM_PROMPT if personal_use else SYSTEM_PROMPT
+    prompt = _system_prompt(enabled, personal_use)
     today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
     user_content = (
         f"Today's date: {today}\n"
@@ -100,7 +107,10 @@ def build_custom_brief_prompt(
     ]
 
 
-def _brief_from(b: dict[str, Any]) -> DesignBrief | None:
+def _brief_from(
+    b: dict[str, Any],
+    enabled: Sequence[str] | None = None,
+) -> DesignBrief | None:
     """The brief in one answer object, or None when it is not usable."""
     concept = b.get("concept", "")
     if not concept:
@@ -110,10 +120,23 @@ def _brief_from(b: dict[str, Any]) -> DesignBrief | None:
     if product_type not in PRODUCT_TAGS:
         return None
 
+    if enabled and product_type not in enabled:
+        if len(enabled) > 1:
+            logger.warning(
+                "Skipping the brief %r: the product type %s is not in production",
+                concept,
+                product_type,
+            )
+            return None
+        product_type = enabled[0]
+
     raw_products = b.get("specific_products", [])
     specific_products = (
         [p for p in raw_products if isinstance(p, str)] if isinstance(raw_products, list) else []
     )
+    specific_products = [
+        product for product in specific_products if product_belongs_to(product, product_type)
+    ]
 
     confidence = b.get("confidence", 0)
     if not isinstance(confidence, int):
@@ -165,7 +188,10 @@ def _brief_from(b: dict[str, Any]) -> DesignBrief | None:
     )
 
 
-def parse_custom_brief_response(text: str) -> DesignBrief | None:
+def parse_custom_brief_response(
+    text: str,
+    enabled: Sequence[str] | None = None,
+) -> DesignBrief | None:
     """The brief in the answer, or None when it cannot be read.
 
     The model does not always answer with only JSON: it appends a note, or
@@ -176,7 +202,7 @@ def parse_custom_brief_response(text: str) -> DesignBrief | None:
         b = obj.get("brief")
         if not isinstance(b, dict):
             continue
-        brief = _brief_from(b)
+        brief = _brief_from(b, enabled)
         if brief is not None:
             return brief
     return None
@@ -190,8 +216,21 @@ def create_custom_brief(
     product_type: str,
     *,
     personal_use: bool = False,
+    enabled: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    messages = build_custom_brief_prompt(description, product_type, personal_use=personal_use)
+    if enabled and product_type not in enabled:
+        if len(enabled) > 1:
+            # There is no single type to fall back to, so the request is
+            # refused instead of answered with the wrong thing.
+            return {
+                "status": "error",
+                "error": f"the product type {product_type} is not in production",
+            }
+        product_type = enabled[0]
+
+    messages = build_custom_brief_prompt(
+        description, product_type, personal_use=personal_use, enabled=enabled
+    )
 
     try:
         raw = llm_completions.with_raw_response.create(
@@ -213,7 +252,7 @@ def create_custom_brief(
             logger.warning("Custom brief LLM call failed: %s", e)
         return {"status": "error", "error": message}
 
-    brief = parse_custom_brief_response(content)
+    brief = parse_custom_brief_response(content, enabled)
     if brief is None:
         # The raw answer is the only way to see what the model actually sent.
         logger.error("The LLM custom brief response could not be read")

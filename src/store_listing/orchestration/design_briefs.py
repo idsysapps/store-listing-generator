@@ -10,9 +10,10 @@ import json
 import logging
 import os
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from typing import Any, Final, Protocol
+from typing import Any, Protocol
 
 from store_listing.orchestration.brief_mix import (
     BRIEF_MIX_REGENERATE_ONCE,
@@ -26,8 +27,9 @@ from store_listing.orchestration.brief_mix import (
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
     DIVERSITY_RULES,
-    LAYOUT_RULES,
-    PRODUCT_CATALOG,
+    layout_rules,
+    product_belongs_to,
+    product_catalog,
 )
 from store_listing.orchestration.context_seeds import get_upcoming_events
 from store_listing.orchestration.json_response import (
@@ -45,43 +47,54 @@ logger = logging.getLogger(__name__)
 MAX_SEEDS_PER_BRIEF = int(os.environ.get("LLM_MAX_BRIEF_SEEDS", "20"))
 MAX_BRIEFS = int(os.environ.get("LLM_MAX_BRIEFS", "8"))
 
-SYSTEM_PROMPT: Final[str] = (
-    "You are a print-on-demand design strategist. Your job is to synthesize trend "
-    "signals into actionable design briefs that a graphic designer can immediately "
-    "execute.\n\n"
-    f"{PRODUCT_CATALOG}\n"
-    "For each brief:\n"
-    "- concept: A specific, design-ready phrase or visual idea (not a category)\n"
-    "- product_type: exactly one of 'dtf_apparel', 'sublimation', 'sticker_vinyl'\n"
-    "- specific_products: array of 1-3 specific products from the catalog above\n"
-    "- audience: who would buy this (demographics, interests)\n"
-    "- visual_style: art direction notes (color palette, illustration style, "
-    "typography). Do NOT include any text/slogan in this field — text is rendered "
-    "separately via the layout fields below.\n"
-    "- confidence: 0-100, how confident you are this will sell\n"
-    "- reasoning: why this concept is timely or evergreen and marketable (cite the "
-    "trend signals)\n"
-    "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
-    f"{LAYOUT_RULES}\n"
-    f"{DESIGN_ONLY_RULES}\n"
-    "MATERIALS — picking the right substrate:\n"
-    "- recommended_materials: array of objects from the available_materials list, each with "
-    "{external_id, name, color, substrate_type, unit_cost}. Pick 1-3 materials that best "
-    "match this design's aesthetic and target audience. Consider color contrast with the "
-    "design, substrate suitability, and unit cost for margin.\n"
-    "- If no materials are available for the product_type, omit recommended_materials.\n\n"
-    "IMPORTANT: Do not suggest designs requiring licensed IP (movie characters, "
-    "team logos, brand names). Create original concepts inspired by cultural moments.\n\n"
-    "Return ONLY valid JSON with this exact structure:\n"
-    '{"briefs": [{"concept": "...", "product_type": "...", "specific_products": [...], '
-    '"audience": "...", "visual_style": "...", "confidence": 0-100, '
-    '"reasoning": "...", "source_seed_ids": [id1, id2], '
-    '"layout_type": "text_top", "headline_text": "...", '
-    '"tagline_text": "...", "font_color": "#000000", '
-    '"scene_description": "...", '
-    '"recommended_materials": [{"external_id": "...", "name": "...", '
-    '"color": "...", "substrate_type": "...", "unit_cost": 0.00}]}]}'
-)
+
+def system_prompt(enabled: Sequence[str] | None = None) -> str:
+    """The prompt for the brief batch, offering only what is in production.
+
+    The catalog names the product types that are in production right now, so
+    a store that focuses on DTF apparel is never offered mugs (issue #215).
+    """
+    types = list(enabled) if enabled else sorted(PRODUCT_TAGS)
+    catalog = product_catalog(types)
+    product_types = ", ".join(f"'{t}'" for t in types)
+    return (
+        "You are a print-on-demand design strategist. Your job is to synthesize trend "
+        "signals into actionable design briefs that a graphic designer can immediately "
+        "execute.\n\n"
+        f"{catalog}\n"
+        "For each brief:\n"
+        "- concept: A specific, design-ready phrase or visual idea (not a category)\n"
+        f"- product_type: exactly one of {product_types}\n"
+        "- specific_products: array of 1-3 specific products from the catalog above\n"
+        "- audience: who would buy this (demographics, interests)\n"
+        "- visual_style: art direction notes (color palette, illustration style, "
+        "typography). Do NOT include any text/slogan in this field — text is rendered "
+        "separately via the layout fields below.\n"
+        "- confidence: 0-100, how confident you are this will sell\n"
+        "- reasoning: why this concept is timely or evergreen and marketable (cite the "
+        "trend signals)\n"
+        "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
+        f"{layout_rules(types)}\n"
+        f"{DESIGN_ONLY_RULES}\n"
+        "MATERIALS — picking the right substrate:\n"
+        "- recommended_materials: array of objects from the available_materials list, each with "
+        "{external_id, name, color, substrate_type, unit_cost}. Pick 1-3 materials that best "
+        "match this design's aesthetic and target audience. Consider color contrast with the "
+        "design, substrate suitability, and unit cost for margin.\n"
+        "- Only recommend a material whose product_type matches the brief.\n"
+        "- If no materials are available for the product_type, omit recommended_materials.\n\n"
+        "IMPORTANT: Do not suggest designs requiring licensed IP (movie characters, "
+        "team logos, brand names). Create original concepts inspired by cultural moments.\n\n"
+        "Return ONLY valid JSON with this exact structure:\n"
+        '{"briefs": [{"concept": "...", "product_type": "...", "specific_products": [...], '
+        '"audience": "...", "visual_style": "...", "confidence": 0-100, '
+        '"reasoning": "...", "source_seed_ids": [id1, id2], '
+        '"layout_type": "text_top", "headline_text": "...", '
+        '"tagline_text": "...", "font_color": "#000000", '
+        '"scene_description": "...", '
+        '"recommended_materials": [{"external_id": "...", "name": "...", '
+        '"color": "...", "substrate_type": "...", "unit_cost": 0.00}]}]}'
+    )
 
 
 @dataclass(frozen=True)
@@ -186,6 +199,7 @@ def build_brief_prompt(
     today: date,
     materials: list[dict[str, Any]] | None = None,
     extra_instructions: list[str] | None = None,
+    enabled: Sequence[str] | None = None,
 ) -> list[dict[str, str]]:
     truncated = candidates[:MAX_SEEDS_PER_BRIEF]
 
@@ -224,7 +238,7 @@ def build_brief_prompt(
 
     user_content = json.dumps(payload, indent=2)
 
-    system = SYSTEM_PROMPT
+    system = system_prompt(enabled)
     if extra_instructions:
         system = f"{system}\n" + "\n".join(extra_instructions)
     system = f"{system}\n{diversity_rules()}"
@@ -235,7 +249,11 @@ def build_brief_prompt(
     ]
 
 
-def _brief_from(b: dict[str, Any]) -> DesignBrief | None:
+def _brief_from(
+    b: dict[str, Any],
+    enabled: Sequence[str] | None = None,
+    materials: list[dict[str, Any]] | None = None,
+) -> DesignBrief | None:
     """The brief in one answer object, or None when it is not usable."""
     concept = b.get("concept", "")
     if not concept:
@@ -245,10 +263,34 @@ def _brief_from(b: dict[str, Any]) -> DesignBrief | None:
     if product_type not in PRODUCT_TAGS:
         return None
 
+    if enabled and product_type not in enabled:
+        if len(enabled) > 1:
+            # The model answered with a type that is not in production and
+            # there is no single type to fall back to.
+            logger.warning(
+                "Skipping brief %r: the product type %s is not in production",
+                concept,
+                product_type,
+            )
+            return None
+        # One type is in production, so the brief is that type.
+        product_type = enabled[0]
+
     raw_products = b.get("specific_products", [])
     specific_products = (
         [p for p in raw_products if isinstance(p, str)] if isinstance(raw_products, list) else []
     )
+    kept_products = [
+        product for product in specific_products if product_belongs_to(product, product_type)
+    ]
+    if specific_products and not kept_products:
+        logger.warning(
+            "Brief %r named the products %s, which are not %s products",
+            concept,
+            specific_products,
+            product_type,
+        )
+    specific_products = kept_products
 
     confidence = b.get("confidence", 0)
     if not isinstance(confidence, int):
@@ -295,6 +337,8 @@ def _brief_from(b: dict[str, Any]) -> DesignBrief | None:
     recommended_materials = b.get("recommended_materials")
     if recommended_materials is not None and not isinstance(recommended_materials, list):
         recommended_materials = None
+    if recommended_materials is not None:
+        recommended_materials = _usable_materials(recommended_materials, product_type, materials)
 
     return DesignBrief(
         concept=concept,
@@ -314,7 +358,55 @@ def _brief_from(b: dict[str, Any]) -> DesignBrief | None:
     )
 
 
-def read_brief_response(text: str) -> tuple[list[DesignBrief], str | None]:
+def _usable_materials(
+    recommended: list[Any],
+    product_type: str,
+    materials: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """The recommended materials that we actually offered.
+
+    The model can invent a material, and it can recommend a substrate that
+    does not serve the product type of the brief. Both are dropped: a brief
+    that names a material we do not carry cannot be printed on it
+    (issue #215).
+
+    Without a list of offered materials there is nothing to check against, so
+    the recommendations are kept as they are.
+    """
+    if materials is None:
+        return [entry for entry in recommended if isinstance(entry, dict)]
+    if not materials:
+        return []
+
+    by_id = {m.get("external_id"): m for m in materials if m.get("external_id")}
+
+    usable: list[dict[str, Any]] = []
+    for entry in recommended:
+        if not isinstance(entry, dict):
+            continue
+        material = by_id.get(entry.get("external_id"))
+        if material is None:
+            logger.warning(
+                "Dropping a recommended material we did not offer: %s", entry.get("external_id")
+            )
+            continue
+        types = material.get("product_type") or []
+        if types and product_type not in types:
+            logger.warning(
+                "Dropping the recommended material %s: it does not serve %s",
+                entry.get("external_id"),
+                product_type,
+            )
+            continue
+        usable.append(entry)
+    return usable
+
+
+def read_brief_response(
+    text: str,
+    enabled: Sequence[str] | None = None,
+    materials: list[dict[str, Any]] | None = None,
+) -> tuple[list[DesignBrief], str | None]:
     """The briefs in the answer, and the reason the answer could not be read.
 
     The model does not always answer with only JSON: it appends a note,
@@ -334,7 +426,7 @@ def read_brief_response(text: str) -> tuple[list[DesignBrief], str | None]:
     result: list[DesignBrief] = []
     seen: set[tuple[str, str]] = set()
     for b in raw_briefs:
-        brief = _brief_from(b)
+        brief = _brief_from(b, enabled, materials)
         if brief is None:
             continue
         # A repeated batch must not become two briefs.
@@ -358,6 +450,7 @@ def generate_design_briefs(
     llm_completions: Any,
     model: str,
     today: date | None = None,
+    enabled: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     today = today or datetime.now(tz=UTC).date()
 
@@ -371,11 +464,17 @@ def generate_design_briefs(
             "reason": "no briefable seeds",
         }
 
-    materials = db_client.list_active_materials()
+    # The materials of the types in production: a brief of another type
+    # cannot be printed on them (issue #215).
+    material_type = enabled[0] if enabled and len(enabled) == 1 else None
+    if material_type:
+        materials = db_client.list_active_materials(product_type=material_type)
+    else:
+        materials = db_client.list_active_materials()
     context = get_upcoming_events(today)
-    messages = build_brief_prompt(candidates, context, today, materials=materials)
+    messages = build_brief_prompt(candidates, context, today, materials=materials, enabled=enabled)
 
-    briefs, error = _request_briefs_with_retry(llm_completions, model, messages)
+    briefs, error = _request_briefs_with_retry(llm_completions, model, messages, enabled, materials)
     if briefs is None:
         return {"status": "error", "error": error or "LLM brief generation failed"}
 
@@ -402,6 +501,7 @@ def generate_design_briefs(
             context,
             today,
             materials=materials,
+            enabled=enabled,
             extra_instructions=[
                 (
                     f"The previous answer was {evergreen} evergreen briefs out of "
@@ -410,7 +510,9 @@ def generate_design_briefs(
                 ),
             ],
         )
-        retry_briefs, retry_error = _request_briefs(llm_completions, model, retry_messages)
+        retry_briefs, retry_error = _request_briefs(
+            llm_completions, model, retry_messages, enabled, materials
+        )
         if retry_error:
             logger.warning("The second brief attempt failed: %s", retry_error)
         if retry_briefs:
@@ -479,6 +581,8 @@ def _request_briefs_with_retry(
     llm_completions: Any,
     model: str,
     messages: list[dict[str, str]],
+    enabled: Sequence[str] | None = None,
+    materials: list[dict[str, Any]] | None = None,
 ) -> tuple[list[DesignBrief] | None, str | None]:
     """Ask for a batch of briefs, and ask again when the answer was unreadable.
 
@@ -491,7 +595,7 @@ def _request_briefs_with_retry(
     error: str | None = None
     for attempt in (1, 2):
         try:
-            briefs, error = _request_briefs(llm_completions, model, messages)
+            briefs, error = _request_briefs(llm_completions, model, messages, enabled, materials)
             break
         except LLMResponseParseError as e:
             error = str(e)
@@ -504,6 +608,8 @@ def _request_briefs(
     llm_completions: Any,
     model: str,
     messages: list[dict[str, str]],
+    enabled: Sequence[str] | None = None,
+    materials: list[dict[str, Any]] | None = None,
 ) -> tuple[list[DesignBrief] | None, str | None]:
     """Ask the model for a batch of briefs: (briefs, error).
 
@@ -533,7 +639,7 @@ def _request_briefs(
             logger.warning("LLM brief generation call failed: %s", e)
         return None, message
 
-    briefs, parse_error = read_brief_response(content)
+    briefs, parse_error = read_brief_response(content, enabled, materials)
     if parse_error is not None:
         logger.error("The LLM brief response could not be read: %s", parse_error)
         # The raw answer is the only way to see what the model actually sent.
