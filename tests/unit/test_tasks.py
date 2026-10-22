@@ -138,6 +138,43 @@ class TestGenerateSingleBriefImageTask:
         assert services == ["s3"]
 
 
+class TestComfyUISettings:
+    def test_the_step_count_defaults_to_four(self, tasks) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            assert tasks._comfyui_steps() == 4
+
+    def test_the_step_count_can_be_set(self, tasks) -> None:
+        with patch.dict(os.environ, {"COMFYUI_STEPS": "8"}):
+            assert tasks._comfyui_steps() == 8
+
+    def test_a_step_count_that_is_not_a_number_falls_back_to_the_default(self, tasks) -> None:
+        with patch.dict(os.environ, {"COMFYUI_STEPS": "many"}):
+            assert tasks._comfyui_steps() == 4
+
+    def test_the_cfg_defaults_to_one(self, tasks) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            assert tasks._comfyui_cfg() == 1.0
+
+    def test_the_cfg_can_be_set(self, tasks) -> None:
+        with patch.dict(os.environ, {"COMFYUI_CFG": "2.5"}):
+            assert tasks._comfyui_cfg() == 2.5
+
+    def test_a_cfg_that_is_not_a_number_falls_back_to_the_default(self, tasks) -> None:
+        with patch.dict(os.environ, {"COMFYUI_CFG": "high"}):
+            assert tasks._comfyui_cfg() == 1.0
+
+    def test_the_client_is_built_with_the_step_count(self, tasks) -> None:
+        pipeline, _ = _run_task(
+            tasks,
+            "generate_design_images_task",
+            {"COMFYUI_STEPS": "8", "COMFYUI_CFG": "2.0"},
+        )
+
+        client = pipeline.call_args.kwargs["comfyui_client"]
+        assert client._steps == 8
+        assert client._cfg == 2.0
+
+
 class TestVisionClient:
     def test_model_defaults_to_the_ocr_model(self) -> None:
         with patch.dict(os.environ, {}, clear=True):

@@ -233,6 +233,10 @@ spec:
               value: {{ .Values.config.comfyuiBgAlphaWhite | default "240" | quote }}
             - name: COMFYUI_BG_ERODE_PIXELS
               value: {{ .Values.config.comfyuiBgErodePixels | default "1" | quote }}
+            - name: COMFYUI_STEPS
+              value: {{ .Values.config.comfyuiSteps | default "4" | quote }}
+            - name: COMFYUI_CFG
+              value: {{ .Values.config.comfyuiCfg | default "1.0" | quote }}
             - name: VISION_LLM_BASE_URL
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL
@@ -445,6 +449,10 @@ spec:
               value: {{ .Values.config.comfyuiBgAlphaWhite | default "240" | quote }}
             - name: COMFYUI_BG_ERODE_PIXELS
               value: {{ .Values.config.comfyuiBgErodePixels | default "1" | quote }}
+            - name: COMFYUI_STEPS
+              value: {{ .Values.config.comfyuiSteps | default "4" | quote }}
+            - name: COMFYUI_CFG
+              value: {{ .Values.config.comfyuiCfg | default "1.0" | quote }}
             - name: VISION_LLM_BASE_URL
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL

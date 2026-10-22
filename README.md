@@ -458,6 +458,8 @@ Ideogram text routing and the AWS Bedrock image calls have been removed.
 | `COMFYUI_BG_ALPHA_BLACK` | `24` | Alpha black point for the cut-out; clears the residual background haze |
 | `COMFYUI_BG_ALPHA_WHITE` | `240` | Alpha white point for the cut-out |
 | `COMFYUI_BG_ERODE_PIXELS` | `1` | Pixels the cut-out is eroded by, to drop the dark halo around the subject |
+| `COMFYUI_STEPS` | `4` | Step count of the image model. Flux Schnell is distilled for 4 steps; the count is a setting so a run can be tuned without a code change (#210) |
+| `COMFYUI_CFG` | `1.0` | The cfg of the image model. Flux ignores the negative prompt at cfg 1, so the value matters for a model that is not the distilled one (#210) |
 | `VISION_LLM_BASE_URL` | `LLM_BASE_URL` | OpenAI-compatible base URL for the vision model (the DGX proxy) |
 | `VISION_LLM_MODEL` | `qwen_vl_ocr` | Vision model name |
 | `VISION_LLM_API_KEY` | `LLM_API_KEY` | Usually a dummy for a local proxy |
@@ -475,6 +477,21 @@ keyed out to produce the transparent PNG, so white artwork and white text stay
 visible. The `sublimation` and `sticker_vinyl` designs are printed full-bleed on
 white paper. The DGX side is documented in
 [`deploy/dgx/COMFYUI_SETUP.md`](deploy/dgx/COMFYUI_SETUP.md).
+
+### Benchmarking the step count
+
+The step count is a setting, so it can be measured instead of guessed. The
+harness renders a fixed set of briefs at several step counts with the same
+seeds, and reports what each run cost - the artwork gate, the lettering gate,
+the wall-clock time and where the images are:
+
+```bash
+python -m store_listing.orchestration.benchmark_steps --steps 4 6 8
+```
+
+It talks to the ComfyUI on the DGX, so it runs where the DGX runs. The report
+lands in `benchmark-output/report.json` next to the images, and the numbers
+belong in issue #210.
 
 ## Material events (cost-book)
 
@@ -496,7 +513,6 @@ redis-cli XPENDING materials:events trend-service
 redis-cli XRANGE materials:events:dead - + COUNT 10
 redis-cli XADD materials:events '*' action upsert external_id bc3001-white name "Bella Canvas 3001"
 ```
-
 ## Source Health & Free-Path-First Harvesting
 
 Each scheduled harvest task records an outcome (`success` / `failure` / `empty`)

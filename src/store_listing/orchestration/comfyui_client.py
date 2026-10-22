@@ -43,6 +43,12 @@ DEFAULT_CLIP_NAME1 = "t5xxl_fp8_e4m3fn.safetensors"
 DEFAULT_CLIP_NAME2 = "clip_l.safetensors"
 DEFAULT_VAE_NAME = "ae.safetensors"
 
+# Flux Schnell is distilled for 1-4 steps at cfg 1.0, so 4 and 1.0 are the
+# defaults. They are settings, not constants: the step count is what the
+# benchmark in issue #210 measures (issue #210).
+DEFAULT_STEPS = 4
+DEFAULT_CFG = 1.0
+
 # Alpha cleanup applied to the background removal result.
 ALPHA_BLACK_POINT = 24
 ALPHA_WHITE_POINT = 240
@@ -149,6 +155,8 @@ class ComfyUIClient:
         alpha_black_point: int = ALPHA_BLACK_POINT,
         alpha_white_point: int = ALPHA_WHITE_POINT,
         alpha_erode_pixels: int = ALPHA_ERODE_PIXELS,
+        steps: int = DEFAULT_STEPS,
+        cfg: float = DEFAULT_CFG,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
@@ -165,6 +173,8 @@ class ComfyUIClient:
         self._alpha_black_point = alpha_black_point
         self._alpha_white_point = alpha_white_point
         self._alpha_erode_pixels = alpha_erode_pixels
+        self._steps = steps
+        self._cfg = cfg
 
     def close(self) -> None:
         """Close the underlying HTTP client, if this instance created it."""
@@ -184,8 +194,8 @@ class ComfyUIClient:
         width: int = 1024,
         height: int = 1024,
         seed: int | None = None,
-        steps: int = 4,
-        cfg: float = 1.0,
+        steps: int | None = None,
+        cfg: float | None = None,
         sampler_name: str = "euler",
         scheduler: str = "simple",
         negative_prompt: str = "",
@@ -194,15 +204,20 @@ class ComfyUIClient:
         clip_name2: str | None = None,
         vae_name: str | None = None,
     ) -> ComfyUIResult:
-        """Queue a Flux Schnell text-to-image workflow and block until it is ready."""
+        """Queue a Flux Schnell text-to-image workflow and block until it is ready.
+
+        The step count and the cfg come from the client, so a run can be
+        tuned without a code change (issue #210). A call can still override
+        them.
+        """
         actual_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
         graph = build_flux_txt2img_graph(
             prompt=prompt,
             width=width,
             height=height,
             seed=actual_seed,
-            steps=steps,
-            cfg=cfg,
+            steps=self._steps if steps is None else steps,
+            cfg=self._cfg if cfg is None else cfg,
             sampler_name=sampler_name,
             scheduler=scheduler,
             negative_prompt=negative_prompt,

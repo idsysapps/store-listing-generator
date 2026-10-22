@@ -31,6 +31,10 @@ config:
   comfyuiBgAlphaBlack: "24"
   comfyuiBgAlphaWhite: "240"
   comfyuiBgErodePixels: "1"
+  # Flux Schnell is distilled for 4 steps at cfg 1.0. The step count is a
+  # setting so a run can be tuned without a code change (issue #210).
+  comfyuiSteps: "4"
+  comfyuiCfg: "1.0"
   visionLlmBaseUrl: ""
   visionLlmModel: "qwen_vl_ocr"
   artworkVisionModel: ""
