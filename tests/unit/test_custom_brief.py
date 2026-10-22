@@ -1,13 +1,17 @@
 """Unit tests for custom design brief generation from user descriptions."""
 
 import json
+import logging
 from unittest.mock import MagicMock
+
+import pytest
 
 from store_listing.orchestration.custom_brief import (
     build_custom_brief_prompt,
     create_custom_brief,
     parse_custom_brief_response,
 )
+from store_listing.orchestration.llm_client import LLM_MAX_TOKENS
 
 
 class _ApiError(Exception):
@@ -227,12 +231,13 @@ class TestCreateCustomBrief:
         db.insert_design_brief.return_value = 42
         return db
 
-    def _mock_llm(self, content: str) -> MagicMock:
+    def _mock_llm(self, content: str, finish_reason: str = "stop") -> MagicMock:
         llm = MagicMock()
         raw_response = MagicMock()
         response = MagicMock()
         choice = MagicMock()
         choice.message.content = content
+        choice.finish_reason = finish_reason
         response.choices = [choice]
         raw_response.parse.return_value = response
         raw_response.headers = {}
@@ -463,3 +468,182 @@ class TestTheVoiceOfTheCustomBrief:
         response = _brief_response(headline_text="Feast, fun, and fireworks")
 
         assert parse_custom_brief_response(response) is None
+
+
+class TestACutAnswer:
+    """A model that runs out of room answers half way (issue #232).
+
+    The briefs model is Qwen3, and it thinks before it answers. The thinking
+    comes out of the same token budget as the answer, so a brief that is cut
+    off is a brief that is lost - and the log said the response could not be
+    parsed, which is not what happened.
+    """
+
+    def _cut_answer(self) -> str:
+        return (
+            "{\n"
+            '"brief": {\n'
+            '"concept": "Thanksgiving in Disney World",\n'
+            '"product_type": "dtf_apparel",\n'
+            '"specific_products": ["t-shirts"],\n'
+            '"audience": "Disney enthusiasts and families",\n'
+            '"visual_style": "Vibrant, playful and nostalgic",\n'
+            '"confidence": 90,\n'
+            '"reasoning": "A festive mashup of two traditions.",\n'
+            '"layout_type": "text_top",\n'
+            '"headline_text": "Thanksgiving in Disney World",\n'
+            '"tagline_text": null,\n'
+            '"font_color": "#FFFFFF",\n'
+            '"voice": "loud",\n'
+            '"style_preset": "distressed_band_tee",'
+        )
+
+    def test_the_call_asks_the_model_for_no_thinking(self) -> None:
+        db = MagicMock()
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response()
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        create_custom_brief(db, llm, "qwen38_briefs", "test idea", "dtf_apparel")
+
+        call_kwargs = llm.with_raw_response.create.call_args.kwargs
+        assert call_kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+    def test_a_model_that_does_not_think_is_left_alone(self) -> None:
+        db = MagicMock()
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response()
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        create_custom_brief(db, llm, "llama-3.3-70b-versatile", "test idea", "dtf_apparel")
+
+        call_kwargs = llm.with_raw_response.create.call_args.kwargs
+        assert "extra_body" not in call_kwargs
+
+    def test_the_call_asks_for_a_token_budget(self) -> None:
+        db = MagicMock()
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response()
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        create_custom_brief(db, llm, "qwen38_briefs", "test idea", "dtf_apparel")
+
+        call_kwargs = llm.with_raw_response.create.call_args.kwargs
+        assert call_kwargs["max_tokens"] == LLM_MAX_TOKENS
+
+    def test_a_cut_answer_still_produces_a_brief(self) -> None:
+        db = MagicMock()
+        db.insert_design_brief.return_value = 42
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = self._cut_answer()
+        choice.finish_reason = "length"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        result = create_custom_brief(
+            db,
+            llm,
+            "qwen38_briefs",
+            "thanksgiving disney shirt",
+            "dtf_apparel",
+            personal_use=True,
+        )
+
+        assert result["status"] == "success"
+        assert result["brief_id"] == 42
+        call_kwargs = db.insert_design_brief.call_args.kwargs
+        assert call_kwargs["concept"] == "Thanksgiving in Disney World"
+        assert call_kwargs["voice"] == "loud"
+        assert call_kwargs["style_preset"] == "distressed_band_tee"
+
+    def test_a_brief_that_was_rejected_says_why(self) -> None:
+        # The brief was read and dropped, which is not the same as an answer
+        # that could not be read.
+        db = MagicMock()
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response(headline_text="Thanksgiving in Disney World")
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        result = create_custom_brief(
+            db, llm, "qwen38_briefs", "thanksgiving disney shirt", "dtf_apparel"
+        )
+
+        assert result["status"] == "error"
+        assert "licensed brand" in result["error"]
+        db.insert_design_brief.assert_not_called()
+
+    def test_an_answer_without_json_says_it_could_not_be_read(self) -> None:
+        db = MagicMock()
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = "I am afraid I cannot do that."
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        result = create_custom_brief(db, llm, "qwen38_briefs", "test idea", "dtf_apparel")
+
+        assert result["status"] == "error"
+        assert result["error"] == "Failed to parse LLM response"
+
+    def test_the_finish_reason_is_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        db = MagicMock()
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = self._cut_answer()
+        choice.finish_reason = "length"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        with caplog.at_level(logging.INFO):
+            create_custom_brief(
+                db,
+                llm,
+                "qwen38_briefs",
+                "thanksgiving disney shirt",
+                "dtf_apparel",
+                personal_use=True,
+            )
+
+        assert "finish=length" in caplog.text

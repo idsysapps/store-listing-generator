@@ -42,7 +42,11 @@ from store_listing.orchestration.json_response import (
     extract_json_objects,
     merge_items,
 )
-from store_listing.orchestration.llm_client import is_model_missing_error, model_error_message
+from store_listing.orchestration.llm_client import (
+    create_answer,
+    is_model_missing_error,
+    model_error_message,
+)
 from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
@@ -759,8 +763,11 @@ def _request_briefs(
     answered, but the answer was not JSON, and losing the batch silently is
     what the parse failure looked like (issue #209).
     """
+    raw, error = create_answer(llm_completions, model, messages, "briefs")
+    if error is not None:
+        return None, error
+
     try:
-        raw = llm_completions.with_raw_response.create(model=model, messages=messages)
         headers = raw.headers
         response = raw.parse()
         _log_llm_response(response, headers, "briefs")

@@ -11,6 +11,7 @@ from __future__ import annotations
 from store_listing.orchestration.json_response import (
     extract_json_objects,
     merge_items,
+    repair_truncated_object,
 )
 
 
@@ -50,6 +51,47 @@ class TestExtractJsonObjects:
 
     def test_ignores_a_value_that_is_not_an_object(self) -> None:
         assert extract_json_objects("[1, 2, 3]") == []
+
+
+class TestRepairTruncatedObject:
+    def test_reads_the_fields_that_arrived(self) -> None:
+        # The model ran out of room half way through the object.
+        text = '{"brief": {"concept": "A castle", "style_preset": "distressed_band_tee",'
+
+        assert repair_truncated_object(text) == {
+            "brief": {"concept": "A castle", "style_preset": "distressed_band_tee"}
+        }
+
+    def test_drops_the_field_that_was_being_written(self) -> None:
+        text = '{"brief": {"concept": "A castle", "scene_description": "a stone cas'
+
+        assert repair_truncated_object(text) == {"brief": {"concept": "A castle"}}
+
+    def test_closes_an_open_array(self) -> None:
+        text = '{"brief": {"specific_products": ["t-shirts", "tote'
+
+        assert repair_truncated_object(text) == {"brief": {"specific_products": ["t-shirts"]}}
+
+    def test_closes_an_open_object(self) -> None:
+        text = '{"brief": {"concept": "A castle"'
+
+        assert repair_truncated_object(text) == {"brief": {"concept": "A castle"}}
+
+    def test_reads_a_complete_object(self) -> None:
+        assert repair_truncated_object('{"brief": {"concept": "A castle"}}') == {
+            "brief": {"concept": "A castle"}
+        }
+
+    def test_gives_up_on_an_answer_without_an_object(self) -> None:
+        assert repair_truncated_object("not json at all") is None
+
+    def test_gives_up_on_an_object_without_a_complete_field(self) -> None:
+        assert repair_truncated_object('{"brief": {"concept') is None
+
+    def test_keeps_a_brace_that_is_inside_a_string(self) -> None:
+        text = '{"brief": {"concept": "a brace } in the text", "audience": "pa'
+
+        assert repair_truncated_object(text) == {"brief": {"concept": "a brace } in the text"}}
 
 
 class TestMergeItems:

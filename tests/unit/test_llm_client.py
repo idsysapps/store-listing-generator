@@ -21,7 +21,9 @@ from store_listing.orchestration.llm_client import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
     DEFAULT_VISION_MODEL,
+    LLM_MAX_TOKENS,
     check_model_available,
+    create_answer,
     get_artwork_vision_model,
     get_llm_client,
     get_llm_curation_model,
@@ -31,6 +33,7 @@ from store_listing.orchestration.llm_client import (
     is_model_missing_error,
     list_served_models,
     model_error_message,
+    reasoning_body,
 )
 
 
@@ -226,3 +229,84 @@ class TestModelErrors:
         error = _ApiError(429, "Error code: 429 - rate limit exceeded")
 
         assert model_error_message(error, "qwen38_briefs") == str(error)
+
+
+class TestTheThinkingOfAModel:
+    """Qwen3 thinks before it answers, and the thinking costs tokens.
+
+    The briefs model is Qwen3-14B with the reasoning parser on. Its thinking
+    comes out of the same budget as the answer, so a brief that is JSON gets
+    a few hundred tokens of answer and is cut in the middle (issue #232).
+    """
+
+    def test_a_qwen_model_is_asked_not_to_think(self) -> None:
+        assert reasoning_body("qwen38_briefs") == {
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}
+        }
+
+    def test_a_model_that_does_not_think_is_left_alone(self) -> None:
+        assert reasoning_body("llama-3.3-70b-versatile") == {}
+
+    def test_the_model_name_is_matched_without_case(self) -> None:
+        assert reasoning_body("Qwen/Qwen3-14B") != {}
+
+
+class TestCreateAnswer:
+    """A call that asks for no thinking, and the endpoint that refuses it."""
+
+    def _answer(self) -> MagicMock:
+        llm = MagicMock()
+        raw_response = MagicMock()
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+        return llm
+
+    def test_the_call_asks_for_no_thinking(self) -> None:
+        llm = self._answer()
+
+        raw, error = create_answer(
+            llm, "qwen38_briefs", [{"role": "user", "content": "x"}], "briefs"
+        )
+
+        assert error is None
+        assert raw is llm.with_raw_response.create.return_value
+        call_kwargs = llm.with_raw_response.create.call_args.kwargs
+        assert call_kwargs["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+        assert call_kwargs["max_tokens"] == LLM_MAX_TOKENS
+
+    def test_an_endpoint_that_does_not_know_the_field_is_asked_again(self) -> None:
+        llm = self._answer()
+        refused = MagicMock()
+        refused.status_code = 400
+        llm.with_raw_response.create.side_effect = [
+            RuntimeError("chat_template_kwargs is not a field of the request"),
+            llm.with_raw_response.create.return_value,
+        ]
+
+        raw, error = create_answer(
+            llm, "qwen38_briefs", [{"role": "user", "content": "x"}], "briefs"
+        )
+
+        assert error is None
+        assert raw is llm.with_raw_response.create.return_value
+        assert llm.with_raw_response.create.call_count == 2
+        assert "extra_body" not in llm.with_raw_response.create.call_args.kwargs
+
+    def test_a_model_that_does_not_think_is_asked_once(self) -> None:
+        llm = self._answer()
+        llm.with_raw_response.create.side_effect = RuntimeError("boom")
+
+        raw, error = create_answer(llm, "llama-3.3-70b-versatile", [], "briefs")
+
+        assert raw is None
+        assert error == "boom"
+        assert llm.with_raw_response.create.call_count == 1
+
+    def test_the_error_of_the_second_ask_is_reported(self) -> None:
+        llm = self._answer()
+        llm.with_raw_response.create.side_effect = RuntimeError("boom")
+
+        raw, error = create_answer(llm, "qwen38_briefs", [], "briefs")
+
+        assert raw is None
+        assert error is not None
