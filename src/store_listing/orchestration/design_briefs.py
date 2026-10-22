@@ -670,14 +670,6 @@ def generate_design_briefs(
         )
         dropped = list(dropped) + list(style_dropped)
 
-    # The geometry is rotated by the batch, not picked by the model: a batch
-    # that the model answered with text_top for the eighth time still gets
-    # eight different silhouettes (issue #238).
-    kept = assign_batch_templates(kept, batch_id)
-    # The idea device is rotated too, so the batch is not eight still lifes
-    # (issue #240).
-    kept = assign_batch_devices(kept, batch_id)
-
     if evergreen < MIN_EVERGREEN_BRIEFS and BRIEF_MIX_REGENERATE_ONCE:
         # The model answered with a season. Ask once more, and say what went
         # wrong, before shipping a batch that is not a batch (issue #200).
@@ -707,6 +699,15 @@ def generate_design_briefs(
                 kept, dropped = retry_kept, retry_dropped
                 briefs = retry_briefs
                 evergreen = retry_evergreen
+
+    # The geometry is rotated by the batch, not picked by the model: a batch
+    # that the model answered with text_top for the eighth time still gets
+    # eight different silhouettes (issue #238). This runs after the last
+    # attempt, so a batch that was asked for again still carries templates.
+    kept = assign_batch_templates(kept, batch_id)
+    # The idea device is rotated too, so the batch is not eight still lifes
+    # (issue #240).
+    kept = assign_batch_devices(kept, batch_id)
 
     if dropped:
         logger.info(

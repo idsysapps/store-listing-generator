@@ -948,6 +948,51 @@ class TestGenerateDesignBriefs:
         concepts = [call.kwargs["concept"] for call in db.insert_design_brief.call_args_list]
         assert concepts == ["Coffee Cat", "Garden Gnome"]
 
+    def test_a_batch_that_is_asked_for_again_still_gets_templates(self) -> None:
+        candidates = [_briefable(1, "halloween costume shirt"), _briefable(2, "cat lover mug")]
+        db = self._mock_db(candidates=candidates)
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Pumpkin Party",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                        }
+                    ]
+                }
+            ),
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Coffee Cat",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [2],
+                            "headline_text": "COFFEE CAT",
+                        },
+                        {
+                            "concept": "Garden Gnome",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [2],
+                            "headline_text": "GARDEN GNOME",
+                        },
+                    ]
+                }
+            ),
+        ]
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        layouts = [call.kwargs["layout_type"] for call in db.insert_design_brief.call_args_list]
+        assert len(set(layouts)) == len(layouts)
+        assert not {"auto", "text_top", "text_top_bottom", "full_bleed"} & set(layouts)
+
     def test_warns_when_a_brief_has_no_usable_source_seed(self, caplog) -> None:
         candidates = [_briefable(42, "dad jokes shirt")]
         db = self._mock_db(candidates=candidates)
