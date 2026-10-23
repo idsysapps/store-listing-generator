@@ -11,7 +11,7 @@ import logging
 import os
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from typing import Any, Protocol
 
@@ -36,6 +36,11 @@ from store_listing.orchestration.brief_prompts import (
     voice_rules,
 )
 from store_listing.orchestration.context_seeds import get_upcoming_events
+from store_listing.orchestration.design_templates import (
+    LEGACY_LAYOUTS,
+    TEMPLATE_IDS,
+    assign_templates,
+)
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE, normalise_voice, screen_text
 from store_listing.orchestration.json_response import (
     LLMResponseParseError,
@@ -107,7 +112,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         '{"briefs": [{"concept": "...", "product_type": "...", "specific_products": [...], '
         '"audience": "...", "visual_style": "...", "confidence": 0-100, '
         '"reasoning": "...", "source_seed_ids": [id1, id2], '
-        '"layout_type": "text_top", "headline_text": "...", '
+        '"layout_type": "auto", "headline_text": "...", '
         '"tagline_text": "...", "font_color": "#000000", '
         '"voice": "deadpan | loud | cozy", '
         '"style_preset": "vintage_screenprint | seventies_retro | halftone_comic | '
@@ -135,14 +140,13 @@ class BriefableCandidate:
 
 
 VALID_LAYOUT_TYPES: set[str] = {
+    "auto",
     "full_bleed",
-    "text_top",
-    "text_top_bottom",
     "text_only",
-    "badge",
-    "banner",
-    "arch",
-    "stack_side",
+    # The templates the pipeline assigns.
+    *TEMPLATE_IDS,
+    # The ids the briefs used before the templates existed.
+    *LEGACY_LAYOUTS,
 }
 
 # The most words a headline may have. A typography-only design without a
@@ -642,6 +646,11 @@ def generate_design_briefs(
         )
         dropped = list(dropped) + list(style_dropped)
 
+    # The geometry is rotated by the batch, not picked by the model: a batch
+    # that the model answered with text_top for the eighth time still gets
+    # eight different silhouettes (issue #238).
+    kept = assign_batch_templates(kept, batch_id)
+
     if evergreen < MIN_EVERGREEN_BRIEFS and BRIEF_MIX_REGENERATE_ONCE:
         # The model answered with a season. Ask once more, and say what went
         # wrong, before shipping a batch that is not a batch (issue #200).
@@ -727,6 +736,19 @@ def generate_design_briefs(
         "evergreen": mix.evergreen,
         "dropped": len(dropped),
     }
+
+
+def assign_batch_templates(briefs: Sequence[DesignBrief], batch_id: str) -> list[DesignBrief]:
+    """The briefs with a template assigned by the batch.
+
+    The model decides whether a brief has copy, no copy at all, or only copy.
+    The geometry is rotated here, so a batch always covers the templates
+    (issue #238).
+    """
+    return [
+        replace(brief, layout_type=template_id)
+        for brief, template_id in zip(briefs, assign_templates(briefs, batch_id), strict=True)
+    ]
 
 
 def _merge_briefs(first: list[DesignBrief], second: list[DesignBrief]) -> list[DesignBrief]:

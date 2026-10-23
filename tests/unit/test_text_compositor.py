@@ -12,6 +12,7 @@ from typing import Any
 
 from PIL import Image
 
+from store_listing.orchestration.design_templates import ART_TEMPLATE_IDS, TEMPLATES
 from store_listing.orchestration.text_compositor import (
     HEADLINE_ZONE,
     TAGLINE_ZONE,
@@ -151,17 +152,29 @@ class TestTagline:
         assert any(colour != (255, 255, 255) for colour in _zone_colours(result, top=False))
 
     def test_a_brief_with_a_tagline_gets_one(self) -> None:
-        # A brief that asks for a tagline gets one, even when the layout says
-        # text_top - otherwise the tagline would be dropped on the floor.
+        # A brief that asks for a tagline gets one - it is not dropped on the
+        # floor, and it no longer turns text_top into text_top_bottom either
+        # (issue #238).
         spec = LayoutSpec(
             layout_type="text_top", headline_text="SPOOKY", tagline_text="TRICK OR TREAT"
         )
 
-        assert spec.layout_type == "text_top_bottom"
+        assert spec.layout_type == "hero_bottom"
+        assert spec.tagline_text == "TRICK OR TREAT"
 
         result = composite_text(_canvas(), spec)
 
-        assert any(colour != (255, 255, 255) for colour in _zone_colours(result, top=False))
+        assert any(colour != (255, 255, 255) for colour in _zone_colours(result, top=True))
+
+    def test_text_top_keeps_the_copy_at_the_top(self) -> None:
+        result = composite_text(
+            _canvas(),
+            LayoutSpec(
+                layout_type="text_top", headline_text="SPOOKY", tagline_text="TRICK OR TREAT"
+            ),
+        )
+
+        assert all(colour == (255, 255, 255) for colour in _zone_colours(result, top=False))
 
 
 class TestUnsupportedGlyphs:
@@ -538,16 +551,16 @@ class TestTheNewLayouts:
     def test_a_badge_draws_a_band_behind_the_text(self) -> None:
         result = composite_text(
             _canvas(),
-            LayoutSpec(layout_type="badge", headline_text="GOBBLE TIL THE BELL"),
+            LayoutSpec(layout_type="banner", headline_text="GOBBLE TIL THE BELL"),
         )
 
-        # A row just inside the top of the band carries the band colour and
-        # nothing else: the band is a solid fill.
+        # A row just inside the top of the ribbon carries the ribbon colour and
+        # nothing else: the ribbon is a solid fill.
         image = _image(result)
         width, height = image.size
-        row = int(height * 0.02)
+        row = int(height * 0.41)
         colours = {image.getpixel((x, row)) for x in range(int(width * 0.1), int(width * 0.9))}
-        assert len(colours) == 1, "the band should be a solid fill"
+        assert len(colours) == 1, "the ribbon should be a solid fill"
 
     def test_a_banner_draws_the_headline_in_the_middle(self) -> None:
         result = composite_text(
@@ -585,14 +598,14 @@ class TestTheNewLayouts:
 
     def test_a_layout_with_a_tagline_keeps_its_shape(self) -> None:
         # The shape of a layout is the layout: a badge with a tagline is still
-        # a badge and not a text_top_bottom.
+        # a roundel and not a text_top_bottom.
         spec = LayoutSpec(
             layout_type="badge",
             headline_text="GOBBLE TIL THE BELL",
             tagline_text="FEAST AT THE OLD CASTLE",
         )
 
-        assert spec.layout_type == "badge"
+        assert spec.layout_type == "roundel"
 
     def test_the_text_stays_inside_its_band_in_every_layout(self) -> None:
         for layout in ("badge", "banner", "arch", "stack_side"):
@@ -615,3 +628,95 @@ class TestTheNewLayouts:
             ]
             assert drawn, f"{layout} drew nothing"
             assert max(x for x, _ in drawn) < width, f"{layout} ran out of the canvas"
+
+
+class TestTheDesignTemplates:
+    def _draw(self, template_id: str, size: tuple[int, int] = (1024, 1024)) -> bytes:
+        return composite_text(
+            _canvas(size),
+            LayoutSpec(
+                layout_type=template_id,
+                headline_text="GOBBLE TIL THE BELL",
+                tagline_text="FEAST AT THE OLD CASTLE",
+            ),
+        )
+
+    def test_every_template_draws_something(self) -> None:
+        for template_id in ART_TEMPLATE_IDS:
+            width, height = TEMPLATES[template_id].size
+            result = self._draw(template_id, (width, height))
+
+            assert _drawn_box_anywhere(result) is not None, template_id
+
+    def test_the_templates_do_not_all_draw_in_the_same_place(self) -> None:
+        boxes = set()
+        for template_id in ART_TEMPLATE_IDS:
+            width, height = TEMPLATES[template_id].size
+            box = _drawn_box_anywhere(self._draw(template_id, (width, height)))
+            assert box is not None, template_id
+            boxes.add((template_id, box))
+
+        assert len({box for _template, box in boxes}) >= 8
+
+    def test_the_text_stays_inside_the_canvas_in_every_template(self) -> None:
+        for template_id in ART_TEMPLATE_IDS:
+            width, height = TEMPLATES[template_id].size
+            box = _drawn_box_anywhere(self._draw(template_id, (width, height)))
+
+            assert box is not None, template_id
+            assert 0 <= box[0] and box[2] < width, template_id
+            assert 0 <= box[1] and box[3] < height, template_id
+
+    def test_a_tower_draws_the_headline_down_the_left_side(self) -> None:
+        result = self._draw("tower", (832, 1216))
+
+        image = _image(result)
+        width, height = image.size
+        column = [
+            (x, y)
+            for y in range(height)
+            for x in range(int(width * 0.4))
+            if image.getpixel((x, y)) != (255, 255, 255)
+        ]
+        assert column, "the headline should be drawn down the left side"
+        assert min(x for x, _ in column) < int(width * 0.1)
+        # The copy runs down the canvas, not across a single band.
+        assert max(y for _, y in column) - min(y for _, y in column) > height * 0.2
+
+    def test_a_side_column_draws_the_copy_on_the_right(self) -> None:
+        result = self._draw("side_column")
+
+        box = _drawn_box_anywhere(result)
+        assert box is not None
+        width, _height = _image(result).size
+        assert box[0] > int(width * 0.5)
+
+    def test_a_wide_scene_draws_the_copy_in_the_bottom_left(self) -> None:
+        result = self._draw("wide_scene", (1216, 832))
+
+        box = _drawn_box_anywhere(result)
+        assert box is not None
+        width, height = _image(result).size
+        assert box[0] < int(width * 0.2)
+        assert box[1] > int(height * 0.6)
+
+    def test_a_roundel_arcs_the_tagline_below_the_headline(self) -> None:
+        result = self._draw("roundel")
+
+        image = _image(result)
+        width, height = image.size
+        bottom = [
+            (x, y)
+            for y in range(int(height * 0.8), height)
+            for x in range(width)
+            if image.getpixel((x, y)) != (255, 255, 255)
+        ]
+        assert bottom, "the tagline should be drawn below the headline"
+        # A curve does not reach the corners of its band the way a straight
+        # line does.
+        assert min(x for x, _ in bottom) > int(width * 0.05)
+
+    def test_the_image_keeps_the_size_of_the_template(self) -> None:
+        result = self._draw("wide_scene", (1216, 832))
+
+        assert _image(result).size == (1216, 832)

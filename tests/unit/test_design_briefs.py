@@ -12,6 +12,8 @@ import pytest
 from store_listing.orchestration.brief_prompts import SEASONAL_WORDS
 from store_listing.orchestration.design_briefs import (
     BriefableCandidate,
+    DesignBrief,
+    assign_batch_templates,
     build_brief_prompt,
     generate_design_briefs,
     parse_brief_response,
@@ -42,6 +44,21 @@ def _briefable(
 
 
 class TestBuildBriefPrompt:
+    def test_the_prompt_does_not_let_the_model_pick_the_geometry(self) -> None:
+        # The model used to answer text_top every time, and the batch came
+        # back as one silhouette (issue #238).
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        system = messages[0]["content"]
+        assert "'auto'" in system
+        assert "text_top" not in system
+        assert "badge" not in system
+        assert "stack_side" not in system
+
     def test_the_prompt_asks_for_print_artwork_not_a_product_photo(self) -> None:
         # A scene that describes a garment or a mug is rendered as a mockup, and
         # a mockup is not a printable file (issue #188).
@@ -1605,3 +1622,52 @@ class TestTheTypeOfTheBrief:
         stored = db.insert_design_brief.call_args.kwargs
         assert stored["voice"] == "cozy"
         assert stored["font_family"] == family_for_voice("cozy")
+
+
+class TestTheBatchTemplates:
+    def _brief(self, concept: str, **overrides: Any) -> DesignBrief:
+        defaults: dict[str, Any] = {
+            "concept": concept,
+            "product_type": "dtf_apparel",
+            "specific_products": ["t-shirt"],
+            "audience": "everyone",
+            "visual_style": "bold",
+            "confidence": 50,
+            "reasoning": "trending",
+            "source_seed_ids": [1],
+            "layout_type": "auto",
+            "headline_text": "GOOD LINE",
+        }
+        defaults.update(overrides)
+        return DesignBrief(**defaults)
+
+    def test_the_batch_covers_the_templates(self) -> None:
+        briefs = [self._brief(f"concept {index}") for index in range(8)]
+
+        assigned = assign_batch_templates(briefs, "2026-10-22")
+
+        assert len({brief.layout_type for brief in assigned}) == 8
+
+    def test_a_legacy_layout_the_model_named_is_overridden(self) -> None:
+        # The model answered text_top eight times; the batch still carries
+        # eight different silhouettes (issue #238).
+        briefs = [self._brief(f"concept {index}", layout_type="text_top") for index in range(8)]
+
+        assigned = assign_batch_templates(briefs, "2026-10-22")
+
+        assert "text_top" not in {brief.layout_type for brief in assigned}
+        assert len({brief.layout_type for brief in assigned}) == 8
+
+    def test_a_brief_without_copy_is_left_art_only(self) -> None:
+        briefs = [self._brief("no copy", headline_text=None, tagline_text=None)]
+
+        assigned = assign_batch_templates(briefs, "2026-10-22")
+
+        assert assigned[0].layout_type == "full_bleed"
+
+    def test_a_text_only_brief_keeps_its_layout(self) -> None:
+        briefs = [self._brief("only type", layout_type="text_only")]
+
+        assigned = assign_batch_templates(briefs, "2026-10-22")
+
+        assert assigned[0].layout_type == "text_only"

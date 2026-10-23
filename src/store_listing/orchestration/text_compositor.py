@@ -21,6 +21,7 @@ drawn in one font with an outline around it, which is the "meme font" look
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -28,6 +29,7 @@ from typing import Any, cast
 
 from PIL import Image, ImageDraw, ImageFont
 
+from store_listing.orchestration.design_templates import resolve_template, template_for
 from store_listing.orchestration.typography import (
     DEFAULT_FONT,
     TextTreatment,
@@ -79,82 +81,19 @@ DTF_KEY_COLOUR = (255, 0, 255)
 PAPER_COLOUR = (255, 255, 255)
 
 
-@dataclass(frozen=True)
-class TextPlacement:
-    """Where the text of a layout goes, as a share of the canvas.
-
-    The box is (x, y, width, height) in shares of the canvas, so the same
-    placement works on a render of any size.
-    """
-
-    headline: tuple[float, float, float, float] | None = None
-    tagline: tuple[float, float, float, float] | None = None
-    # Whether a band is drawn behind the text.
-    bar: bool = False
-
-
-# The layouts that put the text in a shape of its own. Every other layout
-# puts the text above and below the art, which is why every design looked the
-# same (issue #227).
-SHAPED_LAYOUTS: tuple[str, ...] = ("badge", "banner", "arch", "stack_side")
-
-# The placements of the layouts that draw text.
-PLACEMENTS: dict[str, TextPlacement] = {
-    "text_top": TextPlacement(headline=(0.05, 0.00, 0.90, 0.15)),
-    "text_top_bottom": TextPlacement(
-        headline=(0.05, 0.00, 0.90, 0.15), tagline=(0.05, 0.88, 0.90, 0.12)
-    ),
-    # A label: a band at the top, a band at the bottom, an emblem between.
-    "badge": TextPlacement(
-        headline=(0.08, 0.01, 0.84, 0.14), tagline=(0.08, 0.85, 0.84, 0.13), bar=True
-    ),
-    # A ribbon across the middle of the art.
-    "banner": TextPlacement(
-        headline=(0.06, 0.36, 0.88, 0.22), tagline=(0.05, 0.88, 0.90, 0.12), bar=True
-    ),
-    # A tall arch with the headline in the head of the arch.
-    "arch": TextPlacement(
-        headline=(0.20, 0.00, 0.60, 0.14), tagline=(0.05, 0.88, 0.90, 0.12), bar=True
-    ),
-    # The art on the left, the text stacked on the right.
-    "stack_side": TextPlacement(
-        headline=(0.56, 0.28, 0.40, 0.32), tagline=(0.56, 0.62, 0.40, 0.16)
-    ),
-}
-
-
-def resolve_layout(layout_type: str, headline_text: str | None, tagline_text: str | None) -> str:
-    """The layout that is actually drawn.
-
-    A brief that asks for a tagline gets one, even when the layout says
-    ``text_top`` - otherwise the tagline would be dropped on the floor. The
-    artwork prompt has to follow the same rule, so the space for the text is
-    reserved where the text ends up.
-    """
-    if layout_type == "full_bleed":
-        return "full_bleed"
-    if layout_type == "text_only":
-        return "text_only"
-    if layout_type in SHAPED_LAYOUTS:
-        return layout_type
-    if tagline_text and tagline_text.strip():
-        return "text_top_bottom"
-    return "text_top"
-
-
 @dataclass
 class LayoutSpec:
     """What has to be drawn, and where.
 
-    The layout decides what is drawn: a ``text_top`` brief has a headline at
-    the top and nothing else, a ``text_top_bottom`` brief has both. A
-    ``text_only`` brief is typography and nothing else, so it is drawn in the
-    middle of the canvas. The specification is normalised so that it is the
-    single source of truth for the pipeline - the text that is drawn and the
-    text that is validated have to be the same text.
+    The template decides what is drawn: ``hero_top`` has the art above the copy,
+    ``hero_bottom`` has the copy above the art, ``wide_scene`` is a landscape
+    canvas, and so on. A ``text_only`` brief is typography and nothing else, so
+    it is drawn in the middle of the canvas. The specification is normalised so
+    that it is the single source of truth for the pipeline - the text that is
+    drawn and the text that is validated have to be the same text.
     """
 
-    layout_type: str  # "full_bleed", "text_top", "text_top_bottom", "text_only"
+    layout_type: str  # a template id, or a legacy layout id that maps to one
     headline_text: str | None = None
     tagline_text: str | None = None
     font_color: str = "#000000"
@@ -168,11 +107,9 @@ class LayoutSpec:
     treatment_override: TextTreatment | None = None
 
     def __post_init__(self) -> None:
-        self.layout_type = resolve_layout(self.layout_type, self.headline_text, self.tagline_text)
+        self.layout_type = resolve_template(self.layout_type, self.headline_text, self.tagline_text)
         if self.layout_type == "full_bleed":
             self.headline_text = None
-            self.tagline_text = None
-        elif self.layout_type == "text_top":
             self.tagline_text = None
         if not self.font_family:
             self.font_family = family_for_voice(self.voice)
@@ -375,12 +312,23 @@ def _fit(
     family: str,
     treatment: TextTreatment,
 ) -> tuple[ImageFont.FreeTypeFont, list[str]]:
-    """Find the biggest font size at which the text fits the zone."""
+    """Find the biggest font size at which the text fits the zone.
+
+    A word is never split down the middle: a narrow column shrinks the type
+    instead of breaking ``GOBBLE`` into ``GOBBL`` and ``E``, which reads as a
+    typo to the buyer and to the text gate.
+    """
+    words = text.split()
     size = max(MIN_FONT_SIZE, max_height)
     while size >= MIN_FONT_SIZE:
         font = _font(size, family)
-        lines = _wrap(draw, text, font, max_width, treatment.tracking * size)
-        if len(lines) * _line_height(font) <= max_height:
+        tracking = treatment.tracking * size
+        longest_word = max(
+            (_measure_run(draw, word, font, tracking) for word in words),
+            default=0.0,
+        )
+        lines = _wrap(draw, text, font, max_width, tracking)
+        if longest_word <= max_width and len(lines) * _line_height(font) <= max_height:
             return font, lines
         size -= 2
 
@@ -491,8 +439,9 @@ def _draw_text(
     family: str = DEFAULT_FONT,
     treatment: TextTreatment | None = None,
     bar: str | None = None,
+    align: str = "center",
 ) -> None:
-    """Draw the text centred in the given box.
+    """Draw the text centred (or left-aligned) in the given box.
 
     ``bar`` is the colour of a band that is drawn behind the text. The text on
     a band is drawn in the colour that stands out against it, so it stays
@@ -539,7 +488,7 @@ def _draw_text(
     word_index = 0
     for index, line in enumerate(lines):
         line_width = _measure_line(draw, line, font, tracking)
-        line_x = int(x + (width - line_width) / 2)
+        line_x = int(x) if align == "left" else int(x + (width - line_width) / 2)
         line_y = top + index * line_height
 
         if treatment.style == "block":
@@ -582,6 +531,76 @@ def _draw_text(
         word_index += len(line.split())
 
 
+def _draw_arc_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    *,
+    color: str,
+    box: tuple[int, int, int, int],
+    family: str = DEFAULT_FONT,
+    treatment: TextTreatment | None = None,
+) -> None:
+    """Draw the text along a downward curve.
+
+    A ``roundel`` uses it for the tagline, which follows the bottom of the
+    circle. The characters stay upright so the arc is still readable by the
+    text gate; the tagline is secondary, so a curve the gate cannot read does
+    not fail the design.
+    """
+    treatment = treatment or TextTreatment()
+    text = text.strip()
+    if treatment.uppercase:
+        text = text.upper()
+    text = _drop_unsupported(text, family)
+    if not text:
+        return
+
+    x, y, width, height = box
+    if width < 1 or height < 1:
+        return
+
+    size = max(MIN_FONT_SIZE, int(height * 0.55))
+    tracking = treatment.tracking
+    while size > MIN_FONT_SIZE:
+        font = _font(size, family)
+        if _measure_run(draw, text, font, tracking * size) <= width:
+            break
+        size -= 2
+    font = _font(size, family)
+    tracking = treatment.tracking * size
+
+    widths = [draw.textlength(character, font=font) for character in text]
+    total = sum(widths) + tracking * max(0, len(text) - 1)
+    if total <= 0:
+        return
+
+    # A shallow arc: a radius of 2.5x the width keeps the curve gentle, so the
+    # text stays inside its band and the vision model can still read it.
+    radius = width * 2.5
+    half = math.asin(min(1.0, width / (2 * radius)))
+    arc = 2 * half
+    centre_x = x + width / 2
+    centre_y = y + height - radius
+    halo = max(1, int(size * HALO_RATIO)) if treatment.style == "halo" else 0
+
+    position = math.pi / 2 + half
+    for character, character_width in zip(text, widths):
+        angle = position - arc * ((character_width / 2) / total)
+        draw.text(
+            (
+                centre_x + radius * math.cos(angle),
+                centre_y + radius * math.sin(angle),
+            ),
+            character,
+            font=font,
+            fill=color,
+            anchor="mm",
+            stroke_width=halo,
+            stroke_fill=_halo_colour(color),
+        )
+        position -= arc * ((character_width + tracking) / total)
+
+
 def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
     """Draw the brief's headline and tagline onto the artwork."""
     if layout.layout_type == "full_bleed" or not layout.needs_text:
@@ -605,11 +624,11 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
         _draw_text_only(draw, layout, margin_x=margin_x, text_width=text_width, height=height)
         return _composite(image, overlay)
 
-    placement = PLACEMENTS.get(layout.layout_type, PLACEMENTS["text_top"])
-    bar = accent_for(layout.font_color) if placement.bar else None
+    template = template_for(layout.layout_type)
+    bar = accent_for(layout.font_color) if template.bar else None
 
-    if layout.headline_text and placement.headline:
-        box = _box(placement.headline, width, height)
+    if layout.headline_text and template.headline:
+        box = _box(template.headline, width, height)
         _draw_text(
             draw,
             layout.headline_text,
@@ -618,18 +637,30 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
             family=layout.family,
             treatment=treatment,
             bar=bar,
+            align=template.align,
         )
-    if layout.tagline_text and placement.tagline:
-        box = _box(placement.tagline, width, height)
-        _draw_text(
-            draw,
-            layout.tagline_text,
-            color=layout.font_color,
-            box=box,
-            family=layout.tagline_family,
-            treatment=treatment,
-            bar=bar,
-        )
+    if layout.tagline_text and template.tagline:
+        box = _box(template.tagline, width, height)
+        if template.arc_tagline:
+            _draw_arc_text(
+                draw,
+                layout.tagline_text,
+                color=layout.font_color,
+                box=box,
+                family=layout.tagline_family,
+                treatment=treatment,
+            )
+        else:
+            _draw_text(
+                draw,
+                layout.tagline_text,
+                color=layout.font_color,
+                box=box,
+                family=layout.tagline_family,
+                treatment=treatment,
+                bar=bar,
+                align=template.align,
+            )
 
     return _composite(image, overlay)
 
