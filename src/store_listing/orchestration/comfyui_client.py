@@ -25,6 +25,7 @@ from PIL import Image, ImageFilter
 from store_listing.orchestration.chroma_key import (
     correct_key_mix,
     despill_key_spill,
+    key_out_background,
     punch_out_key_colour,
 )
 from store_listing.orchestration.comfyui_workflows import (
@@ -91,6 +92,21 @@ def _invert_alpha(rgba_bytes: bytes) -> bytes:
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _alpha_is_empty(rgba_bytes: bytes, *, minimum: float = 0.005) -> bool:
+    """True when the mask has almost no subject in it.
+
+    BiRefNet looks for a salient object. An all-over pattern has none, so it
+    can return an empty mask, and the raw render still has a flat key colour
+    that can be keyed out (issue #244).
+    """
+    with Image.open(io.BytesIO(rgba_bytes)) as opened:
+        values = opened.convert("RGBA").getchannel("A").tobytes()
+    if not values:
+        return True
+    visible = sum(1 for value in values if value > 8)
+    return visible / len(values) < minimum
 
 
 def _clean_alpha(
@@ -254,6 +270,15 @@ class ComfyUIClient:
             white=self._alpha_white_point,
             erode=self._alpha_erode_pixels,
         )
+        if _alpha_is_empty(result.image_bytes):
+            # An all-over pattern has no salient subject for BiRefNet to find.
+            # Its flat background can still be keyed out exactly, so do that
+            # rather than ship a fully transparent design (issue #244).
+            logger.warning(
+                "Background removal returned an empty mask, keying the background colour instead"
+            )
+            result.image_bytes = key_out_background(image_bytes)
+            return result
         # The model treats the enclosed counter of a letter as part of the
         # subject, so those pixels keep the background colour. Punch them out.
         result.image_bytes = punch_out_key_colour(result.image_bytes, image_bytes)
