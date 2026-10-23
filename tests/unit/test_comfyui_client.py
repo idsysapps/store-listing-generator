@@ -538,6 +538,29 @@ class TestRemoveBackgroundPolarity:
         assert _alpha_at(alpha, 32, 32) == 255
         assert _alpha_at(alpha, 2, 2) == 0
 
+    def test_an_empty_mask_falls_back_to_keying_the_background_colour(self) -> None:
+        # BiRefNet is a salient-object model: an all-over repeat has no subject
+        # to find and it returns an empty mask. The flat key colour can still
+        # be keyed out of the render (issue #244).
+        source = self._source()
+        with Image.open(io.BytesIO(source)) as opened:
+            empty = opened.convert("RGBA")
+        empty.putalpha(Image.new("L", empty.size, 0))
+        buffer = io.BytesIO()
+        empty.save(buffer, format="PNG")
+        counter = [0]
+        client = _client(
+            self._handler([buffer.getvalue()], counter),
+            bg_model_name="birefnet.safetensors",
+        )
+
+        result = client.remove_background(source)
+
+        assert result.image_bytes is not None
+        alpha = Image.open(io.BytesIO(result.image_bytes)).convert("RGBA").getchannel("A")
+        assert _alpha_at(alpha, 32, 32) == 255, "the artwork should survive the fallback"
+        assert _alpha_at(alpha, 2, 2) == 0, "the magenta background should be keyed out"
+
     def test_the_background_colour_is_punched_out_of_the_artwork(self) -> None:
         # A letter's enclosed counter keeps the background colour in the mask.
         # Those pixels are punched out.
