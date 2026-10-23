@@ -218,7 +218,9 @@ def _upload_text_only(
     raw_bytes = composite_text(blank_canvas(product_type), layout)
     transparent_bytes: bytes | None = None
     if product_type == "dtf_apparel":
-        transparent_bytes = composite_text(blank_canvas(product_type, transparent=True), layout)
+        transparent_bytes = composite_text(
+            blank_canvas(product_type, transparent=True), layout, transparent=True
+        )
 
     if text_validator is not None:
         verdict = text_validator.validate(
@@ -438,7 +440,9 @@ def _generate_single_brief(
 
     transparent_bytes: bytes | None = None
     if is_dtf and result.background_removed and result.image_bytes:
-        transparent_bytes = composite_text(_textured(result, brief, is_dtf, keyed=True), layout)
+        transparent_bytes = composite_text(
+            _textured(result, brief, is_dtf, keyed=True), layout, transparent=True
+        )
 
     keys = storage.upload_design(
         raw_bytes=raw_bytes,

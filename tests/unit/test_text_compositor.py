@@ -720,3 +720,97 @@ class TestTheDesignTemplates:
         result = self._draw("wide_scene", (1216, 832))
 
         assert _image(result).size == (1216, 832)
+
+
+def _rgba(data: bytes) -> Image.Image:
+    return Image.open(io.BytesIO(data)).convert("RGBA")
+
+
+def _opaque_colours(image: Image.Image) -> set[tuple[int, int, int]]:
+    """The colours of the pixels that are not transparent."""
+    pixels = image.tobytes()
+    return {
+        (pixels[index], pixels[index + 1], pixels[index + 2])
+        for index in range(0, len(pixels), 4)
+        if pixels[index + 3] > 0
+    }
+
+
+class TestTheTransparentRender:
+    """The DTF print file is transparent, so it is shown on white.
+
+    Text in a light colour would vanish there without an outline. The brief
+    picks white or a light tint to contrast with dark artwork, and the raw
+    render (on the magenta key colour) hides the problem, so the outline is
+    added only to the transparent render.
+    """
+
+    def _spec(self, colour: str) -> LayoutSpec:
+        return LayoutSpec(
+            layout_type="hero_bottom",
+            headline_text="MIDNIGHT SNACK",
+            font_color=colour,
+            # The shadow treatment already draws dark pixels, which would make
+            # the outline indistinguishable from the shadow in this test.
+            treatment_override=TextTreatment(uppercase=True, style="plain"),
+        )
+
+    def test_white_text_gets_a_dark_outline(self) -> None:
+        result = composite_text(
+            blank_canvas("dtf_apparel", transparent=True),
+            self._spec("#FFFFFF"),
+            transparent=True,
+        )
+
+        colours = _opaque_colours(_rgba(result))
+        assert (255, 255, 255) in colours, "the text itself should still be white"
+        assert min(sum(colour) for colour in colours) < 150, "white text needs a dark outline"
+
+    def test_dark_text_gets_a_light_outline(self) -> None:
+        result = composite_text(
+            blank_canvas("dtf_apparel", transparent=True),
+            self._spec("#101010"),
+            transparent=True,
+        )
+
+        colours = _opaque_colours(_rgba(result))
+        assert (16, 16, 16) in colours, "the text itself should still be dark"
+        assert max(sum(colour) for colour in colours) > 600, "dark text needs a light outline"
+
+    def test_the_arc_tagline_is_outlined_too(self) -> None:
+        result = composite_text(
+            blank_canvas("dtf_apparel", transparent=True),
+            LayoutSpec(
+                layout_type="roundel",
+                tagline_text="FEAST AT THE OLD CASTLE",
+                font_color="#FFFFFF",
+                treatment_override=TextTreatment(uppercase=True, style="plain"),
+            ),
+            transparent=True,
+        )
+
+        colours = _opaque_colours(_rgba(result))
+        assert min(sum(colour) for colour in colours) < 150
+
+    def test_a_typography_only_dtf_render_is_outlined(self) -> None:
+        result = composite_text(
+            blank_canvas("dtf_apparel", transparent=True),
+            LayoutSpec(
+                layout_type="text_only",
+                headline_text="MIDNIGHT SNACK",
+                font_color="#FFFFFF",
+                treatment_override=TextTreatment(uppercase=True, style="plain"),
+            ),
+            transparent=True,
+        )
+
+        colours = _opaque_colours(_rgba(result))
+        assert min(sum(colour) for colour in colours) < 150
+
+    def test_the_opaque_render_keeps_its_current_look(self) -> None:
+        # White text on the white paper of a print-through product is only
+        # invisible because this is the opaque render; it must not grow an
+        # outline that the old designs did not have.
+        result = composite_text(_canvas(), self._spec("#FFFFFF"))
+
+        assert _distinct_colours(_image(result)) == {(255, 255, 255)}
