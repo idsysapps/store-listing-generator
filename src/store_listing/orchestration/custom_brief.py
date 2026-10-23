@@ -20,10 +20,12 @@ from store_listing.orchestration.design_briefs import (
     VALID_LAYOUT_TYPES,
     DesignBrief,
     DesignBriefDBClient,
+    assign_batch_devices,
     assign_batch_templates,
     headline_for_text_only,
 )
 from store_listing.orchestration.headline_voice import normalise_voice, screen_text
+from store_listing.orchestration.idea_devices import device_for, idea_device_rules
 from store_listing.orchestration.json_response import extract_json_objects, repair_truncated_object
 from store_listing.orchestration.llm_client import (
     create_answer,
@@ -87,6 +89,8 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         '  "tagline_text": "secondary text or null",\n'
         '  "font_color": "#FFFFFF",\n'
         '  "voice": "deadpan | loud | cozy",\n'
+        '  "idea_device": "juxtaposition | transformation | scale | narrative | '
+        'collection | pattern",\n'
         '  "style_preset": "vintage_screenprint | seventies_retro | halftone_comic | '
         "riso_two_color | hand_inked_woodcut | kawaii_flat | art_nouveau | "
         'distressed_band_tee",\n'
@@ -96,6 +100,7 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         f"{layout_rules(types)}\n"
         f"{voice_rules()}\n"
         f"{art_direction_rules()}\n"
+        f"{idea_device_rules()}\n"
         f"{DESIGN_ONLY_RULES}\n"
         f"{ip_rules}"
     )
@@ -198,6 +203,11 @@ def _read_brief(
             return None, "a text_only design needs a headline"
 
     voice = normalise_voice(b.get("voice") if isinstance(b.get("voice"), str) else None)
+    # How the scene carries its idea. The custom path has no batch slots, so
+    # the device the model named is the one the scene was written for.
+    idea_device = b.get("idea_device")
+    if not isinstance(idea_device, str) or device_for(idea_device) is None:
+        idea_device = None
     # The look of the design. A brief that names a look we do not print has no
     # look, and the voice decides the type then (issue #227).
     style_preset = b.get("style_preset")
@@ -242,6 +252,7 @@ def _read_brief(
             voice=voice,
             font_family=font_family,
             style_preset=style_preset,
+            idea_device=idea_device,
         ),
         "",
     )
@@ -354,6 +365,9 @@ def create_custom_brief(
     # A single brief still gets a template, so the custom path does not always
     # come back as the same centred emblem (issue #238).
     brief = assign_batch_templates([brief], f"custom:{brief.concept}")[0]
+    if brief.idea_device is None:
+        # The model named no device we use; give the brief one anyway.
+        brief = assign_batch_devices([brief], f"custom:{brief.concept}")[0]
 
     brief_id = db_client.insert_design_brief(
         concept=brief.concept,

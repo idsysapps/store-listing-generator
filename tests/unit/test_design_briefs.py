@@ -13,12 +13,14 @@ from store_listing.orchestration.brief_prompts import SEASONAL_WORDS
 from store_listing.orchestration.design_briefs import (
     BriefableCandidate,
     DesignBrief,
+    assign_batch_devices,
     assign_batch_templates,
     build_brief_prompt,
     generate_design_briefs,
     parse_brief_response,
     read_brief_response,
 )
+from store_listing.orchestration.idea_devices import DEVICE_IDS
 from store_listing.orchestration.typography import family_for_voice
 
 
@@ -946,6 +948,51 @@ class TestGenerateDesignBriefs:
         concepts = [call.kwargs["concept"] for call in db.insert_design_brief.call_args_list]
         assert concepts == ["Coffee Cat", "Garden Gnome"]
 
+    def test_a_batch_that_is_asked_for_again_still_gets_templates(self) -> None:
+        candidates = [_briefable(1, "halloween costume shirt"), _briefable(2, "cat lover mug")]
+        db = self._mock_db(candidates=candidates)
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Pumpkin Party",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                        }
+                    ]
+                }
+            ),
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Coffee Cat",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [2],
+                            "headline_text": "COFFEE CAT",
+                        },
+                        {
+                            "concept": "Garden Gnome",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [2],
+                            "headline_text": "GARDEN GNOME",
+                        },
+                    ]
+                }
+            ),
+        ]
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        layouts = [call.kwargs["layout_type"] for call in db.insert_design_brief.call_args_list]
+        assert len(set(layouts)) == len(layouts)
+        assert not {"auto", "text_top", "text_top_bottom", "full_bleed"} & set(layouts)
+
     def test_warns_when_a_brief_has_no_usable_source_seed(self, caplog) -> None:
         candidates = [_briefable(42, "dad jokes shirt")]
         db = self._mock_db(candidates=candidates)
@@ -1671,3 +1718,98 @@ class TestTheBatchTemplates:
         assigned = assign_batch_templates(briefs, "2026-10-22")
 
         assert assigned[0].layout_type == "text_only"
+
+
+class TestTheIdeaDevices:
+    def _messages(self):
+        return build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 22),
+        )
+
+    def _brief(self, concept: str, **overrides: Any) -> DesignBrief:
+        defaults: dict[str, Any] = {
+            "concept": concept,
+            "product_type": "dtf_apparel",
+            "specific_products": ["t-shirt"],
+            "audience": "everyone",
+            "visual_style": "bold",
+            "confidence": 50,
+            "reasoning": "trending",
+            "source_seed_ids": [1],
+            "layout_type": "auto",
+            "headline_text": "GOOD LINE",
+        }
+        defaults.update(overrides)
+        return DesignBrief(**defaults)
+
+    def test_the_prompt_hands_each_brief_slot_a_device(self) -> None:
+        payload = json.loads(self._messages()[1]["content"])
+
+        devices = [slot["idea_device"] for slot in payload["brief_slots"]]
+
+        assert len(devices) == payload["max_briefs"]
+        assert len(set(devices)) >= 6
+
+    def test_the_system_prompt_names_every_device(self) -> None:
+        system = self._messages()[0]["content"]
+
+        for device in DEVICE_IDS:
+            assert device in system
+
+    def test_a_brief_keeps_the_device_it_names(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "A raccoon heist",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                        "layout_type": "auto",
+                        "headline_text": "SNACK RUN",
+                        "idea_device": "narrative",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].idea_device == "narrative"
+
+    def test_an_unknown_device_is_dropped(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "A raccoon heist",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                        "layout_type": "auto",
+                        "headline_text": "SNACK RUN",
+                        "idea_device": "something_else",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].idea_device is None
+
+    def test_the_batch_rotation_covers_the_vocabulary(self) -> None:
+        briefs = [self._brief(f"concept {index}") for index in range(8)]
+
+        assigned = assign_batch_devices(briefs, "2026-10-22")
+
+        assert len({brief.idea_device for brief in assigned}) >= 6
+
+    def test_the_batch_rotation_is_deterministic(self) -> None:
+        briefs = [self._brief(f"concept {index}") for index in range(8)]
+
+        assert assign_batch_devices(briefs, "2026-10-22") == assign_batch_devices(
+            briefs, "2026-10-22"
+        )
