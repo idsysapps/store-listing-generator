@@ -440,12 +440,18 @@ def _draw_text(
     treatment: TextTreatment | None = None,
     bar: str | None = None,
     align: str = "center",
+    force_outline: bool = False,
 ) -> None:
     """Draw the text centred (or left-aligned) in the given box.
 
     ``bar`` is the colour of a band that is drawn behind the text. The text on
     a band is drawn in the colour that stands out against it, so it stays
     readable whatever the band is.
+
+    ``force_outline`` adds a contrasting outline even when the treatment does
+    not ask for one. The transparent DTF render needs it: its text is shown on
+    white, and a light brief colour would otherwise disappear. The band
+    templates are left alone because the band already guarantees contrast.
     """
     treatment = treatment or TextTreatment()
     text = text.strip()
@@ -478,6 +484,8 @@ def _draw_text(
     shadow_color = _halo_colour(color)
     offset = max(1, int(font.size * SHADOW_RATIO))
     halo = max(1, int(font.size * HALO_RATIO)) if treatment.style == "halo" else 0
+    if force_outline and bar is None:
+        halo = max(halo, max(2, int(font.size * HALO_RATIO)))
 
     if bar is not None:
         draw.rectangle([x, y, x + width, y + height], fill=bar)
@@ -539,6 +547,7 @@ def _draw_arc_text(
     box: tuple[int, int, int, int],
     family: str = DEFAULT_FONT,
     treatment: TextTreatment | None = None,
+    force_outline: bool = False,
 ) -> None:
     """Draw the text along a downward curve.
 
@@ -582,6 +591,8 @@ def _draw_arc_text(
     centre_x = x + width / 2
     centre_y = y + height - radius
     halo = max(1, int(size * HALO_RATIO)) if treatment.style == "halo" else 0
+    if force_outline:
+        halo = max(halo, max(2, int(size * HALO_RATIO)))
 
     position = math.pi / 2 + half
     for character, character_width in zip(text, widths):
@@ -601,8 +612,13 @@ def _draw_arc_text(
         position -= arc * ((character_width + tracking) / total)
 
 
-def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
-    """Draw the brief's headline and tagline onto the artwork."""
+def composite_text(image_bytes: bytes, layout: LayoutSpec, *, transparent: bool = False) -> bytes:
+    """Draw the brief's headline and tagline onto the artwork.
+
+    ``transparent`` marks the keyed DTF render, which is shown on whatever the
+    garment or the catalog page is. The text gets a contrasting outline there
+    so a light brief colour does not disappear into the background.
+    """
     if layout.layout_type == "full_bleed" or not layout.needs_text:
         return image_bytes
 
@@ -621,7 +637,14 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
     treatment = layout.treatment
 
     if layout.layout_type == "text_only":
-        _draw_text_only(draw, layout, margin_x=margin_x, text_width=text_width, height=height)
+        _draw_text_only(
+            draw,
+            layout,
+            margin_x=margin_x,
+            text_width=text_width,
+            height=height,
+            force_outline=transparent,
+        )
         return _composite(image, overlay)
 
     template = template_for(layout.layout_type)
@@ -638,6 +661,7 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
             treatment=treatment,
             bar=bar,
             align=template.align,
+            force_outline=transparent,
         )
     if layout.tagline_text and template.tagline:
         box = _box(template.tagline, width, height)
@@ -649,6 +673,7 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
                 box=box,
                 family=layout.tagline_family,
                 treatment=treatment,
+                force_outline=transparent,
             )
         else:
             _draw_text(
@@ -660,6 +685,7 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec) -> bytes:
                 treatment=treatment,
                 bar=bar,
                 align=template.align,
+                force_outline=transparent,
             )
 
     return _composite(image, overlay)
@@ -692,6 +718,7 @@ def _draw_text_only(
     margin_x: int,
     text_width: int,
     height: int,
+    force_outline: bool = False,
 ) -> None:
     """Draw a typography-only design in the middle of the canvas.
 
@@ -712,6 +739,7 @@ def _draw_text_only(
             ),
             family=layout.family,
             treatment=treatment,
+            force_outline=force_outline,
         )
     if layout.tagline_text:
         _draw_text(
@@ -726,4 +754,5 @@ def _draw_text_only(
             ),
             family=layout.tagline_family,
             treatment=treatment,
+            force_outline=force_outline,
         )
