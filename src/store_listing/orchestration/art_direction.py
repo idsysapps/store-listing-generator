@@ -191,6 +191,11 @@ def negative_for(preset: Preset | None, *, allow_surface: bool = False) -> str:
     if not allow_surface:
         parts.append("no surface")
     parts.append("no lettering")
+    if allow_surface:
+        # The carrier itself may be a sign; it has to stay blank. Naming the
+        # lettered objects around it keeps a diner from growing a "DINER"
+        # sign next to the blank one.
+        parts.append("no lettering on signs, no menus with text, no shop signs with letters")
     if preset:
         parts.append(preset.negative)
     return ", ".join(parts)

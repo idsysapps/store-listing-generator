@@ -56,6 +56,22 @@ NO_MOCKUP = (
     "no photo of a printed item"
 )
 
+# The carrier is a surface the compositor has to find again. Naming its colour
+# and material in the prompt makes the image model draw a large flat area the
+# surface palette can match; the plan's description alone was too loose
+# (issue #246).
+SURFACE_PROMPTS: dict[str, str] = {
+    "paper": "a large flat cream paper surface",
+    "kraft": "a large flat tan kraft-paper surface",
+    "wood": "a large flat warm brown wooden surface",
+    "chalkboard": "a large flat dark charcoal chalkboard surface",
+    "metal": "a large flat light grey metal surface",
+    "stone": "a large flat pale grey stone surface",
+    "fabric": "a large flat cream fabric surface",
+    "glass": "a large flat pale blue glass surface",
+    "none": "",
+}
+
 # The image is the graphic that gets printed, not the thing it is printed on.
 # A scene that names the product - a trick-or-treat bag, a hoodie - makes the
 # model draw the product (issue #195).
@@ -199,6 +215,10 @@ def build_flux_prompt(brief: DesignBrief) -> str:
             .replace("plain background only", "only the blank carrier described above")
         )
         parts.append("The blank carrier is part of the illustration and has no lettering on it.")
+        parts.append("Do not add any other sign, menu, billboard or label with writing.")
+        surface = SURFACE_PROMPTS.get(brief.text_plan.surface if brief.text_plan else "", "")
+        if surface:
+            parts.append(f"The blank carrier is {surface}, one solid colour, no lettering.")
         if brief.text_plan and brief.text_plan.carrier_description:
             parts.append(f"The blank carrier: {brief.text_plan.carrier_description}.")
     parts.append(composition)

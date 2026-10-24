@@ -16,7 +16,7 @@ from typing import Any, cast
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from store_listing.orchestration.design_briefs import (
     BriefableCandidate,
@@ -520,6 +520,75 @@ class TestTheCarrier:
 
         assert len({pixel for pixel in inside.getdata()}) > 1, "the sign carries the text"
 
+    def test_the_carrier_is_the_object_not_the_wall_behind_it(self) -> None:
+        image = Image.new("RGB", (1024, 1024), (255, 0, 255))
+        draw = ImageDraw.Draw(image)
+        # A stone wall across the scene and a headstone standing in front of
+        # it. They share the stone palette; the headstone is the carrier.
+        draw.rectangle([0, 620, 1024, 690], fill=(140, 140, 135))
+        draw.rectangle([370, 690, 590, 900], fill=(140, 140, 135))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = composite_text(
+            buffer.getvalue(),
+            LayoutSpec(
+                layout_type="hero_top",
+                headline_text="GONE BUT NOT FORGOTTEN",
+                font_color="#1B1B1B",
+                text_plan=TextPlan(
+                    method="carved",
+                    carrier="headstone",
+                    region="bottom_center",
+                    surface="stone",
+                    ink="dark",
+                ),
+            ),
+        )
+
+        composed = np.asarray(_image(result))
+        raw = np.asarray(image)
+        changed = np.abs(composed.astype(np.int16) - raw.astype(np.int16)).sum(axis=2) > 30
+        ys, xs = np.nonzero(changed)
+
+        assert xs.min() >= 350 and xs.max() <= 610, "the words stay on the headstone"
+        assert ys.min() >= 680, "the words are on the headstone, not the wall"
+
+    def test_a_line_art_carrier_is_found_by_its_outline(self) -> None:
+        image = Image.new("RGB", (1024, 1024), (255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        # The linocut presets draw a white carrier inside a black outline;
+        # the grey stone palette cannot find it, so the enclosed white shape
+        # has to.
+        draw.rectangle([0, 680, 1024, 690], fill=(0, 0, 0))
+        draw.rectangle([370, 690, 590, 900], outline=(0, 0, 0), width=10, fill=(255, 255, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = composite_text(
+            buffer.getvalue(),
+            LayoutSpec(
+                layout_type="hero_top",
+                headline_text="GONE BUT NOT FORGOTTEN",
+                font_color="#1B1B1B",
+                text_plan=TextPlan(
+                    method="carved",
+                    carrier="headstone",
+                    region="bottom_center",
+                    surface="stone",
+                    ink="dark",
+                ),
+            ),
+        )
+
+        composed = np.asarray(_image(result))
+        raw = np.asarray(image)
+        changed = np.abs(composed.astype(np.int16) - raw.astype(np.int16)).sum(axis=2) > 30
+        ys, xs = np.nonzero(changed)
+
+        assert xs.min() >= 360 and xs.max() <= 600, "the words stay inside the outline"
+        assert ys.min() >= 680, "the words are on the headstone"
+
     def test_a_carrier_that_is_not_there_falls_back_to_the_zone(self) -> None:
         result = composite_text(
             _canvas(),
@@ -572,9 +641,20 @@ class TestTheImagePrompt:
 
         assert "no surface" not in negative
         assert "no lettering" in negative, "the carrier has to stay blank"
+        assert "no lettering on signs" in negative, "other signs have to stay blank too"
 
     def test_without_a_carrier_the_look_still_forbids_a_surface(self) -> None:
         assert "no surface" in build_negative_prompt(_brief())
+
+    def test_the_prompt_names_the_surface_the_compositor_will_look_for(self) -> None:
+        brief = _with_plan(
+            _brief(),
+            TextPlan(method="carved", carrier="headstone", surface="stone"),
+        )
+
+        prompt = build_flux_prompt(brief).lower()
+
+        assert "pale grey stone surface" in prompt
 
     def test_the_prompt_asks_for_the_blank_carrier_in_the_clear_band(self) -> None:
         brief = _with_plan(

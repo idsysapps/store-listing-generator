@@ -378,6 +378,11 @@ def _generate_single_brief(
                         brief_id,
                     )
                     retry_hint = NO_LETTERING_RETRY_HINT
+                    if brief.text_plan is not None and brief.text_plan.needs_carrier:
+                        retry_hint += (
+                            " The planned carrier is blank; no other sign, menu, "
+                            "billboard or label may have writing."
+                        )
                     continue
                 if needs_text_check:
                     logger.warning(

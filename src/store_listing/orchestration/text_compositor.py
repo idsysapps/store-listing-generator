@@ -734,7 +734,7 @@ SURFACE_COLOURS: dict[str, tuple[tuple[int, int, int], ...]] = {
     "chalkboard": ((35, 40, 38), (50, 55, 52), (20, 25, 24)),
     "metal": ((168, 173, 178), (120, 125, 130), (200, 205, 210)),
     "stone": ((140, 140, 135), (110, 110, 105), (170, 170, 165), (90, 90, 85)),
-    "fabric": ((201, 181, 155), (150, 130, 110), (220, 205, 185)),
+    "fabric": ((201, 181, 155), (150, 130, 110), (220, 205, 185), (245, 240, 230)),
     "glass": ((190, 214, 220), (150, 180, 190), (220, 235, 240)),
     "none": ((246, 241, 232),),
 }
@@ -798,20 +798,11 @@ def _composite_planned(
     surface_colour: tuple[int, int, int] | None = None
     method = plan.method
     if plan.needs_carrier:
-        # The template zone is where a carrier that fits the layout would be;
-        # the planned region is where the brief put it. Detection searches
-        # their overlap, and the region alone when they do not meet.
-        zone = (
-            headline_box
-            or tagline_box
-            or (
-                int(width * 0.1),
-                int(height * 0.4),
-                int(width * 0.8),
-                int(height * 0.2),
-            )
-        )
-        detected = _detect_carrier(image, plan, zone)
+        # The planner named the region; that is where the carrier is. The
+        # template zone is only where the fallback text goes if the carrier
+        # is not there. A line-art carrier has no surface colour to match, so
+        # the enclosed white shape is the second chance.
+        detected = _detect_carrier(image, plan) or _detect_line_art_carrier(image, plan)
         carrier = detected or _fallback_band(plan, headline_box, tagline_box, width, height)
         if detected is None:
             # The carrier was not drawn, or not where the plan said. The
@@ -907,6 +898,7 @@ def _region_box(region: str, width: int, height: int) -> tuple[int, int, int, in
 def _expand(
     box: tuple[int, int, int, int], share: float, width: int, height: int
 ) -> tuple[int, int, int, int]:
+    """A box with a margin, clamped to the canvas."""
     dx = int(box[2] * share)
     dy = int(box[3] * share)
     x = max(0, box[0] - dx)
@@ -953,29 +945,242 @@ def _fallback_band(
     )
 
 
+def _largest_rectangle(mask: np.ndarray) -> tuple[int, int, int, int] | None:
+    """The largest all-true rectangle in a boolean mask, as x, y, width, height.
+
+    The bounding box of every matching pixel is not the carrier: a stone
+    headstone standing in front of a stone wall shares a colour with the
+    wall, and the union spans the whole scene. The largest solid block is the
+    object itself (issue #246).
+    """
+    if mask.ndim != 2 or mask.size == 0:
+        return None
+    heights = np.zeros(mask.shape[1], dtype=np.int32)
+    best: tuple[int, int, int, int] | None = None
+    best_area = 0
+    for y in range(mask.shape[0]):
+        heights = np.where(mask[y], heights + 1, 0)
+        stack: list[int] = []
+        for x in range(mask.shape[1] + 1):
+            height = int(heights[x]) if x < mask.shape[1] else 0
+            while stack and height < int(heights[stack[-1]]):
+                top = stack.pop()
+                bar_height = int(heights[top])
+                left = stack[-1] + 1 if stack else 0
+                width = x - left
+                area = bar_height * width
+                if area > best_area:
+                    best_area = area
+                    best = (left, y - bar_height + 1, width, bar_height)
+            stack.append(x)
+    return best
+
+
+def _trim_rectangle(
+    mask: np.ndarray,
+    rectangle: tuple[int, int, int, int],
+    max_share: float = 0.5,
+) -> tuple[int, int, int, int]:
+    """Strip rows and columns that belong to a wider object.
+
+    A wall running behind a headstone shares its colour, so the largest
+    rectangle can include the strip of wall directly above the stone. That
+    row continues far outside the box; the headstone's rows do not. Trimming
+    those rows leaves the object the words belong on (issue #246).
+    """
+    x0, y0, width, height = rectangle
+    while height > 0:
+        row = mask[y0, x0 : x0 + width]
+        inside = int(row.sum())
+        outside = int(mask[y0, :].sum()) - inside
+        if outside <= width * max_share:
+            break
+        y0 += 1
+        height -= 1
+    while height > 0:
+        row = mask[y0 + height - 1, x0 : x0 + width]
+        inside = int(row.sum())
+        outside = int(mask[y0 + height - 1, :].sum()) - inside
+        if outside <= width * max_share:
+            break
+        height -= 1
+    while width > 0:
+        column = mask[y0 : y0 + height, x0]
+        inside = int(column.sum())
+        outside = int(mask[:, x0].sum()) - inside
+        if outside <= height * max_share:
+            break
+        x0 += 1
+        width -= 1
+    while width > 0:
+        column = mask[y0 : y0 + height, x0 + width - 1]
+        inside = int(column.sum())
+        outside = int(mask[:, x0 + width - 1].sum()) - inside
+        if outside <= height * max_share:
+            break
+        width -= 1
+    return (x0, y0, width, height)
+
+
+def _grow_rectangle(
+    mask: np.ndarray,
+    rectangle: tuple[int, int, int, int],
+    min_share: float = 0.5,
+) -> tuple[int, int, int, int]:
+    """A rectangle grown to the edges of the surface around it.
+
+    The largest solid block sits inside the carrier; a crack or a grain line
+    can stop it short. A row or column that is still mostly surface belongs
+    to the carrier, so the box grows one step at a time until the surface
+    ends. A row that continues far outside the box is a different object (the
+    stone wall behind a headstone), so it does not count.
+    """
+    x0, y0, width, height = rectangle
+    rows, columns = mask.shape
+    changed = True
+    while changed:
+        changed = False
+        if x0 > 0:
+            column = mask[y0 : y0 + height, x0 - 1]
+            inside = int(column.sum())
+            outside = int(mask[:, x0 - 1].sum()) - inside
+            if inside >= height * min_share and outside <= height * 0.5:
+                x0 -= 1
+                width += 1
+                changed = True
+        if x0 + width < columns:
+            column = mask[y0 : y0 + height, x0 + width]
+            inside = int(column.sum())
+            outside = int(mask[:, x0 + width].sum()) - inside
+            if inside >= height * min_share and outside <= height * 0.5:
+                width += 1
+                changed = True
+        if y0 > 0:
+            row = mask[y0 - 1, x0 : x0 + width]
+            inside = int(row.sum())
+            outside = int(mask[y0 - 1, :].sum()) - inside
+            if inside >= width * min_share and outside <= width * 0.5:
+                y0 -= 1
+                height += 1
+                changed = True
+        if y0 + height < rows:
+            row = mask[y0 + height, x0 : x0 + width]
+            inside = int(row.sum())
+            outside = int(mask[y0 + height, :].sum()) - inside
+            if inside >= width * min_share and outside <= width * 0.5:
+                height += 1
+                changed = True
+    return (x0, y0, width, height)
+
+
+def _block_max(mask: np.ndarray, factor: int) -> np.ndarray:
+    """A mask reduced by taking the maximum of each factor x factor block."""
+    height, width = mask.shape
+    if height < factor or width < factor:
+        return mask.copy()
+    rows = height // factor
+    columns = width // factor
+    trimmed = mask[: rows * factor, : columns * factor]
+    return trimmed.reshape(rows, factor, columns, factor).max(axis=(1, 3))
+
+
+def _detect_line_art_carrier(
+    image: Image.Image,
+    plan: TextPlan,
+) -> tuple[int, int, int, int] | None:
+    """Find a flat carrier drawn inside a dark outline.
+
+    The linocut and ink presets draw a headstone or a sign as a flat area
+    inside black linework, and the riso preset paints it a flat colour the
+    surface palette did not expect. The carrier is still the largest flat
+    area that the linework encloses: the sky touches the edge of the search,
+    and the stones of a wall are small. That enclosed area is the carrier
+    (issue #246).
+    """
+    width, height = image.size
+    search = _expand(_region_box(plan.region, width, height), 0.15, width, height)
+    if search[2] < 1 or search[3] < 1:
+        return None
+    gray = np.asarray(_crop(image, search).convert("L"), dtype=np.int16)
+    dark = gray < 100
+    factor = 4
+    open_cells = ~_block_max(dark, factor)
+    rows, columns = open_cells.shape
+    if rows < 2 or columns < 2:
+        return None
+
+    visited = np.zeros_like(open_cells, dtype=bool)
+    best: tuple[int, int, int, int] | None = None
+    best_area = 0
+    for start_y in range(rows):
+        for start_x in range(columns):
+            if not open_cells[start_y, start_x] or visited[start_y, start_x]:
+                continue
+            stack = [(start_y, start_x)]
+            visited[start_y, start_x] = True
+            area = 0
+            min_x = max_x = start_x
+            min_y = max_y = start_y
+            touches_border = False
+            while stack:
+                y, x = stack.pop()
+                area += 1
+                min_x = min(min_x, x)
+                max_x = max(max_x, x)
+                min_y = min(min_y, y)
+                max_y = max(max_y, y)
+                if x == 0 or y == 0 or x == columns - 1 or y == rows - 1:
+                    touches_border = True
+                if y > 0 and open_cells[y - 1, x] and not visited[y - 1, x]:
+                    visited[y - 1, x] = True
+                    stack.append((y - 1, x))
+                if y + 1 < rows and open_cells[y + 1, x] and not visited[y + 1, x]:
+                    visited[y + 1, x] = True
+                    stack.append((y + 1, x))
+                if x > 0 and open_cells[y, x - 1] and not visited[y, x - 1]:
+                    visited[y, x - 1] = True
+                    stack.append((y, x - 1))
+                if x + 1 < columns and open_cells[y, x + 1] and not visited[y, x + 1]:
+                    visited[y, x + 1] = True
+                    stack.append((y, x + 1))
+            if touches_border or area < 200:
+                continue
+            if area > best_area:
+                best_area = area
+                best = (
+                    search[0] + min_x * factor,
+                    search[1] + min_y * factor,
+                    (max_x - min_x + 1) * factor,
+                    (max_y - min_y + 1) * factor,
+                )
+    if best is None:
+        return None
+    x0, y0, box_width, box_height = best
+    if box_width < 40 or box_height < 20:
+        return None
+    inset_x = max(2, int(box_width * 0.04))
+    inset_y = max(2, int(box_height * 0.04))
+    return (
+        x0 + inset_x,
+        y0 + inset_y,
+        max(1, box_width - 2 * inset_x),
+        max(1, box_height - 2 * inset_y),
+    )
+
+
 def _detect_carrier(
     image: Image.Image,
     plan: TextPlan,
-    fallback: tuple[int, int, int, int],
 ) -> tuple[int, int, int, int] | None:
     """The box of the carrier the scene was asked to draw, or None.
 
-    The search starts in the planned region, clipped to the template's zone
-    when they overlap. The surface colour is the hint; the largest block of
-    that colour is the carrier. A flat canvas that happens to match the hint
-    is still bounded by the zone, so it cannot swallow the whole design.
+    The planner named the region, so that is the search area. The surface
+    colour is the hint; the largest solid block of that colour is the carrier.
+    A flat canvas that happens to match the hint is still bounded by the
+    region, so it cannot swallow the whole design.
     """
     width, height = image.size
-    region = _region_box(plan.region, width, height)
-    if plan.region == "any":
-        # The brief did not commit to a zone, so the carrier may be anywhere.
-        search = region
-    else:
-        expanded = _expand(fallback, 0.15, width, height)
-        overlap = _intersection(expanded, region)
-        search = (
-            overlap if overlap is not None and overlap[2] >= 40 and overlap[3] >= 20 else region
-        )
+    search = _expand(_region_box(plan.region, width, height), 0.15, width, height)
     if search[2] < 1 or search[3] < 1:
         return None
 
@@ -990,11 +1195,13 @@ def _detect_carrier(
     if int(mask.sum()) < 200 or int(mask.sum()) < int(mask.size * 0.005):
         return None
 
-    ys, xs = np.nonzero(mask)
-    x0, x1 = int(xs.min()), int(xs.max())
-    y0, y1 = int(ys.min()), int(ys.max())
-    box_width = x1 - x0 + 1
-    box_height = y1 - y0 + 1
+    rectangle = _largest_rectangle(mask)
+    if rectangle is None:
+        return None
+    x0, y0, box_width, box_height = _trim_rectangle(mask, rectangle)
+    if box_width < 40 or box_height < 20:
+        return None
+    x0, y0, box_width, box_height = _grow_rectangle(mask, (x0, y0, box_width, box_height))
     if box_width < 40 or box_height < 20:
         return None
 
