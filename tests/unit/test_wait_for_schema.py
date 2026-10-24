@@ -57,10 +57,13 @@ class TestMissingColumns:
             "active_seeds.origin",
             "active_seeds.theme",
             "active_seeds.seasonal_window_end",
+            "design_briefs.text_plan",
         ]
 
     def test_a_half_migrated_database_is_missing_the_rest(self) -> None:
-        missing = missing_columns(_connect_with([("active_seeds", "origin")]))
+        missing = missing_columns(
+            _connect_with([("active_seeds", "origin"), ("design_briefs", "text_plan")])
+        )
 
         assert missing == ["active_seeds.theme", "active_seeds.seasonal_window_end"]
 

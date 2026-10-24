@@ -20,6 +20,8 @@ config:
   llmDesignBriefsEnabled: "false"
   llmMaxBriefs: "8"
   llmMaxBriefSeeds: "20"
+  llmTextPlan: "true"
+  llmTextPlanRegenerate: "true"
   llmMaxActiveSeeds: "200"
   llmMinBriefableSeeds: "30"
   llmBriefSeedCooldownDays: "14"

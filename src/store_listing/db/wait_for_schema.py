@@ -24,6 +24,9 @@ REQUIRED_COLUMNS: Final[tuple[tuple[str, str], ...]] = (
     ("active_seeds", "origin"),
     ("active_seeds", "theme"),
     ("active_seeds", "seasonal_window_end"),
+    # The text-plan pass writes this, so a pod must not serve a brief batch
+    # before the migration has added it (issue #246).
+    ("design_briefs", "text_plan"),
 )
 
 DEFAULT_TIMEOUT_SECONDS: Final[int] = 120

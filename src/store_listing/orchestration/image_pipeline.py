@@ -43,6 +43,7 @@ from store_listing.orchestration.text_compositor import (
     blank_canvas,
     composite_text,
 )
+from store_listing.orchestration.text_integration import text_plan_from_value
 from store_listing.orchestration.text_validation import TextValidator
 from store_listing.orchestration.textures import apply_texture
 
@@ -111,6 +112,7 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         voice=voice,
         font_family=font_family,
         style_preset=brief_row.get("style_preset"),
+        text_plan=text_plan_from_value(brief_row.get("text_plan")),
     )
 
 
@@ -272,6 +274,7 @@ def _generate_single_brief(
         font_family=brief.font_family,
         tagline_font_family=tagline_family_for(preset, brief.voice) if preset else None,
         voice=brief.voice,
+        text_plan=brief.text_plan,
     )
     needs_text_check = layout.needs_text
     max_retries = _max_text_retries()
@@ -375,6 +378,11 @@ def _generate_single_brief(
                         brief_id,
                     )
                     retry_hint = NO_LETTERING_RETRY_HINT
+                    if brief.text_plan is not None and brief.text_plan.needs_carrier:
+                        retry_hint += (
+                            " The planned carrier is blank; no other sign, menu, "
+                            "billboard or label may have writing."
+                        )
                     continue
                 if needs_text_check:
                     logger.warning(
