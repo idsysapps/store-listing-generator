@@ -803,6 +803,13 @@ def _composite_planned(
         # is not there. A line-art carrier has no surface colour to match, so
         # the enclosed white shape is the second chance.
         detected = _detect_carrier(image, plan) or _detect_line_art_carrier(image, plan)
+        if detected is None:
+            # The planner's region is a hint, not a cage: the image model can
+            # put the carrier farther out than planned. The whole canvas is
+            # the second chance before the flat fallback.
+            detected = _detect_line_art_carrier(image, plan, whole_canvas=True) or _detect_carrier(
+                image, plan, whole_canvas=True
+            )
         carrier = detected or _fallback_band(plan, headline_box, tagline_box, width, height)
         if detected is None:
             # The carrier was not drawn, or not where the plan said. The
@@ -1087,6 +1094,8 @@ def _block_max(mask: np.ndarray, factor: int) -> np.ndarray:
 def _detect_line_art_carrier(
     image: Image.Image,
     plan: TextPlan,
+    *,
+    whole_canvas: bool = False,
 ) -> tuple[int, int, int, int] | None:
     """Find a flat carrier drawn inside a dark outline.
 
@@ -1098,7 +1107,11 @@ def _detect_line_art_carrier(
     (issue #246).
     """
     width, height = image.size
-    search = _expand(_region_box(plan.region, width, height), 0.15, width, height)
+    search = (
+        (0, 0, width, height)
+        if whole_canvas
+        else _expand(_region_box(plan.region, width, height), 0.15, width, height)
+    )
     if search[2] < 1 or search[3] < 1:
         return None
     gray = np.asarray(_crop(image, search).convert("L"), dtype=np.int16)
@@ -1171,6 +1184,8 @@ def _detect_line_art_carrier(
 def _detect_carrier(
     image: Image.Image,
     plan: TextPlan,
+    *,
+    whole_canvas: bool = False,
 ) -> tuple[int, int, int, int] | None:
     """The box of the carrier the scene was asked to draw, or None.
 
@@ -1180,7 +1195,11 @@ def _detect_carrier(
     region, so it cannot swallow the whole design.
     """
     width, height = image.size
-    search = _expand(_region_box(plan.region, width, height), 0.15, width, height)
+    search = (
+        (0, 0, width, height)
+        if whole_canvas
+        else _expand(_region_box(plan.region, width, height), 0.15, width, height)
+    )
     if search[2] < 1 or search[3] < 1:
         return None
 

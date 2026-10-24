@@ -589,6 +589,39 @@ class TestTheCarrier:
         assert xs.min() >= 360 and xs.max() <= 600, "the words stay inside the outline"
         assert ys.min() >= 680, "the words are on the headstone"
 
+    def test_a_carrier_outside_the_planned_region_is_still_found(self) -> None:
+        image = Image.new("RGB", (1024, 1024), (255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        # The image model put the headstone on the right, while the plan said
+        # bottom_center. The whole-canvas second chance finds it.
+        draw.rectangle([700, 500, 900, 800], outline=(0, 0, 0), width=10, fill=(255, 255, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = composite_text(
+            buffer.getvalue(),
+            LayoutSpec(
+                layout_type="hero_top",
+                headline_text="GONE BUT NOT FORGOTTEN",
+                font_color="#1B1B1B",
+                text_plan=TextPlan(
+                    method="carved",
+                    carrier="headstone",
+                    region="bottom_center",
+                    surface="stone",
+                    ink="dark",
+                ),
+            ),
+        )
+
+        composed = np.asarray(_image(result))
+        raw = np.asarray(image)
+        changed = np.abs(composed.astype(np.int16) - raw.astype(np.int16)).sum(axis=2) > 30
+        ys, xs = np.nonzero(changed)
+
+        assert xs.min() >= 680, "the words follow the carrier out of the planned region"
+        assert ys.min() >= 490
+
     def test_a_carrier_that_is_not_there_falls_back_to_the_zone(self) -> None:
         result = composite_text(
             _canvas(),
