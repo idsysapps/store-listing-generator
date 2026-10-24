@@ -23,6 +23,7 @@ from store_listing.orchestration.design_briefs import (
     assign_batch_devices,
     assign_batch_templates,
     headline_for_text_only,
+    plan_batch_text_integration,
 )
 from store_listing.orchestration.headline_voice import normalise_voice, screen_text
 from store_listing.orchestration.idea_devices import device_for, idea_device_rules
@@ -368,6 +369,9 @@ def create_custom_brief(
     if brief.idea_device is None:
         # The model named no device we use; give the brief one anyway.
         brief = assign_batch_devices([brief], f"custom:{brief.concept}")[0]
+    # The template is known now, so the model can choose how the words live
+    # in it. A failed pass leaves the brief on the flat treatment.
+    brief = plan_batch_text_integration(llm_completions, model, [brief])[0]
 
     brief_id = db_client.insert_design_brief(
         concept=brief.concept,
@@ -388,6 +392,7 @@ def create_custom_brief(
         voice=brief.voice,
         font_family=brief.font_family,
         style_preset=brief.style_preset,
+        text_plan=brief.text_plan.to_dict() if brief.text_plan else None,
     )
 
     return {"status": "success", "brief_id": brief_id, "personal_use": personal_use}

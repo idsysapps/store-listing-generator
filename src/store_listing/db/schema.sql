@@ -175,8 +175,12 @@ CREATE TABLE design_briefs (
     -- The family the text of the design is drawn in.
     font_family VARCHAR(40),
     -- The look the design is drawn in.
-    style_preset VARCHAR(40)
+    style_preset VARCHAR(40),
+    -- How the words live in the design: method, carrier, surface, ink.
+    text_plan JSONB
 );
+
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS text_plan JSONB;
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);
 CREATE INDEX idx_design_briefs_created_at ON design_briefs(created_at);

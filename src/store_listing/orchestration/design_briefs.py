@@ -40,6 +40,7 @@ from store_listing.orchestration.design_templates import (
     LEGACY_LAYOUTS,
     TEMPLATE_IDS,
     assign_templates,
+    resolve_template,
 )
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE, normalise_voice, screen_text
 from store_listing.orchestration.idea_devices import (
@@ -60,11 +61,34 @@ from store_listing.orchestration.llm_client import (
 from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
+from store_listing.orchestration.text_integration import (
+    TextPlan,
+    build_text_plan_entries,
+    build_text_plan_prompt,
+    check_text_plan_mix,
+    read_text_plan_response,
+)
 
 logger = logging.getLogger(__name__)
 
 MAX_SEEDS_PER_BRIEF = int(os.environ.get("LLM_MAX_BRIEF_SEEDS", "20"))
 MAX_BRIEFS = int(os.environ.get("LLM_MAX_BRIEFS", "8"))
+
+
+def _text_plan_enabled() -> bool:
+    """Whether the batch gets a second pass that plans how its text lives."""
+    return os.environ.get("LLM_TEXT_PLAN", "true").lower() not in ("0", "false", "no")
+
+
+def _text_plan_regenerate_once() -> bool:
+    """Whether a batch whose text mix is poor is planned once more."""
+    return os.environ.get("LLM_TEXT_PLAN_REGENERATE", "true").lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+
+
 # Whether a batch whose text was rejected is asked for again with the reason.
 BRIEF_TEXT_REGENERATE_ONCE = os.environ.get("LLM_BRIEF_TEXT_REGENERATE", "true").lower() not in (
     "0",
@@ -201,6 +225,10 @@ class DesignBrief:
     style_preset: str | None = None
     # How the scene carries its idea: 'juxtaposition', 'transformation', ...
     idea_device: str | None = None
+    # How the words live in the design: painted into the art, carved into a
+    # stone, printed on a label. Written by the text-plan pass; None keeps the
+    # design on the flat compositor treatment it had before (issue #246).
+    text_plan: TextPlan | None = None
 
 
 class DesignBriefDBClient(Protocol):
@@ -234,6 +262,7 @@ class DesignBriefDBClient(Protocol):
         voice: str = DEFAULT_VOICE,
         font_family: str | None = None,
         style_preset: str | None = None,
+        text_plan: dict[str, Any] | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -708,6 +737,10 @@ def generate_design_briefs(
     # The idea device is rotated too, so the batch is not eight still lifes
     # (issue #240).
     kept = assign_batch_devices(kept, batch_id)
+    # Now that the templates and devices are known, the model decides how the
+    # words live in each design. It sees the whole batch and plans the mix; the
+    # code only checks the plan and renders it (issue #246).
+    kept = plan_batch_text_integration(llm_completions, model, kept)
 
     if dropped:
         logger.info(
@@ -740,6 +773,7 @@ def generate_design_briefs(
             voice=brief.voice,
             font_family=brief.font_family,
             style_preset=brief.style_preset,
+            text_plan=brief.text_plan.to_dict() if brief.text_plan else None,
         )
         linked = 0
         for seed_id in brief.source_seed_ids:
@@ -790,6 +824,138 @@ def assign_batch_devices(briefs: Sequence[DesignBrief], batch_id: str) -> list[D
         replace(brief, idea_device=device)
         for brief, device in zip(briefs, plan_device_slots(len(briefs), batch_id), strict=True)
     ]
+
+
+def _plan_entry_indexes(briefs: Sequence[DesignBrief]) -> list[int]:
+    """The positions of the briefs the text planner sees.
+
+    A full-bleed brief has no words, so it has no text plan; the other briefs
+    keep their order, which is how the 1-based answer is matched back.
+    """
+    return [
+        index
+        for index, brief in enumerate(briefs)
+        if resolve_template(brief.layout_type, brief.headline_text, brief.tagline_text)
+        != "full_bleed"
+    ]
+
+
+def plan_batch_text_integration(
+    llm_completions: Any,
+    model: str,
+    briefs: Sequence[DesignBrief],
+    extra_instructions: Sequence[str] | None = None,
+) -> list[DesignBrief]:
+    """The briefs with the model's text-integration plan attached.
+
+    This is a second pass, after the batch has its templates and idea devices.
+    It sees the template each brief will be drawn on, so the carrier it writes
+    into the scene is in the place the design expects the words. One call per
+    batch; a failed call leaves the briefs on the existing treatment.
+    """
+    result = list(briefs)
+    if not _text_plan_enabled():
+        return result
+
+    indexes = _plan_entry_indexes(result)
+    if not indexes:
+        return result
+    entries = build_text_plan_entries([result[index] for index in indexes])
+    if not entries:
+        return result
+
+    planned = _request_text_plans(llm_completions, model, entries, extra_instructions)
+    if planned is None:
+        return result
+
+    planned_briefs = _apply_text_plans(result, indexes, planned)
+    issues = check_text_plan_mix([entry.plan for entry in planned.values()])
+    if issues:
+        logger.info("The text-plan mix is uneven: %s", "; ".join(issues))
+        if len(entries) >= 4 and _text_plan_regenerate_once():
+            feedback = (
+                "The previous plan did not meet the batch mix: "
+                + "; ".join(issues)
+                + ". Rewrite the plans so the batch uses at least four methods, no "
+                "method more than twice, at most one third carriers, and at least half "
+                "with no carrier. Keep the concept fit."
+            )
+            retry = _request_text_plans(llm_completions, model, entries, [feedback])
+            if retry is not None:
+                # A retry may answer for only some briefs; keep the first plan
+                # for the ones it skipped.
+                merged = {**planned, **retry}
+                retry_issues = check_text_plan_mix([entry.plan for entry in merged.values()])
+                if len(retry_issues) < len(issues):
+                    logger.info("The second text-plan pass improved the mix")
+                    planned_briefs = _apply_text_plans(result, indexes, merged)
+                else:
+                    logger.warning(
+                        "The second text-plan pass did not improve the mix: %s",
+                        "; ".join(retry_issues),
+                    )
+    return planned_briefs
+
+
+def _request_text_plans(
+    llm_completions: Any,
+    model: str,
+    entries: list[dict[str, Any]],
+    extra_instructions: Sequence[str] | None = None,
+) -> dict[int, Any] | None:
+    """The text plans in the model's answer, or None when there are none.
+
+    A planner that fails must not lose a batch: the briefs already exist and
+    keep the treatment they had before this pass.
+    """
+    messages = build_text_plan_prompt(entries, extra_instructions)
+    raw, error = create_answer(llm_completions, model, messages, "text_plans", temperature=0)
+    if error is not None:
+        logger.warning("The text-plan pass failed: %s", error)
+        return None
+
+    try:
+        response = raw.parse()
+        if not response.choices:
+            logger.warning("The text-plan pass returned empty choices")
+            return None
+        content = response.choices[0].message.content or ""
+    except Exception as e:  # noqa: BLE001
+        logger.warning("The text-plan answer could not be read: %s", e)
+        return None
+
+    plans, parse_error = read_text_plan_response(content, len(entries))
+    if parse_error is not None:
+        logger.warning("The text-plan answer was unusable: %s", parse_error)
+        logger.warning("Raw text-plan answer: %s", content)
+        return None
+    return plans
+
+
+def _apply_text_plans(
+    briefs: list[DesignBrief],
+    indexes: Sequence[int],
+    plans: dict[int, Any],
+) -> list[DesignBrief]:
+    """The briefs with the plans and revised carrier scenes applied."""
+    result = list(briefs)
+    for number, planned in plans.items():
+        if number < 1 or number > len(indexes):
+            continue
+        index = indexes[number - 1]
+        brief = result[index]
+        scene = brief.scene_description
+        # The planner may rewrite the scene to add a carrier or to remove one
+        # the concept no longer needs. A rewritten scene is used whenever it
+        # is present; lettering was already stripped from it.
+        if planned.scene_description:
+            scene = planned.scene_description
+        result[index] = replace(
+            brief,
+            text_plan=planned.plan,
+            scene_description=scene,
+        )
+    return result
 
 
 def _merge_briefs(first: list[DesignBrief], second: list[DesignBrief]) -> list[DesignBrief]:

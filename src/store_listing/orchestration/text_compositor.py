@@ -27,9 +27,11 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 
-from PIL import Image, ImageDraw, ImageFont
+import numpy as np
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from store_listing.orchestration.design_templates import resolve_template, template_for
+from store_listing.orchestration.text_integration import TextPlan
 from store_listing.orchestration.typography import (
     DEFAULT_FONT,
     TextTreatment,
@@ -105,6 +107,9 @@ class LayoutSpec:
     voice: str = "deadpan"
     # A treatment that replaces the one of the voice.
     treatment_override: TextTreatment | None = None
+    # How the words live in the design. Without a plan the design keeps the
+    # flat compositor treatment it had before (issue #246).
+    text_plan: TextPlan | None = None
 
     def __post_init__(self) -> None:
         self.layout_type = resolve_template(self.layout_type, self.headline_text, self.tagline_text)
@@ -636,6 +641,13 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec, *, transparent: bool 
     text_width = width - 2 * margin_x
     treatment = layout.treatment
 
+    if layout.text_plan is not None and (
+        layout.text_plan.method != "typographic" or layout.text_plan.needs_carrier
+    ):
+        planned = _composite_planned(image, layout, transparent=transparent)
+        if planned is not None:
+            return planned
+
     if layout.layout_type == "text_only":
         _draw_text_only(
             draw,
@@ -709,6 +721,468 @@ def _composite(image: Image.Image, overlay: Image.Image) -> bytes:
     buffer = BytesIO()
     result.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+# The colours the compositor looks for when it has to find a carrier. The
+# names are the surface vocabulary of the text plan. A surface has several
+# shades because the image model draws the same wood light or dark, and a
+# single swatch would miss half of them.
+SURFACE_COLOURS: dict[str, tuple[tuple[int, int, int], ...]] = {
+    "paper": ((246, 241, 232), (255, 255, 255), (228, 218, 200)),
+    "kraft": ((193, 154, 107), (160, 120, 80), (210, 175, 130)),
+    "wood": ((139, 94, 60), (101, 67, 33), (180, 130, 90), (80, 55, 35)),
+    "chalkboard": ((35, 40, 38), (50, 55, 52), (20, 25, 24)),
+    "metal": ((168, 173, 178), (120, 125, 130), (200, 205, 210)),
+    "stone": ((140, 140, 135), (110, 110, 105), (170, 170, 165), (90, 90, 85)),
+    "fabric": ((201, 181, 155), (150, 130, 110), (220, 205, 185)),
+    "glass": ((190, 214, 220), (150, 180, 190), (220, 235, 240)),
+    "none": ((246, 241, 232),),
+}
+
+# The nine zones of the canvas, as (x, y, width, height) shares. They overlap
+# so a carrier near a boundary is still found.
+_REGION_RECTS: dict[str, tuple[float, float, float, float]] = {
+    "top_left": (0.0, 0.0, 0.5, 0.5),
+    "top_center": (0.25, 0.0, 0.5, 0.5),
+    "top_right": (0.5, 0.0, 0.5, 0.5),
+    "middle_left": (0.0, 0.25, 0.5, 0.5),
+    "center": (0.25, 0.25, 0.5, 0.5),
+    "middle_right": (0.5, 0.25, 0.5, 0.5),
+    "bottom_left": (0.0, 0.5, 0.5, 0.5),
+    "bottom_center": (0.25, 0.5, 0.5, 0.5),
+    "bottom_right": (0.5, 0.5, 0.5, 0.5),
+    "any": (0.0, 0.0, 1.0, 1.0),
+}
+
+
+def _composite_planned(
+    image: Image.Image, layout: LayoutSpec, *, transparent: bool
+) -> bytes | None:
+    """Draw the text the way the brief planned it.
+
+    Without a carrier the template's text zone is the surface. With one, the
+    compositor looks for the carrier in the planned region and fits the text
+    to it; a carrier that is not there falls back to the zone, so the design
+    never loses its words.
+    """
+    plan = layout.text_plan
+    if plan is None:
+        return None
+
+    width, height = image.size
+    template = template_for(layout.layout_type)
+    margin_x = int(width * MARGIN_X)
+    text_width = width - 2 * margin_x
+
+    headline_box: tuple[int, int, int, int] | None = None
+    tagline_box: tuple[int, int, int, int] | None = None
+    if layout.layout_type == "text_only":
+        headline_box = (
+            margin_x,
+            int(height * TEXT_ONLY_HEADLINE_TOP),
+            text_width,
+            int(height * TEXT_ONLY_HEADLINE_HEIGHT),
+        )
+        tagline_box = (
+            margin_x,
+            int(height * TEXT_ONLY_TAGLINE_TOP),
+            text_width,
+            int(height * TEXT_ONLY_TAGLINE_HEIGHT),
+        )
+    else:
+        if template.headline is not None:
+            headline_box = _box(template.headline, width, height)
+        if template.tagline is not None:
+            tagline_box = _box(template.tagline, width, height)
+
+    surface_colour: tuple[int, int, int] | None = None
+    method = plan.method
+    if plan.needs_carrier:
+        # The template zone is where a carrier that fits the layout would be;
+        # the planned region is where the brief put it. Detection searches
+        # their overlap, and the region alone when they do not meet.
+        zone = (
+            headline_box
+            or tagline_box
+            or (
+                int(width * 0.1),
+                int(height * 0.4),
+                int(width * 0.8),
+                int(height * 0.2),
+            )
+        )
+        detected = _detect_carrier(image, plan, zone)
+        carrier = detected or _fallback_band(plan, headline_box, tagline_box, width, height)
+        if detected is None:
+            # The carrier was not drawn, or not where the plan said. The
+            # model's own non-carrier alternative is the fallback; the words
+            # still go where the carrier was meant to be.
+            method = plan.non_carrier_method or plan.method
+        surface_colour = _mean_colour(image, carrier) or _surface_colour(plan.surface)
+        if layout.headline_text and layout.tagline_text:
+            headline_box = (
+                carrier[0],
+                carrier[1] + int(carrier[3] * 0.06),
+                carrier[2],
+                int(carrier[3] * 0.58),
+            )
+            tagline_box = (
+                carrier[0],
+                carrier[1] + int(carrier[3] * 0.68),
+                carrier[2],
+                int(carrier[3] * 0.24),
+            )
+        elif layout.headline_text:
+            headline_box = carrier
+        elif layout.tagline_text:
+            tagline_box = carrier
+    else:
+        sample = headline_box or tagline_box
+        if sample is not None:
+            surface_colour = _mean_colour(image, sample)
+
+    ink = _resolve_ink(plan, layout.font_color, surface_colour)
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    align = "center" if plan.needs_carrier else template.align
+    if layout.headline_text and headline_box is not None:
+        _draw_text(
+            draw,
+            layout.headline_text,
+            color=ink,
+            box=headline_box,
+            family=layout.family,
+            treatment=layout.treatment,
+            align=align,
+            force_outline=transparent,
+        )
+    if layout.tagline_text and tagline_box is not None:
+        if template.arc_tagline and not plan.needs_carrier:
+            _draw_arc_text(
+                draw,
+                layout.tagline_text,
+                color=ink,
+                box=tagline_box,
+                family=layout.tagline_family,
+                treatment=layout.treatment,
+                force_outline=transparent,
+            )
+        else:
+            _draw_text(
+                draw,
+                layout.tagline_text,
+                color=ink,
+                box=tagline_box,
+                family=layout.tagline_family,
+                treatment=layout.treatment,
+                align=align,
+                force_outline=transparent,
+            )
+
+    overlay = apply_material(overlay, method, ink, surface_colour)
+    return _composite(image, overlay)
+
+
+def _crop(image: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
+    """A crop of a (x, y, width, height) box.
+
+    Pillow's crop takes the right and bottom edges, not a size, and mixing the
+    two conventions silently crops nothing.
+    """
+    x, y, width, height = box
+    return image.crop((x, y, x + width, y + height))
+
+
+def _region_box(region: str, width: int, height: int) -> tuple[int, int, int, int]:
+    x, y, box_width, box_height = _REGION_RECTS.get(region, _REGION_RECTS["any"])
+    return (
+        int(x * width),
+        int(y * height),
+        int(box_width * width),
+        int(box_height * height),
+    )
+
+
+def _expand(
+    box: tuple[int, int, int, int], share: float, width: int, height: int
+) -> tuple[int, int, int, int]:
+    dx = int(box[2] * share)
+    dy = int(box[3] * share)
+    x = max(0, box[0] - dx)
+    y = max(0, box[1] - dy)
+    return (x, y, min(width, box[0] + box[2] + dx) - x, min(height, box[1] + box[3] + dy) - y)
+
+
+def _intersection(
+    first: tuple[int, int, int, int], second: tuple[int, int, int, int]
+) -> tuple[int, int, int, int] | None:
+    x = max(first[0], second[0])
+    y = max(first[1], second[1])
+    right = min(first[0] + first[2], second[0] + second[2])
+    bottom = min(first[1] + first[3], second[1] + second[3])
+    if right <= x or bottom <= y:
+        return None
+    return (x, y, right - x, bottom - y)
+
+
+def _fallback_band(
+    plan: TextPlan,
+    headline_box: tuple[int, int, int, int] | None,
+    tagline_box: tuple[int, int, int, int] | None,
+    width: int,
+    height: int,
+) -> tuple[int, int, int, int]:
+    """Where the words go when the carrier is not there.
+
+    A template zone that overlaps the planned region wins; otherwise a band
+    in the middle of the region, which is where the brief put the carrier.
+    """
+    region = _region_box(plan.region, width, height)
+    for zone in (headline_box, tagline_box):
+        if zone is None:
+            continue
+        overlap = _intersection(region, zone)
+        if overlap is not None:
+            return overlap
+    return (
+        region[0] + int(region[2] * 0.08),
+        region[1] + int(region[3] * 0.35),
+        int(region[2] * 0.84),
+        int(region[3] * 0.30),
+    )
+
+
+def _detect_carrier(
+    image: Image.Image,
+    plan: TextPlan,
+    fallback: tuple[int, int, int, int],
+) -> tuple[int, int, int, int] | None:
+    """The box of the carrier the scene was asked to draw, or None.
+
+    The search starts in the planned region, clipped to the template's zone
+    when they overlap. The surface colour is the hint; the largest block of
+    that colour is the carrier. A flat canvas that happens to match the hint
+    is still bounded by the zone, so it cannot swallow the whole design.
+    """
+    width, height = image.size
+    region = _region_box(plan.region, width, height)
+    if plan.region == "any":
+        # The brief did not commit to a zone, so the carrier may be anywhere.
+        search = region
+    else:
+        expanded = _expand(fallback, 0.15, width, height)
+        overlap = _intersection(expanded, region)
+        search = (
+            overlap if overlap is not None and overlap[2] >= 40 and overlap[3] >= 20 else region
+        )
+    if search[2] < 1 or search[3] < 1:
+        return None
+
+    # int32: a squared channel difference is up to 65025, which overflows
+    # int16 and turns the distance into garbage.
+    targets = np.array(_surface_colours(plan.surface), dtype=np.int32)
+    rgba = np.asarray(_crop(image, search).convert("RGBA"), dtype=np.int32)
+    rgb = rgba[:, :, :3]
+    differences = rgb[:, :, None, :] - targets[None, None, :, :]
+    distance = np.sqrt((differences**2).sum(axis=3)).min(axis=2)
+    mask = (distance <= 60) & (rgba[:, :, 3] > 20)
+    if int(mask.sum()) < 200 or int(mask.sum()) < int(mask.size * 0.005):
+        return None
+
+    ys, xs = np.nonzero(mask)
+    x0, x1 = int(xs.min()), int(xs.max())
+    y0, y1 = int(ys.min()), int(ys.max())
+    box_width = x1 - x0 + 1
+    box_height = y1 - y0 + 1
+    if box_width < 40 or box_height < 20:
+        return None
+
+    # Stay inside the surface: the text should not spill over its edge.
+    inset_x = max(2, int(box_width * 0.04))
+    inset_y = max(2, int(box_height * 0.04))
+    return (
+        search[0] + x0 + inset_x,
+        search[1] + y0 + inset_y,
+        max(1, box_width - 2 * inset_x),
+        max(1, box_height - 2 * inset_y),
+    )
+
+
+def _surface_colours(surface: str) -> tuple[tuple[int, int, int], ...]:
+    return SURFACE_COLOURS.get(surface, SURFACE_COLOURS["paper"])
+
+
+def _surface_colour(surface: str) -> tuple[int, int, int]:
+    return _surface_colours(surface)[0]
+
+
+def _mean_colour(image: Image.Image, box: tuple[int, int, int, int]) -> tuple[int, int, int] | None:
+    """The average visible colour of a box, ignoring transparent pixels."""
+    if box[2] < 1 or box[3] < 1:
+        return None
+    pixels = np.asarray(_crop(image, box).convert("RGBA"), dtype=np.float32)
+    visible = pixels[pixels[:, :, 3] > 20]
+    if visible.size == 0:
+        return None
+    mean = visible[:, :3].mean(axis=0)
+    return (int(mean[0]), int(mean[1]), int(mean[2]))
+
+
+def _rgb(colour: str) -> tuple[int, int, int]:
+    value = colour.lstrip("#")
+    if len(value) != 6:
+        return (0, 0, 0)
+    try:
+        return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+    except ValueError:
+        return (0, 0, 0)
+
+
+def _luminance(colour: tuple[int, int, int]) -> float:
+    return (0.299 * colour[0] + 0.587 * colour[1] + 0.114 * colour[2]) / 255
+
+
+def _resolve_ink(
+    plan: TextPlan,
+    font_color: str,
+    surface: tuple[int, int, int] | None,
+) -> str:
+    """The colour the words are drawn in, made legible on their surface.
+
+    The model picks the ink; the compositor has the final say when the choice
+    would disappear into the carrier, because a design whose text the OCR gate
+    cannot read is a design that never ships.
+    """
+    if plan.ink == "accent":
+        ink = accent_for(font_color)
+    elif plan.ink == "light":
+        ink = "#F7F3E8"
+    elif plan.ink == "dark":
+        ink = "#111111"
+    else:
+        ink = plan.ink
+
+    if surface is not None and abs(_luminance(_rgb(ink)) - _luminance(surface)) < 0.32:
+        return "#F7F3E8" if _luminance(surface) < 0.5 else "#111111"
+    return ink
+
+
+def _tinted(
+    size: tuple[int, int],
+    colour: tuple[int, int, int],
+    mask: Image.Image,
+    opacity: int = 255,
+) -> Image.Image:
+    layer = Image.new("RGBA", size, (0, 0, 0, 0))
+    solid = Image.new("RGBA", size, (*colour, opacity))
+    layer.paste(solid, (0, 0), mask)
+    return layer
+
+
+def _offset(layer: Image.Image, dx: int, dy: int) -> Image.Image:
+    result = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+    result.paste(layer, (dx, dy), layer)
+    return result
+
+
+_STICKER_THRESHOLD = [0 if value <= 30 else 255 for value in range(256)]
+_INSET_ALPHA = [int(value * 0.9) for value in range(256)]
+_PAINT_GRAIN = [200 + value * 55 // 255 for value in range(256)]
+
+
+def apply_material(
+    overlay: Image.Image,
+    method: str,
+    ink: str,
+    surface: tuple[int, int, int] | None = None,
+) -> Image.Image:
+    """Apply the material of a text plan to a drawn text layer.
+
+    Barriers are deliberately light: the OCR gate reads the raw render, so a
+    texture may not eat the letters. Each material changes the edge, the
+    shadow or the surround, not the glyphs themselves.
+    """
+    alpha = overlay.getchannel("A")
+    if method == "sticker":
+        mask = alpha.point(_STICKER_THRESHOLD)
+        border = mask.filter(ImageFilter.MaxFilter(7))
+        shadow = _offset(
+            _tinted(overlay.size, (0, 0, 0), border.filter(ImageFilter.GaussianBlur(1.6)), 90),
+            3,
+            3,
+        )
+        white = _tinted(overlay.size, (255, 255, 255), border, 255)
+        return Image.alpha_composite(Image.alpha_composite(shadow, white), overlay)
+
+    if method == "neon":
+        colour = _rgb(ink)
+        wide = _tinted(overlay.size, colour, alpha.filter(ImageFilter.GaussianBlur(18)), 200)
+        tight = _tinted(overlay.size, colour, alpha.filter(ImageFilter.GaussianBlur(6)), 240)
+        return Image.alpha_composite(Image.alpha_composite(wide, tight), overlay)
+
+    if method == "embroidery":
+        # The bevel is the raised edge of the thread; the diagonal lines over
+        # the fill are the stitches themselves. Both are light enough that the
+        # OCR gate still reads the raw render.
+        dark = _offset(_tinted(overlay.size, (0, 0, 0), alpha, 110), 1, 1)
+        light = _offset(_tinted(overlay.size, (255, 255, 255), alpha, 110), -1, -1)
+        width, height = overlay.size
+        pattern = Image.new("L", overlay.size, 0)
+        pattern_draw = ImageDraw.Draw(pattern)
+        step = max(5, min(width, height) // 55)
+        for x in range(-height, width + height, step):
+            pattern_draw.line(
+                [(x, 0), (x + height, height)],
+                fill=190,
+                width=max(2, step // 2),
+            )
+        stitches = _tinted(
+            overlay.size,
+            (255, 255, 255) if _luminance(_rgb(ink)) < 0.5 else (0, 0, 0),
+            ImageChops.multiply(alpha, pattern),
+            80,
+        )
+        base = Image.alpha_composite(dark, light)
+        return Image.alpha_composite(Image.alpha_composite(base, overlay), stitches)
+
+    if method == "carved":
+        light = _offset(_tinted(overlay.size, (255, 255, 255), alpha, 150), -1, -1)
+        dark = _offset(_tinted(overlay.size, (0, 0, 0), alpha, 160), 1, 1)
+        inset = overlay.copy()
+        inset.putalpha(alpha.point(_INSET_ALPHA))
+        return Image.alpha_composite(Image.alpha_composite(light, dark), inset)
+
+    if method == "chalk":
+        rough = alpha.filter(ImageFilter.GaussianBlur(0.9))
+        dust = _offset(_tinted(overlay.size, _rgb(ink), rough, 55), 1, 1)
+        return Image.alpha_composite(dust, overlay)
+
+    if method == "printed":
+        shadow = _offset(_tinted(overlay.size, (0, 0, 0), alpha, 50), 1, 1)
+        return Image.alpha_composite(shadow, overlay)
+
+    if method == "painted":
+        # Paint sinks into the surface: a darker bleed under the edge, and a
+        # grain in the fill. The grain never drops below 200/255, so the ink
+        # stays readable.
+        colour = _rgb(ink)
+        bleed_colour = (
+            max(0, colour[0] - 40),
+            max(0, colour[1] - 40),
+            max(0, colour[2] - 40),
+        )
+        bleed = _tinted(
+            overlay.size, bleed_colour, alpha.filter(ImageFilter.GaussianBlur(1.2)), 130
+        )
+        shadow = _offset(_tinted(overlay.size, (0, 0, 0), alpha, 60), 2, 2)
+        grain = Image.effect_noise(overlay.size, 40).convert("L").point(_PAINT_GRAIN)
+        grain_rgb = Image.merge("RGB", (grain, grain, grain))
+        textured = ImageChops.multiply(overlay.convert("RGB"), grain_rgb).convert("RGBA")
+        textured.putalpha(alpha)
+        return Image.alpha_composite(Image.alpha_composite(shadow, bleed), textured)
+
+    return overlay
 
 
 def _draw_text_only(

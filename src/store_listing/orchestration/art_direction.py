@@ -176,14 +176,21 @@ def prompt_for(preset: Preset | None) -> str:
     return preset.prompt if preset else ""
 
 
-def negative_for(preset: Preset | None) -> str:
+def negative_for(preset: Preset | None, *, allow_surface: bool = False) -> str:
     """What the image model is told not to draw.
 
     The background is not on this list: the background instruction comes last
     in the prompt, so the magenta of a DTF render and the paper of a
     print-through product are never painted over (issue #188).
+
+    ``allow_surface`` is for a design whose text lives on a carrier: the
+    carrier is a surface in the picture, so the look must not forbid one
+    (issue #246). The lettering is still forbidden: the carrier is blank.
     """
-    parts = ["no paper texture", "no background texture", "no surface", "no lettering"]
+    parts = ["no paper texture", "no background texture"]
+    if not allow_surface:
+        parts.append("no surface")
+    parts.append("no lettering")
     if preset:
         parts.append(preset.negative)
     return ", ".join(parts)

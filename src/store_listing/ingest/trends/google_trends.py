@@ -539,10 +539,12 @@ class DatabaseClient:
         voice: str = DEFAULT_VOICE,
         font_family: str | None = None,
         style_preset: str | None = None,
+        text_plan: dict[str, Any] | None = None,
     ) -> int:
         import json as _json
 
         materials_json = _json.dumps(recommended_materials) if recommended_materials else None
+        text_plan_json = _json.dumps(text_plan) if text_plan else None
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -551,8 +553,8 @@ class DatabaseClient:
                      visual_style, confidence, reasoning, llm_model, batch_id,
                      layout_type, headline_text, tagline_text, font_color,
                      scene_description, personal_use, recommended_materials, voice,
-                     font_family, style_preset)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     font_family, style_preset, text_plan)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -575,6 +577,7 @@ class DatabaseClient:
                     voice,
                     font_family,
                     style_preset,
+                    text_plan_json,
                 ),
             )
             result = cur.fetchone()
@@ -611,7 +614,7 @@ class DatabaseClient:
                     SELECT id, concept, product_type, audience, visual_style,
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
-                           voice, font_family, style_preset
+                           voice, font_family, style_preset, text_plan
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND product_type = ANY(%s)
@@ -626,7 +629,7 @@ class DatabaseClient:
                     SELECT id, concept, product_type, audience, visual_style,
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
-                           voice, font_family, style_preset
+                           voice, font_family, style_preset, text_plan
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                     ORDER BY created_at DESC
@@ -653,6 +656,7 @@ class DatabaseClient:
                     "voice": row[12] or DEFAULT_VOICE,
                     "font_family": row[13],
                     "style_preset": row[14],
+                    "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
                 }
                 for row in cur.fetchall()
             ]
@@ -665,7 +669,8 @@ class DatabaseClient:
                 """
                 SELECT id, concept, product_type, audience, visual_style,
                        layout_type, headline_text, tagline_text, font_color,
-                       regeneration_feedback, scene_description, recommended_materials
+                       regeneration_feedback, scene_description, recommended_materials,
+                       voice, font_family, style_preset, text_plan
                 FROM design_briefs
                 WHERE id = %s
                 """,
@@ -689,6 +694,10 @@ class DatabaseClient:
                 "recommended_materials": (
                     _json.loads(row[11]) if isinstance(row[11], str) else row[11]
                 ),
+                "voice": row[12] or DEFAULT_VOICE,
+                "font_family": row[13],
+                "style_preset": row[14],
+                "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
             }
 
     def list_active_materials(

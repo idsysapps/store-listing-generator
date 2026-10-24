@@ -186,7 +186,22 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     # The composition of the template, including the space the text needs. It
     # replaced the fixed "compact centered composition" that made every design
     # an object in the middle (issue #238).
-    parts.append(composition_for(template_id, brief.concept))
+    composition = composition_for(template_id, brief.concept)
+    carrier = brief.text_plan is not None and brief.text_plan.needs_carrier
+    if carrier:
+        # The clear band the template reserved for type now holds the carrier
+        # the brief wrote into the scene. The compositor finds that object and
+        # draws the words on it (issue #246). The band is no longer empty, so
+        # the composition must not call it empty.
+        composition = (
+            composition.replace("clear empty band", "clear band")
+            .replace("clear and empty", "clear")
+            .replace("plain background only", "only the blank carrier described above")
+        )
+        parts.append("The blank carrier is part of the illustration and has no lettering on it.")
+        if brief.text_plan and brief.text_plan.carrier_description:
+            parts.append(f"The blank carrier: {brief.text_plan.carrier_description}.")
+    parts.append(composition)
 
     # The background comes last so that it survives a visual style that asks
     # for something else (issue #188).
@@ -204,8 +219,13 @@ def build_negative_prompt(brief: DesignBrief) -> str:
     The negative prompt keeps the look of the design and keeps the paper
     clean: a texture that is painted on the background would survive the DTF
     cutout as a grey rectangle and would wreck the despill (issue #227).
+
+    A planned carrier is a surface in the picture, so the look must not
+    forbid one; the carrier is still blank, so lettering stays forbidden
+    (issue #246).
     """
-    return negative_for(preset_for(brief.style_preset))
+    allow_surface = brief.text_plan is not None and brief.text_plan.needs_carrier
+    return negative_for(preset_for(brief.style_preset), allow_surface=allow_surface)
 
 
 def generate_image(

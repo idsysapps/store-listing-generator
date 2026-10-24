@@ -21,6 +21,8 @@ data:
   LLM_DESIGN_BRIEFS_ENABLED: {{ .Values.config.llmDesignBriefsEnabled | default "false" | quote }}
   LLM_MAX_BRIEFS: {{ .Values.config.llmMaxBriefs | default "8" | quote }}
   LLM_MAX_BRIEF_SEEDS: {{ .Values.config.llmMaxBriefSeeds | default "20" | quote }}
+  LLM_TEXT_PLAN: {{ .Values.config.llmTextPlan | default "true" | quote }}
+  LLM_TEXT_PLAN_REGENERATE: {{ .Values.config.llmTextPlanRegenerate | default "true" | quote }}
   LLM_MAX_ACTIVE_SEEDS: {{ .Values.config.llmMaxActiveSeeds | default "200" | quote }}
   LLM_MIN_BRIEFABLE_SEEDS: {{ .Values.config.llmMinBriefableSeeds | default "30" | quote }}
   LLM_BRIEF_SEED_COOLDOWN_DAYS: {{ .Values.config.llmBriefSeedCooldownDays | default "14" | quote }}
@@ -203,7 +205,9 @@ data:
         -- The family the text of the design is drawn in.
         font_family VARCHAR(40),
         -- The look the design is drawn in.
-        style_preset VARCHAR(40)
+        style_preset VARCHAR(40),
+        -- How the words live in the design: method, carrier, surface, ink.
+        text_plan JSONB
     );
 
     CREATE INDEX IF NOT EXISTS idx_design_briefs_product_type ON design_briefs(product_type);
@@ -493,6 +497,8 @@ data:
 
     -- Add recommended_materials to design_briefs
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS recommended_materials JSONB;
+    -- How the words live in the design: method, carrier, surface, ink.
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS text_plan JSONB;
 
     -- Table: app_settings (the settings the operator can change without a
     -- redeploy, e.g. which product types the pipeline produces)
