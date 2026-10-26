@@ -700,6 +700,67 @@ class DatabaseClient:
                 "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
             }
 
+    def list_briefs_by_batch(self, batch_id: str) -> list[dict[str, Any]]:
+        """Every brief in a batch, with the plan it already has."""
+        import json as _json
+
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, concept, product_type, audience, visual_style,
+                       layout_type, headline_text, tagline_text, font_color,
+                       regeneration_feedback, scene_description, recommended_materials,
+                       voice, font_family, style_preset, text_plan
+                FROM design_briefs
+                WHERE batch_id = %s
+                ORDER BY id
+                """,
+                (batch_id,),
+            )
+            return [
+                {
+                    "id": row[0],
+                    "concept": row[1],
+                    "product_type": row[2],
+                    "audience": row[3],
+                    "visual_style": row[4],
+                    "layout_type": row[5] or "full_bleed",
+                    "headline_text": row[6],
+                    "tagline_text": row[7],
+                    "font_color": row[8],
+                    "regeneration_feedback": row[9],
+                    "scene_description": row[10],
+                    "recommended_materials": (
+                        _json.loads(row[11]) if isinstance(row[11], str) else row[11]
+                    ),
+                    "voice": row[12] or DEFAULT_VOICE,
+                    "font_family": row[13],
+                    "style_preset": row[14],
+                    "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
+                }
+                for row in cur.fetchall()
+            ]
+
+    def update_brief_text_plan(
+        self,
+        brief_id: int,
+        text_plan: dict[str, Any] | None,
+        scene_description: str | None,
+    ) -> None:
+        """Store a replanned text treatment and the scene that carries it."""
+        import json as _json
+
+        plan_json = _json.dumps(text_plan) if text_plan else None
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE design_briefs
+                SET text_plan = %s, scene_description = %s
+                WHERE id = %s
+                """,
+                (plan_json, scene_description, brief_id),
+            )
+
     def list_active_materials(
         self,
         product_type: str | None = None,

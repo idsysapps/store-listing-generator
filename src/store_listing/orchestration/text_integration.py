@@ -21,7 +21,7 @@ import json
 import logging
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final, Protocol
 
@@ -39,6 +39,7 @@ __all__ = [
     "TextPlan",
     "build_text_plan_entries",
     "build_text_plan_prompt",
+    "check_text_plan_fit",
     "check_text_plan_mix",
     "read_text_plan_response",
     "text_integration_rules",
@@ -57,6 +58,11 @@ METHODS: Final[tuple[str, ...]] = (
     "neon",
     "typographic",
 )
+
+# A method that cuts or stitches needs a surface. The compositor can draw the
+# material on the art, but the plan has to name the object it belongs to or
+# the words float in the template band (issue #246).
+SURFACE_METHODS: Final[frozenset[str]] = frozenset({"carved", "embroidery"})
 
 # What the words sit on. A carrier is optional: the concept decides.
 CARRIERS: Final[tuple[str, ...]] = (
@@ -306,7 +312,11 @@ def text_integration_rules() -> str:
         "apparel, screen. Combine a method and a carrier freely: embroidered on a "
         "banner, letterpress on a label, carved into a headstone, painted on a sign. "
         "A carrier is an object in the illustration, not a mockup of the product for "
-        "sale; use 'apparel' only when a garment is part of the concept.\n"
+        "sale. A DTF design is print artwork: never use 'apparel' as a carrier, "
+        "because a garment in the scene is a product mockup.\n"
+        "- carved and embroidery need a surface: give them a carrier. painted, printed, "
+        "sticker, chalk, neon and typographic can work in the art without one.\n"
+        "- typographic means the type is the design: use it with carrier 'none' only.\n"
         "- reason: one sentence that says why this integration fits this concept.\n"
         "- surface is the material of the carrier; use 'none' only when the carrier is "
         "'none'. The compositor uses it to find the carrier in the picture.\n"
@@ -347,6 +357,9 @@ class _PlannableBrief(Protocol):
     def concept(self) -> str: ...
 
     @property
+    def product_type(self) -> str: ...
+
+    @property
     def headline_text(self) -> str | None: ...
 
     @property
@@ -366,6 +379,9 @@ class _PlannableBrief(Protocol):
 
     @property
     def layout_type(self) -> str: ...
+
+    @property
+    def text_plan(self) -> TextPlan | None: ...
 
 
 def build_text_plan_entries(briefs: Sequence[_PlannableBrief]) -> list[dict[str, Any]]:
@@ -387,12 +403,14 @@ def build_text_plan_entries(briefs: Sequence[_PlannableBrief]) -> list[dict[str,
             {
                 "brief": len(entries) + 1,
                 "concept": brief.concept,
+                "product_type": brief.product_type,
                 "headline": brief.headline_text,
                 "tagline": brief.tagline_text,
                 "scene": brief.scene_description,
                 "voice": brief.voice,
                 "style_preset": brief.style_preset,
                 "idea_device": brief.idea_device,
+                "previous_plan": brief.text_plan.to_dict() if brief.text_plan else None,
                 "template": {
                     "id": template.id,
                     "label": template.label,
@@ -502,4 +520,42 @@ def check_text_plan_mix(plans: Sequence[TextPlan]) -> list[str]:
     if carriers > 0 and len(plans) - carriers < (len(plans) + 1) // 2:
         issues.append("at least half of the designs must use a method with no carrier")
 
+    return issues
+
+
+def check_text_plan_fit(
+    entries: Sequence[dict[str, Any]],
+    plans: Mapping[int, PlannedText],
+) -> list[str]:
+    """The ways a plan contradicts its product or its own method, if any.
+
+    These are not style preferences. A garment carrier on a DTF design asks
+    the image model for a product mockup; a carved or embroidered plan with
+    no carrier asks the compositor to engrave words into nothing. The model
+    gets the same one feedback retry as a poor mix; the code only checks.
+    """
+    issues: list[str] = []
+    for number, planned in sorted(plans.items()):
+        if number < 1 or number > len(entries):
+            continue
+        entry = entries[number - 1]
+        plan = planned.plan
+        product = str(entry.get("product_type") or "")
+        if product == "dtf_apparel" and plan.carrier == "apparel":
+            issues.append(
+                f"brief {number} uses 'apparel' as a carrier on a DTF design; a "
+                "garment is a product mockup, not artwork. Choose a sign, label, "
+                "banner, ticket, book, packaging, headstone or screen, or no carrier"
+            )
+        if plan.method in SURFACE_METHODS and plan.carrier == "none":
+            issues.append(
+                f"brief {number} uses {plan.method} with no carrier; that method "
+                "needs a surface. Choose a carrier, or use painted, printed, chalk, "
+                "sticker, neon or typographic"
+            )
+        if plan.method == "typographic" and plan.carrier != "none":
+            issues.append(
+                f"brief {number} uses typographic with carrier '{plan.carrier}'; "
+                "typographic needs no surface"
+            )
     return issues
