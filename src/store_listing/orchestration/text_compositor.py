@@ -1314,7 +1314,9 @@ def _offset(layer: Image.Image, dx: int, dy: int) -> Image.Image:
 
 _STICKER_THRESHOLD = [0 if value <= 30 else 255 for value in range(256)]
 _INSET_ALPHA = [int(value * 0.9) for value in range(256)]
-_PAINT_GRAIN = [200 + value * 55 // 255 for value in range(256)]
+# The fill of a painted word keeps a brush grain, but a light one: a 22%
+# stipple made the letters read as a halftone screen from across the room.
+_PAINT_GRAIN = [225 + value * 30 // 255 for value in range(256)]
 
 
 def apply_material(
