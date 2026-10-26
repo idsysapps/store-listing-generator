@@ -603,6 +603,29 @@ def rerank_design_briefs_task() -> dict:
 
 
 @celery_app.task
+def replan_design_briefs_task(batch_id: str, feedback: str | None = None) -> dict:
+    """Rewrite the text plans of an existing batch before re-rendering it."""
+    from store_listing.orchestration.design_briefs import replan_batch
+    from store_listing.orchestration.llm_client import configured, get_llm_client, get_llm_model
+
+    if not configured():
+        return {"status": "skipped", "reason": "LLM_API_KEY not set"}
+
+    client = get_llm_client()
+    model = get_llm_model()
+    _check_llm_model(client, model)
+    result = replan_batch(
+        client.chat.completions,
+        model,
+        DatabaseClient(),
+        batch_id,
+        [feedback] if feedback else None,
+    )
+    result["llm_model"] = model
+    return result
+
+
+@celery_app.task
 def generate_design_images_task() -> dict:
     """Generate images for design briefs via ComfyUI on the DGX, store in S3, update DB."""
     import boto3

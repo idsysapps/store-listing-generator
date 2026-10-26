@@ -62,11 +62,15 @@ from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 from store_listing.orchestration.text_integration import (
+    SURFACE_METHODS,
+    PlannedText,
     TextPlan,
     build_text_plan_entries,
     build_text_plan_prompt,
+    check_text_plan_fit,
     check_text_plan_mix,
     read_text_plan_response,
+    text_plan_from_value,
 )
 
 logger = logging.getLogger(__name__)
@@ -869,30 +873,33 @@ def plan_batch_text_integration(
         return result
 
     planned_briefs = _apply_text_plans(result, indexes, planned)
-    issues = check_text_plan_mix([entry.plan for entry in planned.values()])
+    mix_issues = check_text_plan_mix([entry.plan for entry in planned.values()])
+    fit_issues = check_text_plan_fit(entries, planned)
+    issues = fit_issues + mix_issues
     if issues:
-        logger.info("The text-plan mix is uneven: %s", "; ".join(issues))
-        if len(entries) >= 4 and _text_plan_regenerate_once():
+        logger.info("The text plan needs another pass: %s", "; ".join(issues))
+        if _text_plan_regenerate_once():
             feedback = (
-                "The previous plan did not meet the batch mix: "
+                "The previous plan did not pass the checks: "
                 + "; ".join(issues)
-                + ". Rewrite the plans so the batch uses at least four methods, no "
-                "method more than twice, at most one third carriers, and at least half "
-                "with no carrier. Keep the concept fit."
+                + ". Fix every issue and keep the concept fit. When the batch has four "
+                "or more briefs, use at least four methods, no method more than twice, "
+                "at most one third carriers, and at least half with no carrier."
             )
             retry = _request_text_plans(llm_completions, model, entries, [feedback])
             if retry is not None:
                 # A retry may answer for only some briefs; keep the first plan
                 # for the ones it skipped.
                 merged = {**planned, **retry}
-                retry_issues = check_text_plan_mix([entry.plan for entry in merged.values()])
-                if len(retry_issues) < len(issues):
-                    logger.info("The second text-plan pass improved the mix")
+                retry_fit = check_text_plan_fit(entries, merged)
+                retry_mix = check_text_plan_mix([entry.plan for entry in merged.values()])
+                if (len(retry_fit), len(retry_mix)) < (len(fit_issues), len(mix_issues)):
+                    logger.info("The second text-plan pass improved the plan")
                     planned_briefs = _apply_text_plans(result, indexes, merged)
                 else:
                     logger.warning(
-                        "The second text-plan pass did not improve the mix: %s",
-                        "; ".join(retry_issues),
+                        "The second text-plan pass did not improve the plan: %s",
+                        "; ".join(retry_fit + retry_mix),
                     )
     return planned_briefs
 
@@ -902,7 +909,7 @@ def _request_text_plans(
     model: str,
     entries: list[dict[str, Any]],
     extra_instructions: Sequence[str] | None = None,
-) -> dict[int, Any] | None:
+) -> dict[int, PlannedText] | None:
     """The text plans in the model's answer, or None when there are none.
 
     A planner that fails must not lose a batch: the briefs already exist and
@@ -932,10 +939,47 @@ def _request_text_plans(
     return plans
 
 
+def _sanitise_text_plan(plan: TextPlan, product_type: str) -> TextPlan:
+    """A plan that does not contradict the product or its own method.
+
+    The planner is asked to fix these, but a batch must never render a
+    garment mockup or a carved word with no surface. The fallback is the
+    model's own non-carrier alternative, then painted; the brief keeps its
+    words either way (issue #246).
+    """
+    if product_type == "dtf_apparel" and plan.carrier == "apparel":
+        return replace(
+            plan,
+            method=plan.non_carrier_method or "painted",
+            carrier="none",
+            carrier_description=None,
+            region="any",
+            surface="none",
+        )
+    if plan.method in SURFACE_METHODS and plan.carrier == "none":
+        return replace(
+            plan,
+            method=plan.non_carrier_method or "painted",
+            carrier="none",
+            carrier_description=None,
+            region="any",
+            surface="none",
+        )
+    if plan.method == "typographic" and plan.carrier != "none":
+        return replace(
+            plan,
+            carrier="none",
+            carrier_description=None,
+            region="any",
+            surface="none",
+        )
+    return plan
+
+
 def _apply_text_plans(
     briefs: list[DesignBrief],
     indexes: Sequence[int],
-    plans: dict[int, Any],
+    plans: dict[int, PlannedText],
 ) -> list[DesignBrief]:
     """The briefs with the plans and revised carrier scenes applied."""
     result = list(briefs)
@@ -944,18 +988,109 @@ def _apply_text_plans(
             continue
         index = indexes[number - 1]
         brief = result[index]
-        scene = brief.scene_description
-        # The planner may rewrite the scene to add a carrier or to remove one
-        # the concept no longer needs. A rewritten scene is used whenever it
-        # is present; lettering was already stripped from it.
-        if planned.scene_description:
-            scene = planned.scene_description
+        plan = _sanitise_text_plan(planned.plan, brief.product_type)
+        if plan != planned.plan:
+            logger.warning(
+                "Adjusted an unusable text plan for brief %r: %s/%s -> %s/%s",
+                brief.concept,
+                planned.plan.method,
+                planned.plan.carrier,
+                plan.method,
+                plan.carrier,
+            )
+            scene = brief.scene_description
+        else:
+            scene = brief.scene_description
+            # The planner may rewrite the scene to add a carrier or to remove
+            # one the concept no longer needs. A rewritten scene is used when
+            # it is present; lettering was already stripped from it.
+            if planned.scene_description:
+                scene = planned.scene_description
         result[index] = replace(
             brief,
-            text_plan=planned.plan,
+            text_plan=plan,
             scene_description=scene,
         )
     return result
+
+
+class TextPlanDBClient(Protocol):
+    def list_briefs_by_batch(self, batch_id: str) -> list[dict[str, Any]]: ...
+
+    def update_brief_text_plan(
+        self,
+        brief_id: int,
+        text_plan: dict[str, Any] | None,
+        scene_description: str | None,
+    ) -> None: ...
+
+
+def _brief_from_row(row: dict[str, Any]) -> DesignBrief:
+    """A brief from a stored row, for a replan pass."""
+    return DesignBrief(
+        concept=str(row.get("concept") or ""),
+        product_type=str(row.get("product_type") or "dtf_apparel"),
+        specific_products=[],
+        audience=str(row.get("audience") or ""),
+        visual_style=str(row.get("visual_style") or ""),
+        confidence=0,
+        reasoning="",
+        source_seed_ids=[],
+        layout_type=str(row.get("layout_type") or "full_bleed"),
+        headline_text=row.get("headline_text"),
+        tagline_text=row.get("tagline_text"),
+        font_color=row.get("font_color"),
+        regeneration_feedback=row.get("regeneration_feedback"),
+        scene_description=row.get("scene_description"),
+        recommended_materials=row.get("recommended_materials"),
+        voice=str(row.get("voice") or DEFAULT_VOICE),
+        font_family=row.get("font_family"),
+        style_preset=row.get("style_preset"),
+        text_plan=text_plan_from_value(row.get("text_plan")),
+    )
+
+
+def replan_batch(
+    llm_completions: Any,
+    model: str,
+    db_client: TextPlanDBClient,
+    batch_id: str,
+    extra_instructions: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Rewrite the text plans of an existing batch and store the changes.
+
+    The image renderer only executes a stored plan, so a batch that was
+    written before the plan existed (or that got a poor plan) needs this pass
+    before its images can be re-rendered. Briefs the planner cannot improve
+    keep their current plan.
+    """
+    rows = db_client.list_briefs_by_batch(batch_id)
+    if not rows:
+        return {"status": "skipped", "batch_id": batch_id, "reason": "no briefs in batch"}
+
+    briefs = [_brief_from_row(row) for row in rows]
+    planned = plan_batch_text_integration(llm_completions, model, briefs, extra_instructions)
+    updated = 0
+    for row, before, after in zip(rows, briefs, planned, strict=True):
+        if after.text_plan is None:
+            continue
+        if (
+            after.text_plan == before.text_plan
+            and after.scene_description == before.scene_description
+        ):
+            continue
+        db_client.update_brief_text_plan(
+            row["id"],
+            after.text_plan.to_dict(),
+            after.scene_description,
+        )
+        updated += 1
+    return {
+        "status": "success",
+        "batch_id": batch_id,
+        "briefs": len(briefs),
+        "updated": updated,
+    }
 
 
 def _merge_briefs(first: list[DesignBrief], second: list[DesignBrief]) -> list[DesignBrief]:

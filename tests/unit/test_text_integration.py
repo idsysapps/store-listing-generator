@@ -22,8 +22,10 @@ from store_listing.orchestration.design_briefs import (
     BriefableCandidate,
     DesignBrief,
     DesignBriefDBClient,
+    TextPlanDBClient,
     generate_design_briefs,
     plan_batch_text_integration,
+    replan_batch,
 )
 from store_listing.orchestration.image_generation import (
     build_flux_prompt,
@@ -36,8 +38,10 @@ from store_listing.orchestration.text_integration import (
     METHODS,
     REGIONS,
     SURFACES,
+    PlannedText,
     TextPlan,
     build_text_plan_prompt,
+    check_text_plan_fit,
     check_text_plan_mix,
     read_text_plan_response,
     text_integration_rules,
@@ -311,6 +315,60 @@ class TestTheMix:
         assert any("methods" in issue for issue in check_text_plan_mix(plans))
 
 
+class TestThePlanFit:
+    def _entries(self, *product_types: str) -> list[dict[str, Any]]:
+        return [
+            {"brief": index + 1, "product_type": product_type}
+            for index, product_type in enumerate(product_types)
+        ]
+
+    def test_a_garment_carrier_on_dtf_is_flagged(self) -> None:
+        plans = {
+            1: PlannedText(plan=TextPlan(method="embroidery", carrier="apparel", surface="fabric"))
+        }
+
+        issues = check_text_plan_fit(self._entries("dtf_apparel"), plans)
+
+        assert any("apparel" in issue for issue in issues)
+
+    def test_carved_without_a_carrier_is_flagged(self) -> None:
+        plans = {1: PlannedText(plan=TextPlan(method="carved", carrier="none"))}
+
+        issues = check_text_plan_fit(self._entries("dtf_apparel"), plans)
+
+        assert any("carved" in issue for issue in issues)
+
+    def test_embroidery_without_a_carrier_is_flagged(self) -> None:
+        plans = {1: PlannedText(plan=TextPlan(method="embroidery", carrier="none"))}
+
+        issues = check_text_plan_fit(self._entries("dtf_apparel"), plans)
+
+        assert any("embroidery" in issue for issue in issues)
+
+    def test_typographic_with_a_carrier_is_flagged(self) -> None:
+        plans = {1: PlannedText(plan=TextPlan(method="typographic", carrier="sign"))}
+
+        issues = check_text_plan_fit(self._entries("dtf_apparel"), plans)
+
+        assert any("typographic" in issue for issue in issues)
+
+    def test_a_valid_plan_has_no_issues(self) -> None:
+        plans = {
+            1: PlannedText(plan=TextPlan(method="painted", carrier="none")),
+            2: PlannedText(plan=TextPlan(method="carved", carrier="headstone")),
+            3: PlannedText(plan=TextPlan(method="embroidery", carrier="banner")),
+            4: PlannedText(plan=TextPlan(method="typographic", carrier="none")),
+        }
+
+        assert (
+            check_text_plan_fit(
+                self._entries("dtf_apparel", "dtf_apparel", "dtf_apparel", "dtf_apparel"),
+                plans,
+            )
+            == []
+        )
+
+
 class TestThePrompt:
     def test_the_prompt_shows_the_template_geometry(self) -> None:
         messages = build_text_plan_prompt(
@@ -404,7 +462,7 @@ class TestThePlanner:
             "plans": [
                 {"brief": 1, "method": "painted"},
                 {"brief": 2, "method": "sticker"},
-                {"brief": 3, "method": "embroidery"},
+                {"brief": 3, "method": "embroidery", "carrier": "banner"},
                 {"brief": 4, "method": "typographic"},
             ]
         }
@@ -430,6 +488,57 @@ class TestThePlanner:
 
         assert planned[0].text_plan is not None
         assert planned[0].text_plan.method == "neon"
+
+    def test_an_unusable_plan_is_asked_for_again(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LLM_TEXT_PLAN", "true")
+        monkeypatch.setenv("LLM_TEXT_PLAN_REGENERATE", "true")
+        briefs = [
+            _brief(concept="a garment"),
+            _brief(concept="a bean"),
+            _brief(concept="a spider"),
+        ]
+        first = {
+            "plans": [
+                {"brief": 1, "method": "embroidery", "carrier": "apparel"},
+                {"brief": 2, "method": "carved", "carrier": "none"},
+                {"brief": 3, "method": "typographic", "carrier": "none"},
+            ]
+        }
+        second = {
+            "plans": [
+                {"brief": 1, "method": "painted", "carrier": "none"},
+                {"brief": 2, "method": "sticker", "carrier": "none"},
+                {"brief": 3, "method": "neon", "carrier": "none"},
+            ]
+        }
+        llm = _LLM(first, second)
+
+        planned = plan_batch_text_integration(llm, "test-model", briefs)
+
+        assert len(llm.calls) == 2, "the model gets one more chance with the fit issues"
+        assert planned[0].text_plan is not None
+        assert planned[0].text_plan.method == "painted"
+        assert planned[1].text_plan is not None
+        assert planned[1].text_plan.method == "sticker"
+
+    def test_an_invalid_plan_is_sanitised_when_regeneration_is_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLM_TEXT_PLAN", "true")
+        monkeypatch.setenv("LLM_TEXT_PLAN_REGENERATE", "false")
+        llm = _LLM(
+            {
+                "plans": [
+                    {"brief": 1, "method": "embroidery", "carrier": "apparel"},
+                ]
+            }
+        )
+
+        planned = plan_batch_text_integration(llm, "test-model", [_brief()])
+
+        assert planned[0].text_plan is not None
+        assert planned[0].text_plan.carrier == "none"
+        assert planned[0].text_plan.method == "painted"
 
 
 class TestTheMaterials:
@@ -787,6 +896,87 @@ class TestTheStoredPlan:
         assert stored["scene_description"] == (
             "a quiet graveyard with a blank headstone in the mist"
         )
+
+
+class TestTheReplan:
+    def test_replanning_stores_the_new_plan(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LLM_TEXT_PLAN", "true")
+        llm = _LLM(
+            {
+                "plans": [
+                    {
+                        "brief": 1,
+                        "method": "painted",
+                        "carrier": "none",
+                        "scene_description": "a painted graveyard in the mist",
+                    }
+                ]
+            }
+        )
+        db = _ReplanDB()
+
+        result = replan_batch(llm, "test-model", cast(TextPlanDBClient, db), "batch-1")
+
+        assert result["status"] == "success"
+        assert result["updated"] == 1
+        assert db.updated[0][0] == 1
+        assert db.updated[0][1] is not None
+        assert db.updated[0][1]["method"] == "painted"
+        assert db.updated[0][2] == "a painted graveyard in the mist"
+
+    def test_an_empty_batch_is_skipped(self) -> None:
+        db = _ReplanDB(rows=[])
+
+        result = replan_batch(_LLM(), "test-model", cast(TextPlanDBClient, db), "missing")
+
+        assert result["status"] == "skipped"
+        assert db.updated == []
+
+
+class _ReplanDB:
+    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
+        self.rows = (
+            rows
+            if rows is not None
+            else [
+                {
+                    "id": 1,
+                    "concept": "a quiet graveyard",
+                    "product_type": "dtf_apparel",
+                    "layout_type": "hero_top",
+                    "headline_text": "GONE BUT NOT FORGOTTEN",
+                    "tagline_text": None,
+                    "scene_description": "a quiet graveyard in the mist",
+                    "voice": "deadpan",
+                    "style_preset": "hand_inked_woodcut",
+                    "text_plan": None,
+                },
+                {
+                    "id": 2,
+                    "concept": "a pattern",
+                    "product_type": "dtf_apparel",
+                    "layout_type": "full_bleed",
+                    "headline_text": None,
+                    "tagline_text": None,
+                    "scene_description": "a repeating pattern",
+                    "voice": "deadpan",
+                    "style_preset": "hand_inked_woodcut",
+                    "text_plan": None,
+                },
+            ]
+        )
+        self.updated: list[tuple[int, dict[str, Any] | None, str | None]] = []
+
+    def list_briefs_by_batch(self, batch_id: str) -> list[dict[str, Any]]:
+        return self.rows
+
+    def update_brief_text_plan(
+        self,
+        brief_id: int,
+        text_plan: dict[str, Any] | None,
+        scene_description: str | None,
+    ) -> None:
+        self.updated.append((brief_id, text_plan, scene_description))
 
 
 class _DB:
