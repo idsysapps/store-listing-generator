@@ -39,8 +39,10 @@ __all__ = [
     "TextPlan",
     "build_text_plan_entries",
     "build_text_plan_prompt",
+    "carrier_is_attached",
     "check_text_plan_fit",
     "check_text_plan_mix",
+    "infer_surface",
     "read_text_plan_response",
     "text_integration_rules",
     "text_plan_from_value",
@@ -63,6 +65,60 @@ METHODS: Final[tuple[str, ...]] = (
 # material on the art, but the plan has to name the object it belongs to or
 # the words float in the template band (issue #246).
 SURFACE_METHODS: Final[frozenset[str]] = frozenset({"carved", "embroidery"})
+
+# Carriers that have to be attached to something in the scene. A label on a
+# cup is wrapped around it, a ticket is pinned, a banner hangs; a floating
+# card or a flag on a stick reads as a sign beside the design, not as part of
+# it (issue #246).
+ATTACHABLE_CARRIERS: Final[frozenset[str]] = frozenset({"label", "ticket", "banner"})
+ATTACHMENT_WORDS: Final[tuple[str, ...]] = (
+    "wrapped",
+    "tied",
+    "hanging",
+    "hangs",
+    "attached",
+    "pinned",
+    "taped",
+    "stuck",
+    "around",
+    "handle",
+    "string",
+    "band",
+    "between",
+    "pole",
+    "post",
+    "on the front",
+    "on the side",
+    "on the surface",
+    "on the cup",
+    "on the bottle",
+)
+
+# The material a carrier is normally made of, and the words that name it in
+# the plan. A plan that forgot the surface still gets a sensibly matching one
+# instead of a label the compositor looks for in the paper palette.
+CARRIER_SURFACES: Final[dict[str, str]] = {
+    "label": "paper",
+    "ticket": "paper",
+    "banner": "fabric",
+    "book": "paper",
+    "packaging": "kraft",
+    "sign": "wood",
+    "headstone": "stone",
+    "screen": "glass",
+    "apparel": "fabric",
+    "none": "paper",
+}
+SURFACE_WORDS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
+    ("kraft", ("kraft",)),
+    ("chalkboard", ("chalkboard", "chalk board")),
+    ("metal", ("metal", "tin", "steel", "aluminium", "aluminum")),
+    ("stone", ("stone", "granite", "slate", "marble")),
+    ("fabric", ("fabric", "cloth", "canvas", "linen", "cotton")),
+    ("glass", ("glass",)),
+    ("wood", ("wood", "wooden")),
+    ("paper", ("paper", "card", "cream", "white")),
+)
 
 # What the words sit on. A carrier is optional: the concept decides.
 CARRIERS: Final[tuple[str, ...]] = (
@@ -314,6 +370,9 @@ def text_integration_rules() -> str:
         "A carrier is an object in the illustration, not a mockup of the product for "
         "sale. A DTF design is print artwork: never use 'apparel' as a carrier, "
         "because a garment in the scene is a product mockup.\n"
+        "- A label, ticket or banner must be attached in the scene: wrapped around an "
+        "object, tied to a handle, pinned, taped, hanging from a wall or between "
+        "poles. Never make it a floating sign, flag, placard or card.\n"
         "- carved and embroidery need a surface: give them a carrier. painted, printed, "
         "sticker, chalk, neon and typographic can work in the art without one.\n"
         "- typographic means the type is the design: use it with carrier 'none' only.\n"
@@ -523,6 +582,28 @@ def check_text_plan_mix(plans: Sequence[TextPlan]) -> list[str]:
     return issues
 
 
+def carrier_is_attached(plan: TextPlan, scene: str | None) -> bool:
+    """Whether the plan describes the carrier as part of the scene.
+
+    A label, ticket or banner that is not wrapped, tied, pinned, hanging or
+    stuck to something becomes a floating card or a flag on a stick. That is
+    the difference between type on the teacup and a sign beside it.
+    """
+    if plan.carrier not in ATTACHABLE_CARRIERS:
+        return True
+    text = f"{plan.carrier_description or ''} {scene or ''}".lower()
+    return any(word in text for word in ATTACHMENT_WORDS)
+
+
+def infer_surface(carrier: str, description: str | None) -> str:
+    """The surface a carrier is made of, from its description or its kind."""
+    text = (description or "").lower()
+    for surface, words in SURFACE_WORDS:
+        if any(word in text for word in words):
+            return surface
+    return CARRIER_SURFACES.get(carrier, "paper")
+
+
 def check_text_plan_fit(
     entries: Sequence[dict[str, Any]],
     plans: Mapping[int, PlannedText],
@@ -546,6 +627,20 @@ def check_text_plan_fit(
                 f"brief {number} uses 'apparel' as a carrier on a DTF design; a "
                 "garment is a product mockup, not artwork. Choose a sign, label, "
                 "banner, ticket, book, packaging, headstone or screen, or no carrier"
+            )
+        if plan.needs_carrier and plan.surface == "none":
+            issues.append(
+                f"brief {number} uses carrier '{plan.carrier}' with surface 'none'; "
+                "name the carrier's material (paper, kraft, wood, chalkboard, metal, "
+                "stone, fabric or glass)"
+            )
+        if plan.carrier in ATTACHABLE_CARRIERS and not carrier_is_attached(
+            plan, str(entry.get("scene") or "")
+        ):
+            issues.append(
+                f"brief {number} uses carrier '{plan.carrier}' as a floating object; "
+                "describe it attached in the scene: wrapped around the object, tied "
+                "to the handle, pinned, taped or hanging. No sign, flag, placard or card"
             )
         if plan.method in SURFACE_METHODS and plan.carrier == "none":
             issues.append(
