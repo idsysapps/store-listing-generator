@@ -86,16 +86,19 @@ PRESETS: Final[dict[str, Preset]] = {
     ),
     "halftone_comic": Preset(
         id="halftone_comic",
-        label="Halftone comic",
+        label="Comic book",
         prompt=(
-            "comic book illustration, heavy black ink, halftone dot shading, bold "
+            "comic book illustration, heavy black ink, cross-hatched shading, bold "
             "linework, high contrast"
         ),
-        negative="soft shading, pastel, photorealistic, gradient mesh, 3d render",
+        negative=(
+            "halftone dots, ben-day dots, soft shading, pastel, photorealistic, "
+            "gradient mesh, 3d render"
+        ),
         palette=("#111111", "#FDF6E3", "#D6342C", "#FFC72C"),
         headline_family="anton",
         tagline_family="bebas",
-        texture="halftone",
+        texture="grain",
     ),
     "riso_two_color": Preset(
         id="riso_two_color",

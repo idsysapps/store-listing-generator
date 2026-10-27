@@ -351,7 +351,8 @@ class TestTheLookOfTheDesign:
 
         prompt = build_flux_prompt(brief)
 
-        assert "halftone dot shading" in prompt.lower()
+        assert "comic book illustration" in prompt.lower()
+        assert "halftone" not in prompt.lower(), "the hard halftone screen read as squares"
 
     def test_the_free_style_of_the_brief_does_not_fight_the_look(self) -> None:
         # Free text made every design come out as the same flat vector

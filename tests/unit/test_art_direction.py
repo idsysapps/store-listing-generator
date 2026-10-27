@@ -66,6 +66,14 @@ class TestTheLookCannotPaintTheBackground:
             for word in ("paper", "surface", "background", "texture"):
                 assert word not in lowered, f"{preset.id} asks for {word}"
 
+    def test_the_comic_look_does_not_use_a_halftone_screen(self) -> None:
+        # The hard dot grid read as little squares all over the art.
+        preset = preset_for("halftone_comic")
+        assert preset is not None
+
+        assert "halftone" not in preset.prompt.lower()
+        assert preset.texture != "halftone"
+
     def test_the_negative_keeps_the_background_out(self) -> None:
         negative = negative_for(preset_for("riso_two_color"))
 
