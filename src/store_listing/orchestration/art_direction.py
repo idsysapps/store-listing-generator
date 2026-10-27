@@ -55,9 +55,10 @@ class Preset:
     # 'crackle' or nothing.
     texture: str | None = None
     # Whether to smooth small dot screens and specks out of the generated art
-    # before the texture and the type go on. The comic look uses this: a
-    # halftone grid drawn by the image model read as little squares.
-    despeckle: bool = False
+    # before the texture and the type go on. A halftone grid drawn by the
+    # image model read as little squares, so every look is despeckled; a
+    # 5 x 5 median removes the dots and keeps the bold shapes.
+    despeckle: bool = True
 
 
 # The looks. The type of a look stays in the same period as the art, and the
