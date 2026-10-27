@@ -11,10 +11,15 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["build_birefnet_background_graph", "build_flux_txt2img_graph"]
+__all__ = [
+    "build_birefnet_background_graph",
+    "build_flux_txt2img_graph",
+    "build_qwen_image_txt2img_graph",
+]
 
 DEFAULT_FILENAME_PREFIX = "store_listing"
 DEFAULT_BACKGROUND_FILENAME_PREFIX = "bg_removed"
+QWEN_IMAGE_FILENAME_PREFIX = "qwen_wordmark"
 
 
 def build_flux_txt2img_graph(
@@ -87,6 +92,87 @@ def build_flux_txt2img_graph(
         "9": {
             "class_type": "SaveImage",
             "inputs": {"filename_prefix": filename_prefix, "images": ["8", 0]},
+        },
+    }
+
+
+def build_qwen_image_txt2img_graph(
+    *,
+    prompt: str,
+    width: int,
+    height: int,
+    seed: int,
+    steps: int = 20,
+    cfg: float = 4.0,
+    sampler_name: str = "euler",
+    scheduler: str = "simple",
+    shift: float = 3.1,
+    negative_prompt: str = "",
+    unet_name: str,
+    clip_name: str,
+    vae_name: str,
+    filename_prefix: str = QWEN_IMAGE_FILENAME_PREFIX,
+) -> dict[str, Any]:
+    """Return the Qwen-Image text-to-image graph from the official template.
+
+    Qwen-Image is a 20B MMDiT. It is not a Flux graph: the text encoder is a
+    single Qwen2.5-VL model loaded with ``type="qwen_image"``, the model needs
+    the AuraFlow sampling shift, and the latent is the SD3 shape. The sampler
+    runs 20 steps at cfg 4.0 - the settings the Phase 0 bake-off used (issue
+    #254). It is much slower than Flux Schnell, so only the typographic hero
+    path uses it.
+    """
+    return {
+        "1": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
+        },
+        "2": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": clip_name, "type": "qwen_image", "device": "default"},
+        },
+        "3": {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": vae_name},
+        },
+        "4": {
+            "class_type": "ModelSamplingAuraFlow",
+            "inputs": {"model": ["1", 0], "shift": shift},
+        },
+        "5": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": prompt, "clip": ["2", 0]},
+        },
+        "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": negative_prompt, "clip": ["2", 0]},
+        },
+        "7": {
+            "class_type": "EmptySD3LatentImage",
+            "inputs": {"width": width, "height": height, "batch_size": 1},
+        },
+        "8": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["4", 0],
+                "seed": seed,
+                "steps": steps,
+                "cfg": cfg,
+                "sampler_name": sampler_name,
+                "scheduler": scheduler,
+                "positive": ["5", 0],
+                "negative": ["6", 0],
+                "latent_image": ["7", 0],
+                "denoise": 1.0,
+            },
+        },
+        "9": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["8", 0], "vae": ["3", 0]},
+        },
+        "10": {
+            "class_type": "SaveImage",
+            "inputs": {"filename_prefix": filename_prefix, "images": ["9", 0]},
         },
     }
 

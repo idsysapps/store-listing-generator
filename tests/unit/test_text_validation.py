@@ -10,10 +10,13 @@ from unittest.mock import MagicMock
 from PIL import Image
 
 from store_listing.orchestration.text_validation import (
+    StrictTextValidator,
     TextValidator,
     encode_image_for_vision,
     missing_words,
+    normalize_strict_text,
     normalize_text,
+    strict_text_matches,
     text_matches,
 )
 
@@ -289,3 +292,154 @@ class TestTextValidator:
         assert content[0]["type"] == "text"
         assert content[1]["type"] == "image_url"
         assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def _sequence_vision_client(observations: list[str]) -> Any:
+    client = MagicMock()
+    client.chat.completions.create.side_effect = [
+        MagicMock(choices=[MagicMock(message=MagicMock(content=observation))])
+        for observation in observations
+    ]
+    return client
+
+
+class TestNormalizeStrictText:
+    """Strict normalisation keeps the characters that change the message."""
+
+    def test_folds_case_and_collapses_whitespace(self) -> None:
+        assert normalize_strict_text("  Groovy   Ghost  ") == "groovy ghost"
+
+    def test_keeps_the_ampersand(self) -> None:
+        assert normalize_strict_text("SALT & PEPPER") == "salt & pepper"
+
+    def test_keeps_apostrophes_and_hyphens(self) -> None:
+        assert normalize_strict_text("YOU'RE A SPOOKY 2-PACK") == "you're a spooky 2-pack"
+
+    def test_normalises_curly_apostrophes_and_dashes(self) -> None:
+        assert normalize_strict_text("YOU’RE A SPOOKY 2–PACK") == "you're a spooky 2-pack"
+
+    def test_drops_decorative_punctuation(self) -> None:
+        assert normalize_strict_text("GROOVY!!!") == "groovy"
+
+
+class TestStrictTextMatches:
+    def test_an_exact_match_passes(self) -> None:
+        assert strict_text_matches("GROOVY", "GROOVY") == (True, 1.0)
+
+    def test_one_wrong_letter_fails(self) -> None:
+        assert strict_text_matches("GROOVY", "CROOVY")[0] is False
+
+    def test_a_missing_letter_fails(self) -> None:
+        assert strict_text_matches("WEIRD", "WERD")[0] is False
+
+    def test_a_block_inside_a_larger_line_passes(self) -> None:
+        assert strict_text_matches("GROOVY", "IN MY SPOOKY ERA GROOVY")[0] is True
+
+    def test_a_prefix_does_not_match_a_longer_word(self) -> None:
+        assert strict_text_matches("GROOVY", "GROOVYX")[0] is False
+
+    def test_the_ampersand_is_required(self) -> None:
+        assert strict_text_matches("SALT & PEPPER", "SALT PEPPER")[0] is False
+
+    def test_the_apostrophe_is_required(self) -> None:
+        assert strict_text_matches("YOU'RE MY BOO", "YOURE MY BOO")[0] is False
+
+    def test_a_block_split_over_two_lines_passes(self) -> None:
+        assert strict_text_matches("SALT & PEPPER", "SALT &\nPEPPER")[0] is True
+
+    def test_digits_have_to_be_present(self) -> None:
+        assert strict_text_matches("2 SPOOKY 4 YOU", "SPOOKY 4 YOU")[0] is False
+
+    def test_copy_drawn_twice_is_not_a_clean_match(self) -> None:
+        assert strict_text_matches("GROOVY", "GROOVY GROOVY")[0] is False
+
+    def test_empty_expectation_passes(self) -> None:
+        assert strict_text_matches("", "anything")[0] is True
+
+    def test_empty_observation_fails(self) -> None:
+        assert strict_text_matches("GROOVY", "") == (False, 0.0)
+
+
+class TestStrictTextValidator:
+    def test_passes_when_the_majority_of_readings_are_exact(self) -> None:
+        client = _sequence_vision_client(["GROOVY", "CROOVY", "GROOVY"])
+        validator = StrictTextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), expected=["GROOVY"])
+
+        assert result.matched is True
+        assert result.votes == 2
+        assert result.error is None
+
+    def test_fails_when_only_one_reading_is_exact(self) -> None:
+        client = _sequence_vision_client(["GROOVY", "CROOVY", "CROOVY"])
+        validator = StrictTextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), expected=["GROOVY"])
+
+        assert result.matched is False
+        assert result.votes == 1
+
+    def test_checks_every_block(self) -> None:
+        client = _sequence_vision_client(
+            ["IN MY SPOOKY ERA\nGROOVY", "IN MY SPOOKY ERA\nGROOVY", "IN MY SPOOKY ERA\nGROOVY"]
+        )
+        validator = StrictTextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), expected=["IN MY SPOOKY ERA", "GROOVY"])
+
+        assert result.matched is True
+
+    def test_reports_a_missing_kicker(self) -> None:
+        client = _sequence_vision_client(["GROOVY", "GROOVY", "GROOVY"])
+        validator = StrictTextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), expected=["IN MY SPOOKY ERA", "GROOVY"])
+
+        assert result.matched is False
+        assert "IN MY SPOOKY ERA" in result.missing
+
+    def test_reports_duplicated_copy(self) -> None:
+        client = _sequence_vision_client(["GROOVY GROOVY", "GROOVY GROOVY", "GROOVY GROOVY"])
+        validator = StrictTextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), expected=["GROOVY"])
+
+        assert result.matched is False
+        assert "GROOVY" in result.duplicated
+
+    def test_no_expected_text_skips_the_model(self) -> None:
+        client = _sequence_vision_client([])
+        validator = StrictTextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), expected=[])
+
+        assert result.matched is True
+        client.chat.completions.create.assert_not_called()
+
+    def test_model_errors_fail_closed(self) -> None:
+        client = MagicMock()
+        client.chat.completions.create.side_effect = RuntimeError("vision model is down")
+        validator = StrictTextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), expected=["GROOVY"])
+
+        assert result.matched is False
+        assert result.error is not None
+        assert "vision model is down" in result.error
+
+    def test_no_text_marker_fails(self) -> None:
+        client = _sequence_vision_client(["NO_TEXT", "NO_TEXT", "NO_TEXT"])
+        validator = StrictTextValidator(client=client, model="qwen_vl_ocr")
+
+        result = validator.validate(_png_bytes(), expected=["GROOVY"])
+
+        assert result.matched is False
+
+    def test_min_votes_is_configurable(self) -> None:
+        client = _sequence_vision_client(["GROOVY", "CROOVY", "CROOVY"])
+        validator = StrictTextValidator(client=client, model="qwen_vl_ocr", min_votes=1)
+
+        result = validator.validate(_png_bytes(), expected=["GROOVY"])
+
+        assert result.matched is True

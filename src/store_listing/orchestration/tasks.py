@@ -159,6 +159,24 @@ def _build_artwork_text_validator() -> Any:
     return ArtworkTextValidator(client=get_vision_client(), model=get_artwork_vision_model())
 
 
+def _build_hero_validator() -> Any:
+    """The strict OCR gate for Qwen-drawn lettering, or None when the path is off.
+
+    The hero path is the only one where the image model draws the words, so it
+    needs the stricter gate: one wrong letter is a wrong design, not an OCR
+    wobble (issue #254).
+    """
+    from store_listing.orchestration.typographic_hero import typographic_hero_enabled
+
+    if not typographic_hero_enabled():
+        return None
+
+    from store_listing.orchestration.llm_client import get_vision_client, get_vision_model
+    from store_listing.orchestration.text_validation import StrictTextValidator
+
+    return StrictTextValidator(client=get_vision_client(), model=get_vision_model())
+
+
 celery_app.conf.beat_schedule = {
     "seed-context-injection": {
         "task": "store_listing.orchestration.tasks.inject_context_seeds_task",
@@ -672,6 +690,7 @@ def generate_design_images_task() -> dict:
         text_validator=text_validator,
         artwork_validator=_build_artwork_validator(),
         artwork_text_validator=_build_artwork_text_validator(),
+        hero_validator=_build_hero_validator(),
         product_types=enabled_product_types(DatabaseClient()),
     )
 
@@ -724,4 +743,5 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         text_validator=text_validator,
         artwork_validator=_build_artwork_validator(),
         artwork_text_validator=_build_artwork_text_validator(),
+        hero_validator=_build_hero_validator(),
     )

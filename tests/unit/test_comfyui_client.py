@@ -636,3 +636,83 @@ class TestHealth:
             raise httpx.ConnectError("refused")
 
         assert _client(handler).health() is False
+
+
+class TestGenerateQwenImage:
+    """Qwen-Image is the typographic wordmark path (issue #254)."""
+
+    def _handler(self, bodies: list[dict]) -> Handler:
+        import json
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            if path == "/prompt":
+                bodies.append(json.loads(request.content))
+                return _prompt_ok()
+            if path.startswith("/history/"):
+                # The Qwen graph saves from node 10, not the Flux node 9.
+                return _history_ok(node_id="10")
+            if path == "/view":
+                return httpx.Response(200, content=_png_bytes())
+            return httpx.Response(404)
+
+        return handler
+
+    def test_returns_the_generated_image(self) -> None:
+        bodies: list[dict] = []
+        result = _client(self._handler(bodies)).generate_qwen_image(prompt="a ghost")
+
+        assert result.error is None
+        assert result.image_bytes == _png_bytes()
+        assert result.prompt_id == "prompt-123"
+
+    def test_posts_the_qwen_graph(self) -> None:
+        bodies: list[dict] = []
+        _client(self._handler(bodies)).generate_qwen_image(
+            prompt="a ghost with GROOVY", seed=7, width=1024, height=1280
+        )
+
+        graph = bodies[0]["prompt"]
+        assert graph["1"]["inputs"]["unet_name"] == "qwen_image_fp8_e4m3fn.safetensors"
+        assert graph["2"]["inputs"]["type"] == "qwen_image"
+        assert graph["3"]["inputs"]["vae_name"] == "qwen_image_vae.safetensors"
+        assert graph["4"]["class_type"] == "ModelSamplingAuraFlow"
+        assert graph["8"]["inputs"]["steps"] == 20
+        assert graph["8"]["inputs"]["cfg"] == 4.0
+        assert graph["8"]["inputs"]["seed"] == 7
+        assert graph["7"]["inputs"]["width"] == 1024
+        assert graph["7"]["inputs"]["height"] == 1280
+        assert graph["5"]["inputs"]["text"] == "a ghost with GROOVY"
+
+    def test_accepts_a_negative_prompt(self) -> None:
+        bodies: list[dict] = []
+        _client(self._handler(bodies)).generate_qwen_image(
+            prompt="a ghost", negative_prompt="misspelled"
+        )
+        assert bodies[0]["prompt"]["6"]["inputs"]["text"] == "misspelled"
+
+    def test_model_names_and_sampling_are_overridable(self) -> None:
+        bodies: list[dict] = []
+        _client(self._handler(bodies)).generate_qwen_image(
+            prompt="a ghost",
+            unet_name="custom-unet.safetensors",
+            clip_name="custom-clip.safetensors",
+            vae_name="custom-vae.safetensors",
+            steps=8,
+            cfg=1.0,
+            shift=2.0,
+        )
+        graph = bodies[0]["prompt"]
+        assert graph["1"]["inputs"]["unet_name"] == "custom-unet.safetensors"
+        assert graph["2"]["inputs"]["clip_name"] == "custom-clip.safetensors"
+        assert graph["3"]["inputs"]["vae_name"] == "custom-vae.safetensors"
+        assert graph["8"]["inputs"]["steps"] == 8
+        assert graph["8"]["inputs"]["cfg"] == 1.0
+        assert graph["4"]["inputs"]["shift"] == 2.0
+
+    def test_raises_when_the_graph_is_rejected(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, json={"error": {"message": "bad graph"}})
+
+        with pytest.raises(ComfyUIError):
+            _client(handler).generate_qwen_image(prompt="a ghost")
