@@ -62,13 +62,16 @@ from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 from store_listing.orchestration.text_integration import (
+    ATTACHABLE_CARRIERS,
     SURFACE_METHODS,
     PlannedText,
     TextPlan,
     build_text_plan_entries,
     build_text_plan_prompt,
+    carrier_is_attached,
     check_text_plan_fit,
     check_text_plan_mix,
+    infer_surface,
     read_text_plan_response,
     text_plan_from_value,
 )
@@ -947,6 +950,11 @@ def _sanitise_text_plan(plan: TextPlan, product_type: str) -> TextPlan:
     model's own non-carrier alternative, then painted; the brief keeps its
     words either way (issue #246).
     """
+    if plan.needs_carrier and plan.surface == "none":
+        plan = replace(
+            plan,
+            surface=infer_surface(plan.carrier, plan.carrier_description),
+        )
     if product_type == "dtf_apparel" and plan.carrier == "apparel":
         return replace(
             plan,
@@ -989,6 +997,9 @@ def _apply_text_plans(
         index = indexes[number - 1]
         brief = result[index]
         plan = _sanitise_text_plan(planned.plan, brief.product_type)
+        scene = brief.scene_description
+        if planned.scene_description:
+            scene = planned.scene_description
         if plan != planned.plan:
             logger.warning(
                 "Adjusted an unusable text plan for brief %r: %s/%s -> %s/%s",
@@ -998,14 +1009,25 @@ def _apply_text_plans(
                 plan.method,
                 plan.carrier,
             )
+            if not plan.needs_carrier:
+                scene = brief.scene_description
+        if plan.carrier in ATTACHABLE_CARRIERS and not carrier_is_attached(plan, scene):
+            logger.warning(
+                "Dropping an unattached %s carrier for brief %r; the words fall "
+                "back to %s in the template zone",
+                plan.carrier,
+                brief.concept,
+                plan.non_carrier_method or "painted",
+            )
+            plan = replace(
+                plan,
+                method=plan.non_carrier_method or "painted",
+                carrier="none",
+                carrier_description=None,
+                region="any",
+                surface="none",
+            )
             scene = brief.scene_description
-        else:
-            scene = brief.scene_description
-            # The planner may rewrite the scene to add a carrier or to remove
-            # one the concept no longer needs. A rewritten scene is used when
-            # it is present; lettering was already stripped from it.
-            if planned.scene_description:
-                scene = planned.scene_description
         result[index] = replace(
             brief,
             text_plan=plan,

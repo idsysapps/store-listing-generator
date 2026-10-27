@@ -355,8 +355,15 @@ class TestThePlanFit:
     def test_a_valid_plan_has_no_issues(self) -> None:
         plans = {
             1: PlannedText(plan=TextPlan(method="painted", carrier="none")),
-            2: PlannedText(plan=TextPlan(method="carved", carrier="headstone")),
-            3: PlannedText(plan=TextPlan(method="embroidery", carrier="banner")),
+            2: PlannedText(plan=TextPlan(method="carved", carrier="headstone", surface="stone")),
+            3: PlannedText(
+                plan=TextPlan(
+                    method="embroidery",
+                    carrier="banner",
+                    carrier_description="a blank fabric banner hanging from the wall",
+                    surface="fabric",
+                )
+            ),
             4: PlannedText(plan=TextPlan(method="typographic", carrier="none")),
         }
 
@@ -367,6 +374,60 @@ class TestThePlanFit:
             )
             == []
         )
+
+    def test_a_carrier_without_a_surface_is_flagged(self) -> None:
+        plans = {
+            1: PlannedText(
+                plan=TextPlan(
+                    method="printed",
+                    carrier="label",
+                    carrier_description="a blank paper label wrapped around the cup",
+                )
+            )
+        }
+
+        issues = check_text_plan_fit(self._entries("dtf_apparel"), plans)
+
+        assert any("surface" in issue for issue in issues)
+
+    def test_a_floating_label_is_flagged(self) -> None:
+        entries = [
+            {
+                "brief": 1,
+                "product_type": "dtf_apparel",
+                "scene": "a teacup at the top right with a blank label on a teacup",
+            }
+        ]
+        plans = {
+            1: PlannedText(
+                plan=TextPlan(
+                    method="printed",
+                    carrier="label",
+                    carrier_description="a blank label on a teacup",
+                    surface="paper",
+                )
+            )
+        }
+
+        issues = check_text_plan_fit(entries, plans)
+
+        assert any("floating" in issue for issue in issues)
+
+    def test_a_wrapped_label_is_fine(self) -> None:
+        plans = {
+            1: PlannedText(
+                plan=TextPlan(
+                    method="printed",
+                    carrier="label",
+                    carrier_description=(
+                        "a blank cream paper label wrapped around the front of the cup"
+                    ),
+                    surface="paper",
+                )
+            )
+        }
+
+        assert check_text_plan_fit(self._entries("dtf_apparel"), plans) == []
 
 
 class TestThePrompt:
@@ -462,7 +523,13 @@ class TestThePlanner:
             "plans": [
                 {"brief": 1, "method": "painted"},
                 {"brief": 2, "method": "sticker"},
-                {"brief": 3, "method": "embroidery", "carrier": "banner"},
+                {
+                    "brief": 3,
+                    "method": "embroidery",
+                    "carrier": "banner",
+                    "carrier_description": "a blank fabric banner hanging from the wall",
+                    "surface": "fabric",
+                },
                 {"brief": 4, "method": "typographic"},
             ]
         }
@@ -530,6 +597,55 @@ class TestThePlanner:
             {
                 "plans": [
                     {"brief": 1, "method": "embroidery", "carrier": "apparel"},
+                ]
+            }
+        )
+
+        planned = plan_batch_text_integration(llm, "test-model", [_brief()])
+
+        assert planned[0].text_plan is not None
+        assert planned[0].text_plan.carrier == "none"
+        assert planned[0].text_plan.method == "painted"
+
+    def test_a_label_without_a_surface_gets_a_sensible_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLM_TEXT_PLAN", "true")
+        monkeypatch.setenv("LLM_TEXT_PLAN_REGENERATE", "false")
+        llm = _LLM(
+            {
+                "plans": [
+                    {
+                        "brief": 1,
+                        "method": "printed",
+                        "carrier": "label",
+                        "carrier_description": (
+                            "a blank cream paper label wrapped around the front of the cup"
+                        ),
+                    }
+                ]
+            }
+        )
+
+        planned = plan_batch_text_integration(llm, "test-model", [_brief()])
+
+        assert planned[0].text_plan is not None
+        assert planned[0].text_plan.carrier == "label"
+        assert planned[0].text_plan.surface == "paper"
+
+    def test_a_floating_label_falls_back_to_painted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LLM_TEXT_PLAN", "true")
+        monkeypatch.setenv("LLM_TEXT_PLAN_REGENERATE", "false")
+        llm = _LLM(
+            {
+                "plans": [
+                    {
+                        "brief": 1,
+                        "method": "printed",
+                        "carrier": "label",
+                        "carrier_description": "a blank label on a teacup",
+                        "surface": "paper",
+                    }
                 ]
             }
         )
