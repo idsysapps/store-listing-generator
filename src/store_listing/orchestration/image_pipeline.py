@@ -45,7 +45,7 @@ from store_listing.orchestration.text_compositor import (
 )
 from store_listing.orchestration.text_integration import text_plan_from_value
 from store_listing.orchestration.text_validation import TextValidator
-from store_listing.orchestration.textures import apply_texture
+from store_listing.orchestration.textures import apply_texture, despeckle_image
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +134,8 @@ def _textured(
         return b""
 
     preset = preset_for(brief.style_preset)
+    if preset and preset.despeckle:
+        source = despeckle_image(source)
     texture = preset.texture if preset else None
     if not texture:
         return source

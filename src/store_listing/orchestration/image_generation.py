@@ -56,6 +56,15 @@ NO_MOCKUP = (
     "no photo of a printed item"
 )
 
+# The designs should be crisp and clear. The image model used to draw a
+# halftone or a dot screen even when the look did not ask for one; naming the
+# texture as unwanted is the only chance the prompt has to keep it out. The
+# deterministic screen is gone and the comic look is despeckled.
+CLEAN_PRINT = (
+    "crisp clean artwork, smooth flat colours, no halftone dots, no Ben-Day dots, "
+    "no dot screen, no visible print grid"
+)
+
 # The carrier is a surface the compositor has to find again. Naming its colour
 # and material in the prompt makes the image model draw a large flat area the
 # surface palette can match; the plan's description alone was too loose
@@ -198,6 +207,8 @@ def build_flux_prompt(brief: DesignBrief) -> str:
         parts.append("Do not include any text or lettering.")
     else:
         parts.append("Print artwork without any lettering: no text, no words, no watermark.")
+
+    parts.append(CLEAN_PRINT)
 
     # The composition of the template, including the space the text needs. It
     # replaced the fixed "compact centered composition" that made every design
