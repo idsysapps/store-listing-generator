@@ -73,6 +73,8 @@ class TestTheLookCannotPaintTheBackground:
 
         assert "halftone" not in preset.prompt.lower()
         assert preset.texture != "halftone"
+        assert preset.texture is None, "the look adds no screen of its own"
+        assert preset.despeckle, "the generated art is despeckled before the type"
 
     def test_the_negative_keeps_the_background_out(self) -> None:
         negative = negative_for(preset_for("riso_two_color"))

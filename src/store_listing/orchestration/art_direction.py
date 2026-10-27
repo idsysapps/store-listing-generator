@@ -52,8 +52,12 @@ class Preset:
     headline_family: str
     tagline_family: str
     # The texture that is applied to the artwork after the keying: 'grain',
-    # 'halftone', 'crackle' or nothing.
+    # 'crackle' or nothing.
     texture: str | None = None
+    # Whether to smooth small dot screens and specks out of the generated art
+    # before the texture and the type go on. The comic look uses this: a
+    # halftone grid drawn by the image model read as little squares.
+    despeckle: bool = False
 
 
 # The looks. The type of a look stays in the same period as the art, and the
@@ -92,13 +96,14 @@ PRESETS: Final[dict[str, Preset]] = {
             "linework, high contrast"
         ),
         negative=(
-            "halftone dots, ben-day dots, soft shading, pastel, photorealistic, "
-            "gradient mesh, 3d render"
+            "halftone dots, ben-day dots, dot screen, soft shading, pastel, "
+            "photorealistic, gradient mesh, 3d render"
         ),
         palette=("#111111", "#FDF6E3", "#D6342C", "#FFC72C"),
         headline_family="anton",
         tagline_family="bebas",
-        texture="grain",
+        texture=None,
+        despeckle=True,
     ),
     "riso_two_color": Preset(
         id="riso_two_color",
@@ -194,6 +199,7 @@ def negative_for(preset: Preset | None, *, allow_surface: bool = False) -> str:
     if not allow_surface:
         parts.append("no surface")
     parts.append("no lettering")
+    parts.append("no halftone dots, no Ben-Day dots, no dot screen")
     if allow_surface:
         # The carrier itself may be a sign; it has to stay blank. Naming the
         # lettered objects around it keeps a diner from growing a "DINER"

@@ -1,9 +1,9 @@
 """Tests for the texture of a design.
 
-The grain, the halftone and the cracked ink are what make a flat vector read
-as a print. They cannot be asked of the image model, because a texture it
-paints lands on the background too, and the background of a DTF render is
-keyed out (issue #227).
+The grain and the cracked ink are what make a flat vector read as a print.
+They cannot be asked of the image model, because a texture it paints lands
+on the background too, and the background of a DTF render is keyed out
+(issue #227).
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import cast
 
 from PIL import Image, ImageDraw
 
-from store_listing.orchestration.textures import apply_texture
+from store_listing.orchestration.textures import apply_texture, despeckle_image
 
 KEY = (255, 0, 255)
 
@@ -79,17 +79,16 @@ class TestTheTexture:
         )
         assert changed > 0, "the grain should reach the artwork"
 
-    def test_the_halftone_leaves_the_background_alone(self) -> None:
-        canvas = _canvas(colour=KEY)
+    def test_the_halftone_texture_is_disabled(self) -> None:
+        # A stale brief could still name the old texture; it must not put the
+        # dot grid back on the art.
+        canvas = _canvas()
 
-        result = apply_texture(canvas, "halftone", key_colour=KEY)
-
-        image = _image(result)
-        assert _rgb(image, 2, 2) == KEY
+        assert apply_texture(canvas, "halftone") == canvas
 
     def test_an_alpha_mask_keeps_a_non_key_background_clean(self) -> None:
         # The DTF background is often pink rather than the exact key magenta;
-        # a distance mask would stamp the halftone onto it. The keyed render's
+        # a distance mask would stamp the texture onto it. The keyed render's
         # alpha is the exact foreground.
         background = (251, 114, 183)
         raw = Image.new("RGB", (64, 64), background)
@@ -106,7 +105,7 @@ class TestTheTexture:
 
         result = apply_texture(
             raw_buffer.getvalue(),
-            "halftone",
+            "grain",
             key_colour=KEY,
             alpha_mask_bytes=transparent_buffer.getvalue(),
         )
@@ -117,6 +116,29 @@ class TestTheTexture:
             1 for y in range(20, 45) for x in range(20, 45) if _rgb(image, x, y) != (255, 255, 255)
         )
         assert changed > 0, "the texture should still reach the artwork"
+
+    def test_despeckle_removes_a_dot_screen_and_keeps_a_bold_line(self) -> None:
+        image = Image.new("RGB", (64, 64), (255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        # A 3 x 3 halftone dot and a 5 px bar.
+        draw.rectangle([10, 10, 12, 12], fill=(0, 0, 0))
+        draw.rectangle([32, 10, 36, 50], fill=(0, 0, 0))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = _image(despeckle_image(buffer.getvalue()))
+
+        assert _rgb(result, 11, 11) == (255, 255, 255), "the dot is gone"
+        assert _rgb(result, 34, 30) == (0, 0, 0), "the bold line stays"
+
+    def test_despeckle_keeps_the_alpha(self) -> None:
+        image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = _image(despeckle_image(buffer.getvalue()))
+
+        assert _pixel(result, 32, 32)[3] == 0
 
     def test_the_crackle_leaves_the_background_alone(self) -> None:
         canvas = _canvas(colour=KEY)

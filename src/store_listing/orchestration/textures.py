@@ -1,7 +1,7 @@
 """The texture of a design.
 
-A look that is drawn as a flat vector reads as clip-art. The grain, the
-halftone dots and the cracked ink are what make it read as a print.
+A look that is drawn as a flat vector reads as clip-art. The grain and the
+cracked ink are what make it read as a print.
 
 They cannot be asked of the image model: a texture it paints lands on the
 background too, and the background of a DTF render is keyed out - a paper
@@ -22,18 +22,12 @@ from io import BytesIO
 from typing import Final
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 logger = logging.getLogger(__name__)
 
 # How strong the grain is, as a share of the colour.
 GRAIN_STRENGTH: Final[float] = 0.10
-# The distance between two halftone dots, in pixels.
-HALFTONE_SPACING: Final[int] = 6
-# The radius of a halftone dot, in pixels.
-HALFTONE_RADIUS: Final[float] = 1.7
-# How strongly a halftone dot darkens the art.
-HALFTONE_STRENGTH: Final[float] = 0.18
 # How many scratches a cracked print carries.
 CRACKLE_COUNT: Final[int] = 260
 # The longest scratch, in pixels.
@@ -43,7 +37,7 @@ TEXTURE_SEED: Final[int] = 20261021
 # The distance from the key colour at which a pixel counts as artwork.
 KEY_DISTANCE: Final[float] = 40.0
 
-__all__ = ["apply_texture"]
+__all__ = ["apply_texture", "despeckle_image"]
 
 
 def _offset(texture: str, width: int, height: int, rng: np.random.Generator) -> np.ndarray | None:
@@ -57,12 +51,11 @@ def _offset(texture: str, width: int, height: int, rng: np.random.Generator) -> 
         return noise * 255.0
 
     if texture == "halftone":
-        rows, columns = np.mgrid[0:height, 0:width]
-        offset_x = columns % HALFTONE_SPACING - HALFTONE_SPACING / 2
-        offset_y = rows % HALFTONE_SPACING - HALFTONE_SPACING / 2
-        distance = np.sqrt(offset_x**2 + offset_y**2)
-        dots = (distance < HALFTONE_RADIUS).astype(float)
-        return -HALFTONE_STRENGTH * 255.0 * dots
+        # The hard dot screen read as little squares across the art. There is
+        # no longer a look that asks for it; a stale brief still gets clean
+        # artwork rather than a grid.
+        logger.warning("The halftone texture is disabled; leaving the artwork clean")
+        return None
 
     if texture == "crackle":
         scratches = Image.new("L", (width, height), 0)
@@ -80,6 +73,27 @@ def _offset(texture: str, width: int, height: int, rng: np.random.Generator) -> 
 
     logger.warning("Unknown texture %r, drawing the artwork without it", texture)
     return None
+
+
+def despeckle_image(image_bytes: bytes) -> bytes:
+    """Remove small dot screens and specks without blurring the linework.
+
+    A 5 x 5 median replaces a 3-4 pixel halftone dot with the colour around
+    it. A bold outline or a flat shape is larger than half the kernel, so its
+    median is itself and it survives. The alpha is preserved.
+    """
+    try:
+        image = Image.open(BytesIO(image_bytes)).convert("RGBA")
+    except OSError as error:
+        logger.warning("Cannot despeckle the artwork: %s", error)
+        return image_bytes
+
+    cleaned = image.convert("RGB").filter(ImageFilter.MedianFilter(5))
+    result = cleaned.convert("RGBA")
+    result.putalpha(image.getchannel("A"))
+    buffer = BytesIO()
+    result.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def apply_texture(
