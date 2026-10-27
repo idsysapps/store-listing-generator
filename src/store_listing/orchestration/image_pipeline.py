@@ -44,8 +44,15 @@ from store_listing.orchestration.text_compositor import (
     composite_text,
 )
 from store_listing.orchestration.text_integration import text_plan_from_value
-from store_listing.orchestration.text_validation import TextValidator
+from store_listing.orchestration.text_validation import StrictTextValidator, TextValidator
 from store_listing.orchestration.textures import apply_texture, despeckle_image
+from store_listing.orchestration.typographic_hero import (
+    TypographicHeroGenerator,
+    hero_candidate_count,
+    hero_copy_from_brief,
+    is_typographic_hero_brief,
+    typographic_hero_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +181,7 @@ def generate_images_for_briefs(
     text_validator: TextValidator | None = None,
     artwork_validator: ArtworkValidator | None = None,
     artwork_text_validator: ArtworkTextValidator | None = None,
+    hero_validator: StrictTextValidator | None = None,
     product_types: list[str] | None = None,
 ) -> dict[str, Any]:
     # A store that focuses on one production method does not spend GPU time
@@ -195,6 +203,7 @@ def generate_images_for_briefs(
             text_validator=text_validator,
             artwork_validator=artwork_validator,
             artwork_text_validator=artwork_text_validator,
+            hero_validator=hero_validator,
             db_client=db_client,
         )
         if success:
@@ -258,6 +267,64 @@ def _upload_text_only(
     return True, None
 
 
+def _generate_typographic_hero_brief(
+    brief_row: dict[str, Any],
+    brief: DesignBrief,
+    *,
+    storage: ImageStorageClient,
+    comfyui_client: ComfyUIClient,
+    validator: StrictTextValidator,
+    db_client: Any,
+) -> tuple[bool, str | None]:
+    """Render a stacked emblem with Qwen-Image and upload it.
+
+    Qwen draws the kicker and the hero word; there is no compositor pass. The
+    descriptor is not part of this image: it is added later, if at all. The DTF
+    print file is keyed from the white sticker background.
+    """
+    brief_id = brief_row["id"]
+    is_dtf = brief_row["product_type"] == "dtf_apparel"
+
+    try:
+        copy = hero_copy_from_brief(brief)
+    except ValueError as error:
+        return False, str(error)
+
+    generator = TypographicHeroGenerator(
+        comfyui_client=comfyui_client,
+        validator=validator,
+        candidates=hero_candidate_count(),
+    )
+    result = generator.generate(copy, seed=random.randint(0, 2**31 - 1))
+    if result.image_bytes is None:
+        logger.warning(
+            "Typographic hero generation failed for brief %d: %s", brief_id, result.error
+        )
+        return False, result.error or "typographic hero generation failed"
+
+    raw_bytes = result.image_bytes
+    transparent_bytes: bytes | None = None
+    if is_dtf:
+        keyed = comfyui_client.remove_background(raw_bytes)
+        if keyed.image_bytes is None:
+            logger.warning("Background removal failed for hero brief %d: %s", brief_id, keyed.error)
+        else:
+            transparent_bytes = keyed.image_bytes
+
+    keys = storage.upload_design(
+        raw_bytes=raw_bytes,
+        transparent_bytes=transparent_bytes,
+        brief_id=brief_id,
+        product_type=brief_row["product_type"],
+    )
+    db_client.update_brief_image_keys(
+        brief_id=brief_id,
+        image_key_raw=keys["raw"],
+        image_key_transparent=keys.get("transparent"),
+    )
+    return True, None
+
+
 def _generate_single_brief(
     brief_row: dict[str, Any],
     *,
@@ -267,10 +334,29 @@ def _generate_single_brief(
     db_client: Any,
     artwork_validator: ArtworkValidator | None = None,
     artwork_text_validator: ArtworkTextValidator | None = None,
+    hero_validator: StrictTextValidator | None = None,
 ) -> tuple[bool, str | None]:
     brief = _brief_from_row(brief_row)
     brief_id = brief_row["id"]
     is_dtf = brief_row["product_type"] == "dtf_apparel"
+
+    # The typographic hero path is the only path where the image model draws
+    # the words. It is opt-in: a brief has to be marked as a hero layout, or
+    # named in a trial batch, and the feature flag has to be on (issue #254).
+    if (
+        typographic_hero_enabled()
+        and hero_validator is not None
+        and is_typographic_hero_brief(brief_row, brief)
+    ):
+        return _generate_typographic_hero_brief(
+            brief_row,
+            brief,
+            storage=storage,
+            comfyui_client=comfyui_client,
+            validator=hero_validator,
+            db_client=db_client,
+        )
+
     preset = preset_for(brief.style_preset)
     layout = LayoutSpec(
         layout_type=resolve_template(
@@ -486,6 +572,7 @@ def generate_image_for_brief(
     text_validator: TextValidator | None = None,
     artwork_validator: ArtworkValidator | None = None,
     artwork_text_validator: ArtworkTextValidator | None = None,
+    hero_validator: StrictTextValidator | None = None,
 ) -> dict[str, Any]:
     brief_row = db_client.get_brief_by_id(brief_id)
     if brief_row is None:
@@ -499,6 +586,7 @@ def generate_image_for_brief(
         text_validator=text_validator,
         artwork_validator=artwork_validator,
         artwork_text_validator=artwork_text_validator,
+        hero_validator=hero_validator,
         db_client=db_client,
     )
     if success:

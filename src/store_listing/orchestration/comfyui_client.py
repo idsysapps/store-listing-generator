@@ -31,6 +31,7 @@ from store_listing.orchestration.chroma_key import (
 from store_listing.orchestration.comfyui_workflows import (
     build_birefnet_background_graph,
     build_flux_txt2img_graph,
+    build_qwen_image_txt2img_graph,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,21 @@ DEFAULT_VAE_NAME = "ae.safetensors"
 # benchmark in issue #210 measures (issue #210).
 DEFAULT_STEPS = 4
 DEFAULT_CFG = 1.0
+
+# Qwen-Image 1.0 (Apache 2.0) is the typographic hero model. The official
+# ComfyUI template runs 20 steps at cfg 4.0 with the AuraFlow shift at 3.1
+# (issue #254). It renders lettering reliably where FLUX.2 Klein 4B does not,
+# but it is 5-10x slower, so only the wordmark path uses it.
+QWEN_UNET_NAME = "qwen_image_fp8_e4m3fn.safetensors"
+QWEN_CLIP_NAME = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+QWEN_VAE_NAME = "qwen_image_vae.safetensors"
+QWEN_STEPS = 20
+QWEN_CFG = 4.0
+QWEN_SHIFT = 3.1
+QWEN_SIZE = 1328
+# A Qwen image takes 100-190s on the GB10 before queueing. The Flux 300s
+# default is too tight, so the Qwen path gets its own deadline.
+QWEN_TIMEOUT_SECONDS = 900.0
 
 # Alpha cleanup applied to the background removal result.
 ALPHA_BLACK_POINT = 24
@@ -244,6 +260,49 @@ class ComfyUIClient:
         )
         return self._run_graph(graph, seed=actual_seed)
 
+    def generate_qwen_image(
+        self,
+        *,
+        prompt: str,
+        width: int = QWEN_SIZE,
+        height: int = QWEN_SIZE,
+        seed: int | None = None,
+        steps: int = QWEN_STEPS,
+        cfg: float = QWEN_CFG,
+        shift: float = QWEN_SHIFT,
+        sampler_name: str = "euler",
+        scheduler: str = "simple",
+        negative_prompt: str = "",
+        unet_name: str | None = None,
+        clip_name: str | None = None,
+        vae_name: str | None = None,
+    ) -> ComfyUIResult:
+        """Queue a Qwen-Image text-to-image workflow and block until it is ready.
+
+        Qwen-Image is only used for the typographic hero path: it can render a
+        kicker and a hero word with the subject weaving through the letters,
+        which Flux cannot spell (issue #254). The defaults are the official
+        ComfyUI template's, and the deadline is longer because a 20B model at
+        20 steps takes 100-190s on the GB10.
+        """
+        actual_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
+        graph = build_qwen_image_txt2img_graph(
+            prompt=prompt,
+            width=width,
+            height=height,
+            seed=actual_seed,
+            steps=steps,
+            cfg=cfg,
+            shift=shift,
+            sampler_name=sampler_name,
+            scheduler=scheduler,
+            negative_prompt=negative_prompt,
+            unet_name=unet_name or QWEN_UNET_NAME,
+            clip_name=clip_name or QWEN_CLIP_NAME,
+            vae_name=vae_name or QWEN_VAE_NAME,
+        )
+        return self._run_graph(graph, seed=actual_seed, timeout_seconds=QWEN_TIMEOUT_SECONDS)
+
     def remove_background(
         self,
         image_bytes: bytes,
@@ -342,11 +401,17 @@ class ComfyUIClient:
         logger.info("Using background removal model %s", self._discovered_bg_model)
         return self._discovered_bg_model
 
-    def _run_graph(self, graph: dict[str, Any], *, seed: int | None = None) -> ComfyUIResult:
+    def _run_graph(
+        self,
+        graph: dict[str, Any],
+        *,
+        seed: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> ComfyUIResult:
         save_node_id = self._find_save_node(graph)
         prompt_id = self._queue(graph)
         logger.info("Queued ComfyUI workflow %s (save node %s)", prompt_id, save_node_id)
-        descriptor = self._await_image(prompt_id, save_node_id)
+        descriptor = self._await_image(prompt_id, save_node_id, timeout_seconds=timeout_seconds)
         image_bytes = self._fetch_image(descriptor)
         return ComfyUIResult(image_bytes=image_bytes, prompt_id=prompt_id, seed=seed)
 
@@ -374,8 +439,15 @@ class ComfyUIClient:
             raise ComfyUIError("ComfyUI accepted the workflow but returned no prompt_id")
         return str(prompt_id)
 
-    def _await_image(self, prompt_id: str, save_node_id: str) -> dict[str, Any]:
-        deadline = time.monotonic() + self.timeout_seconds
+    def _await_image(
+        self,
+        prompt_id: str,
+        save_node_id: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
+        deadline = time.monotonic() + timeout
         while True:
             try:
                 response = self._http.get(f"{self.base_url}/history/{prompt_id}")
@@ -402,9 +474,7 @@ class ComfyUIClient:
                     )
 
             if time.monotonic() >= deadline:
-                raise ComfyUIError(
-                    f"ComfyUI workflow {prompt_id} timed out after {self.timeout_seconds}s"
-                )
+                raise ComfyUIError(f"ComfyUI workflow {prompt_id} timed out after {timeout}s")
             time.sleep(self.poll_interval_seconds)
 
     def _fetch_image(self, descriptor: dict[str, Any]) -> bytes:

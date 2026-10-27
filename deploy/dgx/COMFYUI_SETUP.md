@@ -139,6 +139,34 @@ phrase exactly, including `SALT & PEPPER`, `2 SPOOKY 4 YOU`, and `BOO JEE`.
 > Qwen-Image **2.1** is research-only and must not be used. FLUX.2 dev (32B) and
 > FLUX.2 Klein 9B are non-commercial. Ideogram is API-only.
 
+### Typographic hero path
+
+The renderer has two image paths:
+
+| Path | Model | What it draws | Text source |
+|------|-------|---------------|-------------|
+| `type_hero` / `wordmark_stack` | Qwen-Image | Kicker + hero word + subject | Qwen draws it, strict OCR gate |
+| `full_bleed`, `emblem`, captions, no-text | Flux Schnell | Artwork only | Compositor, or no text at all |
+
+The hero path is opt-in and disabled by default. Enable it for a trial batch
+with:
+
+```bash
+TYPOGRAPHIC_HERO_ENABLED=1
+# Optional: target specific briefs when they do not use a hero layout yet.
+TYPOGRAPHIC_HERO_BRIEF_IDS=254,255
+# Optional: Qwen renders to retry before the brief fails (default 2).
+TYPOGRAPHIC_HERO_CANDIDATES=2
+```
+
+Qwen renders the kicker and the hero word in one pass. The descriptor is not
+part of that pass: three blocks in one prompt garbled the third block in the
+Phase 1 tests, so the descriptor is composited deterministically afterwards.
+Every candidate is read back by Qwen2.5-VL three times; at least two readings
+must match the copy exactly, preserving `&`, apostrophes, hyphens, and digits.
+A candidate that fails is retried with the next seed, and a brief that runs out
+of candidates is left unrendered rather than uploaded with a typo.
+
 ### Verifying the installation
 
 ```bash

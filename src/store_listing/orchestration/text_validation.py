@@ -22,12 +22,18 @@ from PIL import Image
 
 __all__ = [
     "OCR_PROMPT",
+    "STRICT_OCR_PROMPTS",
+    "StrictTextResult",
+    "StrictTextValidator",
     "TextValidationResult",
     "TextValidator",
+    "count_text_blocks",
     "encode_image_for_vision",
     "is_verifiable",
     "missing_words",
+    "normalize_strict_text",
     "normalize_text",
+    "strict_text_matches",
     "text_matches",
 ]
 
@@ -35,6 +41,23 @@ OCR_PROMPT = (
     "Transcribe every word of text visible in this image, verbatim. "
     "Preserve capitalisation and reading order. "
     "If there is no text at all, reply with exactly: NO_TEXT"
+)
+
+# Model-drawn bubble lettering needs a different question from the flat
+# compositor type. The Phase 0 bake-off found "transcribe the stylised text"
+# could misread a correct GROOVY as CROOVY, while asking what text is shown
+# was stable. Three readings with a majority vote keep OCR noise from
+# rejecting a good candidate without letting a genuine typo through.
+STRICT_OCR_PROMPTS: tuple[str, ...] = (
+    "What text is shown in this image? Output only the words.",
+    (
+        "Read the large lettering in this image exactly as written. "
+        "Output only the words, one block per line."
+    ),
+    (
+        "Transcribe the text in this image. Do not correct spelling or add words. "
+        "Output only the words."
+    ),
 )
 
 NO_TEXT_MARKER = "NO_TEXT"
@@ -69,6 +92,21 @@ class TextValidationResult:
     wrong_words: list[str] = field(default_factory=list)
 
 
+@dataclass
+class StrictTextResult:
+    """Verdict for model-drawn lettering, where every letter has to be right."""
+
+    matched: bool
+    expected: list[str]
+    observed: str
+    score: float
+    error: str | None = None
+    missing: list[str] = field(default_factory=list)
+    duplicated: list[str] = field(default_factory=list)
+    votes: int = 0
+    observations: list[str] = field(default_factory=list)
+
+
 def encode_image_for_vision(image_bytes: bytes, *, max_side: int = DEFAULT_MAX_SIDE) -> str:
     """Downscale and JPEG-encode an image into a base64 data URL for the vision model.
 
@@ -98,6 +136,78 @@ def normalize_text(text: str) -> str:
         " " if character in string.punctuation else character for character in lowered
     )
     return " ".join(without_punctuation.split())
+
+
+# Typographic lookalikes are the same character for spelling purposes. The
+# rest of the punctuation is decoration: GROOVY! and GROOVY are the same word.
+_TYPOGRAPHIC_REPLACEMENTS = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+    }
+)
+
+# Punctuation that changes the message and must survive strict normalisation.
+_STRICT_PUNCTUATION = frozenset("&'-")
+
+
+def normalize_strict_text(text: str) -> str:
+    """Casefold and normalise, keeping the characters that change the words.
+
+    The tolerant :func:`normalize_text` drops every punctuation mark, so
+    "SALT & PEPPER" and "SALT PEPPER" compare equal. For model-drawn lettering
+    that is exactly the defect the gate exists to catch, so strict
+    normalisation keeps ``&``, ``'`` and ``-`` and drops only decoration.
+    """
+    translated = text.translate(_TYPOGRAPHIC_REPLACEMENTS)
+    kept = "".join(
+        character
+        if character.isalnum() or character in _STRICT_PUNCTUATION or character.isspace()
+        else " "
+        for character in translated.casefold()
+    )
+    return " ".join(kept.split())
+
+
+def _strict_tokens(text: str) -> list[str]:
+    return normalize_strict_text(text).split()
+
+
+def count_text_blocks(expected: str, observed: str) -> int:
+    """How many times ``expected`` appears as whole tokens in ``observed``.
+
+    A block may be split over lines by the transcription, so the match is done
+    on the token sequence rather than on a line. Whole tokens matter: GROOVY
+    must not match GROOVYX.
+    """
+    expected_tokens = _strict_tokens(expected)
+    observed_tokens = _strict_tokens(observed)
+    if not expected_tokens or not observed_tokens:
+        return 0
+    width = len(expected_tokens)
+    return sum(
+        1
+        for start in range(len(observed_tokens) - width + 1)
+        if observed_tokens[start : start + width] == expected_tokens
+    )
+
+
+def strict_text_matches(expected: str, observed: str) -> tuple[bool, float]:
+    """Return ``(matched, 1.0)`` only when the text is there exactly once.
+
+    This is the gate for a hero word: one wrong letter, a missing ampersand,
+    or the word drawn twice all fail. It is deliberately stricter than
+    :func:`text_matches`, which tolerates an OCR misread on a long word.
+    """
+    if not normalize_strict_text(expected):
+        return True, 1.0
+    if count_text_blocks(expected, observed) == 1:
+        return True, 1.0
+    return False, 0.0
 
 
 def _best_window_ratio(expected: str, observed: str) -> float:
@@ -352,3 +462,128 @@ class TextValidator:
             ],
         )
         return response.choices[0].message.content or ""
+
+
+class StrictTextValidator:
+    """Fail-closed OCR gate for lettering the image model drew itself.
+
+    The compositor's type is predictable, so a single transcription is enough.
+    Qwen-Image draws stylised bubble letters, and a vision model can misread a
+    correct word (the bake-off saw GROOVY read back as CROOVY). Three readings
+    with a majority vote separate OCR noise from a real typo: a genuine error
+    is read the same wrong way every time, while a correct word survives one
+    noisy reading.
+    """
+
+    def __init__(
+        self,
+        *,
+        client: Any,
+        model: str,
+        prompts: Sequence[str] = STRICT_OCR_PROMPTS,
+        min_votes: int = 2,
+    ) -> None:
+        if min_votes < 1:
+            raise ValueError("min_votes must be at least 1")
+        self._client = client
+        self._model = model
+        self._prompts = tuple(prompts)
+        self._min_votes = min_votes
+
+    def validate(self, image_bytes: bytes, *, expected: Sequence[str]) -> StrictTextResult:
+        blocks = [block.strip() for block in expected if block and block.strip()]
+        verifiable = [block for block in blocks if is_verifiable(block)]
+        if not verifiable:
+            return StrictTextResult(
+                matched=True,
+                expected=blocks,
+                observed="",
+                score=1.0,
+            )
+
+        try:
+            data_url = encode_image_for_vision(image_bytes)
+        except Exception as error:  # noqa: BLE001 - fail closed on any image error
+            return StrictTextResult(
+                matched=False,
+                expected=blocks,
+                observed="",
+                score=0.0,
+                error=f"Vision validation failed: {error}",
+            )
+
+        observations: list[str] = []
+        errors: list[str] = []
+        for prompt in self._prompts:
+            try:
+                observations.append(self._transcribe(data_url, prompt))
+            except Exception as error:  # noqa: BLE001 - one bad reading is not fatal
+                errors.append(str(error))
+
+        if not observations:
+            return StrictTextResult(
+                matched=False,
+                expected=blocks,
+                observed="",
+                score=0.0,
+                error="Vision validation failed: " + "; ".join(errors),
+            )
+
+        votes = 0
+        missing: list[str] = []
+        duplicated: list[str] = []
+        for observation in observations:
+            if NO_TEXT_MARKER in observation.strip().upper():
+                _extend_unique(missing, verifiable)
+                continue
+
+            observation_missing: list[str] = []
+            observation_duplicated: list[str] = []
+            for block in verifiable:
+                count = count_text_blocks(block, observation)
+                if count == 0:
+                    observation_missing.append(block)
+                elif count > 1:
+                    observation_duplicated.append(block)
+
+            _extend_unique(missing, observation_missing)
+            _extend_unique(duplicated, observation_duplicated)
+            if not observation_missing and not observation_duplicated:
+                votes += 1
+
+        matched = votes >= self._min_votes
+        error = None
+        if errors and not matched:
+            error = "Vision validation failed: " + "; ".join(errors)
+        return StrictTextResult(
+            matched=matched,
+            expected=blocks,
+            observed="\n---\n".join(observations),
+            score=votes / len(observations),
+            error=error,
+            missing=missing,
+            duplicated=duplicated,
+            votes=votes,
+            observations=observations,
+        )
+
+    def _transcribe(self, data_url: str, prompt: str) -> str:
+        response = self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+        )
+        return response.choices[0].message.content or ""
+
+
+def _extend_unique(target: list[str], values: Sequence[str]) -> None:
+    for value in values:
+        if value not in target:
+            target.append(value)

@@ -7,6 +7,7 @@ from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from PIL import Image
 
 from store_listing.orchestration.artwork_validation import (
@@ -18,7 +19,7 @@ from store_listing.orchestration.image_pipeline import (
     generate_image_for_brief,
     generate_images_for_briefs,
 )
-from store_listing.orchestration.text_validation import TextValidationResult
+from store_listing.orchestration.text_validation import StrictTextResult, TextValidationResult
 
 
 def _real_png(width: int = 64, height: int = 64, color: str = "white") -> bytes:
@@ -1076,3 +1077,113 @@ class TestTheLookOfARender:
         nouveau = Image.open(BytesIO(body)).convert("RGB")
 
         assert comic.tobytes() != nouveau.tobytes()
+
+
+class TestTypographicHeroPath:
+    """The Qwen wordmark path is opt-in and only draws the copy it can spell."""
+
+    def _hero_brief(self, **overrides: Any) -> dict[str, Any]:
+        row = _brief(
+            id=254,
+            product_type="sublimation",
+            layout_type="type_hero",
+            headline_text="GROOVY",
+            tagline_text="GROOVY GHOST VIBES",
+            scene_description="a cute groovy ghost",
+        )
+        row.update(overrides)
+        return row
+
+    def _hero_validator(self, *, matched: bool = True) -> MagicMock:
+        validator = MagicMock()
+        validator.validate.return_value = StrictTextResult(
+            matched=matched,
+            expected=["GROOVY"],
+            observed="GROOVY" if matched else "CROOVY",
+            score=1.0 if matched else 0.0,
+        )
+        return validator
+
+    def test_a_hero_brief_is_drawn_by_qwen_and_uploaded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        db = _mock_db_client(briefs=[self._hero_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"hero", seed=1)
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            hero_validator=self._hero_validator(),
+        )
+
+        assert result == {"status": "success", "images_generated": 1, "errors": 0}
+        comfy.generate_qwen_image.assert_called_once()
+        comfy.generate_image.assert_not_called()
+        prompt = comfy.generate_qwen_image.call_args.kwargs["prompt"]
+        assert "GROOVY" in prompt
+        assert "GROOVY GHOST VIBES" not in prompt
+        db.update_brief_image_keys.assert_called_once()
+        keys = db.update_brief_image_keys.call_args.kwargs
+        assert keys["image_key_raw"].endswith("_raw.png")
+        assert keys["image_key_transparent"] is None
+
+    def test_the_dtf_hero_is_keyed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        brief = self._hero_brief(product_type="dtf_apparel")
+        db = _mock_db_client(briefs=[brief])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"hero")
+        comfy.remove_background.return_value = ComfyUIResult(image_bytes=b"keyed")
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            hero_validator=self._hero_validator(),
+        )
+
+        comfy.remove_background.assert_called_once_with(b"hero")
+        keys = db.update_brief_image_keys.call_args.kwargs
+        assert keys["image_key_transparent"].endswith("_transparent.png")
+
+    def test_the_path_is_off_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("TYPOGRAPHIC_HERO_ENABLED", raising=False)
+        db = _mock_db_client(briefs=[self._hero_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_image.return_value = ComfyUIResult(image_bytes=_real_png())
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+            hero_validator=self._hero_validator(),
+        )
+
+        assert result["images_generated"] == 1
+        comfy.generate_image.assert_called_once()
+        comfy.generate_qwen_image.assert_not_called()
+
+    def test_a_hero_that_fails_the_gate_is_not_uploaded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_CANDIDATES", "2")
+        db = _mock_db_client(briefs=[self._hero_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"hero")
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            hero_validator=self._hero_validator(matched=False),
+        )
+
+        assert result["errors"] == 1
+        assert comfy.generate_qwen_image.call_count == 2
+        comfy.generate_image.assert_not_called()
+        db.update_brief_image_keys.assert_not_called()
