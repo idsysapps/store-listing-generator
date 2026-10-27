@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from io import BytesIO
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 from PIL import Image
@@ -1187,3 +1187,105 @@ class TestTypographicHeroPath:
         assert comfy.generate_qwen_image.call_count == 2
         comfy.generate_image.assert_not_called()
         db.update_brief_image_keys.assert_not_called()
+
+    def test_the_descriptor_is_composited_into_the_raw_image(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        monkeypatch.delenv("TYPOGRAPHIC_HERO_DESCRIPTOR", raising=False)
+        composed = MagicMock(return_value=b"composed")
+        monkeypatch.setattr(
+            "store_listing.orchestration.image_pipeline.compose_hero_descriptor", composed
+        )
+        db = _mock_db_client(briefs=[self._hero_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"hero")
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            hero_validator=self._hero_validator(),
+        )
+
+        composed.assert_called_once_with(b"hero", "GROOVY GHOST VIBES", transparent=False)
+        bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
+        assert b"composed" in bodies
+
+    def test_the_descriptor_can_be_switched_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_DESCRIPTOR", "0")
+        composed = MagicMock(return_value=b"composed")
+        monkeypatch.setattr(
+            "store_listing.orchestration.image_pipeline.compose_hero_descriptor", composed
+        )
+        db = _mock_db_client(briefs=[self._hero_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"hero")
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            hero_validator=self._hero_validator(),
+        )
+
+        composed.assert_not_called()
+        bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
+        assert bodies == [b"hero"]
+
+    def test_the_dtf_descriptor_is_composited_on_the_keyed_artwork(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        monkeypatch.delenv("TYPOGRAPHIC_HERO_DESCRIPTOR", raising=False)
+        composed = MagicMock(side_effect=[b"composed-raw", b"composed-keyed"])
+        monkeypatch.setattr(
+            "store_listing.orchestration.image_pipeline.compose_hero_descriptor", composed
+        )
+        db = _mock_db_client(briefs=[self._hero_brief(product_type="dtf_apparel")])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"hero")
+        comfy.remove_background.return_value = ComfyUIResult(image_bytes=b"keyed")
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            hero_validator=self._hero_validator(),
+        )
+
+        assert composed.call_args_list == [
+            call(b"hero", "GROOVY GHOST VIBES", transparent=False),
+            call(b"keyed", "GROOVY GHOST VIBES", transparent=True),
+        ]
+        bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
+        assert b"composed-raw" in bodies
+        assert b"composed-keyed" in bodies
+
+    def test_a_hero_without_a_descriptor_skips_the_compositor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        composed = MagicMock(return_value=b"composed")
+        monkeypatch.setattr(
+            "store_listing.orchestration.image_pipeline.compose_hero_descriptor", composed
+        )
+        db = _mock_db_client(briefs=[self._hero_brief(tagline_text=None)])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"hero")
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            hero_validator=self._hero_validator(),
+        )
+
+        composed.assert_not_called()
+        bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
+        assert bodies == [b"hero"]
