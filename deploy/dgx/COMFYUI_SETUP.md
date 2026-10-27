@@ -157,6 +157,8 @@ TYPOGRAPHIC_HERO_ENABLED=1
 TYPOGRAPHIC_HERO_BRIEF_IDS=254,255
 # Optional: Qwen renders to retry before the brief fails (default 2).
 TYPOGRAPHIC_HERO_CANDIDATES=2
+# Optional: upload the Phase 1 image without the composited descriptor.
+TYPOGRAPHIC_HERO_DESCRIPTOR=0
 ```
 
 Qwen renders the kicker and the hero word in one pass. The descriptor is not
@@ -166,6 +168,12 @@ Every candidate is read back by Qwen2.5-VL three times; at least two readings
 must match the copy exactly, preserving `&`, apostrophes, hyphens, and digits.
 A candidate that fails is retried with the next seed, and a brief that runs out
 of candidates is left unrendered rather than uploaded with a typo.
+
+The descriptor compositor finds the artwork's content bounding box, reflows the
+artwork into the upper part of the canvas, and draws the descriptor in Anton in
+a reserved bottom band. It never overlaps the artwork. The DTF file gets the
+descriptor on the keyed artwork with a light outline. Set
+`TYPOGRAPHIC_HERO_DESCRIPTOR=0` to upload the Phase 1 image unchanged.
 
 ### Verifying the installation
 

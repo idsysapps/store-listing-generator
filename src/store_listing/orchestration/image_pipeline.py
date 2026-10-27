@@ -28,6 +28,10 @@ from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.design_templates import composition_for, resolve_template
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE
+from store_listing.orchestration.hero_descriptor import (
+    compose_hero_descriptor,
+    descriptor_enabled,
+)
 from store_listing.orchestration.image_generation import (
     ARTWORK_RETRY_HINT,
     NO_LETTERING_RETRY_HINT,
@@ -267,6 +271,23 @@ def _upload_text_only(
     return True, None
 
 
+def _hero_with_descriptor(
+    image_bytes: bytes,
+    descriptor: str | None,
+    *,
+    transparent: bool = False,
+) -> bytes:
+    """The hero artwork with its descriptor, unless it has none or is off.
+
+    The descriptor is drawn after the strict gate because Qwen garbles a third
+    block. For the DTF file it is drawn on the keyed artwork, so the outline
+    can do its job on any garment colour.
+    """
+    if not descriptor or not descriptor.strip() or not descriptor_enabled():
+        return image_bytes
+    return compose_hero_descriptor(image_bytes, descriptor, transparent=transparent)
+
+
 def _generate_typographic_hero_brief(
     brief_row: dict[str, Any],
     brief: DesignBrief,
@@ -302,14 +323,18 @@ def _generate_typographic_hero_brief(
         )
         return False, result.error or "typographic hero generation failed"
 
-    raw_bytes = result.image_bytes
+    raw_bytes = _hero_with_descriptor(result.image_bytes, copy.descriptor)
     transparent_bytes: bytes | None = None
     if is_dtf:
-        keyed = comfyui_client.remove_background(raw_bytes)
+        # Key the Qwen artwork, then draw the descriptor on the transparent
+        # canvas: background removal must not decide what happens to the type.
+        keyed = comfyui_client.remove_background(result.image_bytes)
         if keyed.image_bytes is None:
             logger.warning("Background removal failed for hero brief %d: %s", brief_id, keyed.error)
         else:
-            transparent_bytes = keyed.image_bytes
+            transparent_bytes = _hero_with_descriptor(
+                keyed.image_bytes, copy.descriptor, transparent=True
+            )
 
     keys = storage.upload_design(
         raw_bytes=raw_bytes,
