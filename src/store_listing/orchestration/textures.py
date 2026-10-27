@@ -87,11 +87,18 @@ def apply_texture(
     texture: str | None,
     *,
     key_colour: tuple[int, int, int] | None = None,
+    alpha_mask_bytes: bytes | None = None,
 ) -> bytes:
     """The artwork with the texture of its look on it.
 
     ``key_colour`` is the colour of the background of a render that has not
     been keyed out. The texture is not painted on that background.
+
+    ``alpha_mask_bytes`` is a transparent render of the same artwork. The DTF
+    background is not always the exact key magenta, so a key-colour distance
+    lets pink pixels through and stamps the halftone onto the preview
+    background. The alpha of the keyed render is the exact foreground mask
+    (issue #227).
     """
     if not texture:
         return image_bytes
@@ -112,7 +119,17 @@ def apply_texture(
     if offset is None:
         return image_bytes
 
-    if key_colour is not None:
+    if alpha_mask_bytes is not None:
+        try:
+            mask_image = Image.open(BytesIO(alpha_mask_bytes)).convert("RGBA")
+        except OSError as error:
+            logger.warning("Cannot read the texture mask: %s", error)
+            mask = (alpha > 0).astype(np.float32)
+        else:
+            if mask_image.size != image.size:
+                mask_image = mask_image.resize(image.size, Image.Resampling.NEAREST)
+            mask = (np.asarray(mask_image)[:, :, 3] > 0).astype(np.float32)
+    elif key_colour is not None:
         distance = np.abs(rgb - np.array(key_colour, dtype=np.float32)).sum(axis=2)
         mask = (distance > KEY_DISTANCE).astype(np.float32)
     else:

@@ -140,7 +140,13 @@ def _textured(
 
     if keyed:
         return apply_texture(source, texture)
-    return apply_texture(source, texture, key_colour=DTF_KEY_COLOUR if is_dtf else None)
+    alpha_mask = result.image_bytes if is_dtf and result.background_removed else None
+    return apply_texture(
+        source,
+        texture,
+        key_colour=DTF_KEY_COLOUR if is_dtf else None,
+        alpha_mask_bytes=alpha_mask,
+    )
 
 
 def _retry_hint(brief: DesignBrief) -> str:
