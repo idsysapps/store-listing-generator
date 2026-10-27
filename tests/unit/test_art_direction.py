@@ -52,6 +52,11 @@ class TestTheVocabulary:
             assert preset.headline_family in FONTS
             assert preset.tagline_family in FONTS
 
+    def test_every_look_is_despeckled(self) -> None:
+        # The image model can draw a dot screen under any look; a 5 x 5
+        # median removes it before the type goes on.
+        assert all(preset.despeckle for preset in PRESETS.values())
+
     def test_a_look_that_is_not_sold_is_not_found(self) -> None:
         assert preset_for("cubism") is None
         assert preset_for(None) is None
