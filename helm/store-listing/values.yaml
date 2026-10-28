@@ -37,6 +37,11 @@ config:
   # setting so a run can be tuned without a code change (issue #210).
   comfyuiSteps: "4"
   comfyuiCfg: "1.0"
+  # The Qwen typographic hero path is slower than Flux, so it is opt-in.
+  typographicHeroEnabled: "0"
+  typographicHeroBriefIds: ""
+  typographicHeroCandidates: "2"
+  typographicHeroDescriptor: "1"
   visionLlmBaseUrl: ""
   visionLlmModel: "qwen_vl_ocr"
   artworkVisionModel: ""

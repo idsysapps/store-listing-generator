@@ -14,6 +14,12 @@ config:
   # app_settings wins over this value, so the scope can be changed without a
   # redeploy (issue #216).
   enabledProductTypes: "dtf_apparel"
+  # Qwen draws the kicker and hero word for type_hero briefs. The path is
+  # slower than Flux, but it is the only one that spells reliably.
+  typographicHeroEnabled: "1"
+  typographicHeroBriefIds: ""
+  typographicHeroCandidates: "2"
+  typographicHeroDescriptor: "1"
 
 secrets:
   databaseUser: store_listing

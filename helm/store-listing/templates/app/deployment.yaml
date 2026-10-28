@@ -244,6 +244,14 @@ spec:
               value: {{ .Values.config.comfyuiSteps | default "4" | quote }}
             - name: COMFYUI_CFG
               value: {{ .Values.config.comfyuiCfg | default "1.0" | quote }}
+            - name: TYPOGRAPHIC_HERO_ENABLED
+              value: {{ .Values.config.typographicHeroEnabled | default "0" | quote }}
+            - name: TYPOGRAPHIC_HERO_BRIEF_IDS
+              value: {{ .Values.config.typographicHeroBriefIds | default "" | quote }}
+            - name: TYPOGRAPHIC_HERO_CANDIDATES
+              value: {{ .Values.config.typographicHeroCandidates | default "2" | quote }}
+            - name: TYPOGRAPHIC_HERO_DESCRIPTOR
+              value: {{ .Values.config.typographicHeroDescriptor | default "1" | quote }}
             - name: VISION_LLM_BASE_URL
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL
@@ -467,6 +475,14 @@ spec:
               value: {{ .Values.config.comfyuiSteps | default "4" | quote }}
             - name: COMFYUI_CFG
               value: {{ .Values.config.comfyuiCfg | default "1.0" | quote }}
+            - name: TYPOGRAPHIC_HERO_ENABLED
+              value: {{ .Values.config.typographicHeroEnabled | default "0" | quote }}
+            - name: TYPOGRAPHIC_HERO_BRIEF_IDS
+              value: {{ .Values.config.typographicHeroBriefIds | default "" | quote }}
+            - name: TYPOGRAPHIC_HERO_CANDIDATES
+              value: {{ .Values.config.typographicHeroCandidates | default "2" | quote }}
+            - name: TYPOGRAPHIC_HERO_DESCRIPTOR
+              value: {{ .Values.config.typographicHeroDescriptor | default "1" | quote }}
             - name: VISION_LLM_BASE_URL
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL
