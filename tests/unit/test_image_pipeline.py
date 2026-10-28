@@ -1320,6 +1320,7 @@ class TestTypographicHeroPath:
         prompt = comfy.generate_qwen_image.call_args.kwargs["prompt"]
         assert "GROOVY" in prompt
         assert "GROOVY GHOST VIBES" not in prompt
+        assert "plain white background" in prompt
         db.update_brief_image_keys.assert_called_once()
         keys = db.update_brief_image_keys.call_args.kwargs
         assert keys["image_key_raw"].endswith("_raw.png")
@@ -1343,6 +1344,26 @@ class TestTypographicHeroPath:
         comfy.remove_background.assert_called_once_with(b"hero")
         keys = db.update_brief_image_keys.call_args.kwargs
         assert keys["image_key_transparent"].endswith("_transparent.png")
+
+    def test_the_dtf_hero_prompt_uses_a_keyable_background(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        db = _mock_db_client(briefs=[self._hero_brief(product_type="dtf_apparel")])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"hero")
+        comfy.remove_background.return_value = ComfyUIResult(image_bytes=b"keyed")
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            hero_validator=self._hero_validator(),
+        )
+
+        prompt = comfy.generate_qwen_image.call_args.kwargs["prompt"]
+        assert "solid pure magenta background" in prompt
+        assert "plain white background" not in prompt
 
     def test_the_path_is_off_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("TYPOGRAPHIC_HERO_ENABLED", raising=False)
