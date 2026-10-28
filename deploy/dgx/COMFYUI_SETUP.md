@@ -161,6 +161,11 @@ TYPOGRAPHIC_HERO_CANDIDATES=2
 TYPOGRAPHIC_HERO_DESCRIPTOR=0
 ```
 
+In the Helm chart the same settings are `config.typographicHeroEnabled`,
+`config.typographicHeroBriefIds`, `config.typographicHeroCandidates` and
+`config.typographicHeroDescriptor`. The defaults keep the path off;
+`helm/store-listing/prod-values.yaml` turns it on.
+
 Qwen renders the kicker and the hero word in one pass. The descriptor is not
 part of that pass: three blocks in one prompt garbled the third block in the
 Phase 1 tests, so the descriptor is composited deterministically afterwards.
