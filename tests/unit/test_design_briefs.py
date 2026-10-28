@@ -232,6 +232,7 @@ class TestBuildBriefPrompt:
         assert "Through A Kitchen" in system
         assert "Kitchen Commute" in system
         assert "should usually be null" in system
+        assert "not a list of words" in system
 
 
 class TestParseBriefResponse:
