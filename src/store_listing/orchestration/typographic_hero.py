@@ -44,6 +44,10 @@ __all__ = [
 
 DEFAULT_STYLE = "retro 1970s bubble lettering"
 DEFAULT_PALETTE: tuple[str, ...] = ("lavender", "orange", "black", "white")
+DEFAULT_BACKGROUND = "plain white background"
+# DTF keys the background out, so a white subject on white would disappear.
+# Magenta is the same key the Flux path uses and keeps white artwork visible.
+DTF_BACKGROUND = "solid pure magenta background, chroma key backdrop"
 DEFAULT_CANDIDATES = 2
 ENABLED_ENV = "TYPOGRAPHIC_HERO_ENABLED"
 BRIEF_IDS_ENV = "TYPOGRAPHIC_HERO_BRIEF_IDS"
@@ -129,6 +133,7 @@ class HeroCopy:
     subject: str = ""
     style: str = DEFAULT_STYLE
     palette: tuple[str, ...] = DEFAULT_PALETTE
+    background: str = DEFAULT_BACKGROUND
 
     def __post_init__(self) -> None:
         if not self.hero or not self.hero.strip():
@@ -190,7 +195,7 @@ def build_typographic_hero_prompt(copy: HeroCopy) -> str:
 
     parts.append(
         "Thick black outline, hard offset shadow, flat "
-        f"{' '.join(palette)} palette, plain white background, generous margin, "
+        f"{' '.join(palette)} palette, {copy.background}, generous margin, "
         "no other text."
     )
     return " ".join(parts)
@@ -211,12 +216,14 @@ def hero_copy_from_brief(brief: DesignBrief) -> HeroCopy:
     kicker = kicker.strip() if isinstance(kicker, str) and kicker.strip() else None
     descriptor = (brief.tagline_text or "").strip() or None
     subject = strip_lettering((brief.scene_description or "").strip())
+    background = DTF_BACKGROUND if brief.product_type == "dtf_apparel" else DEFAULT_BACKGROUND
 
     return HeroCopy(
         hero=hero,
         kicker=kicker,
         descriptor=descriptor,
         subject=subject,
+        background=background,
     )
 
 

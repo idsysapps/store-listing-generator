@@ -34,10 +34,11 @@ def _brief(
     layout_type: str = "full_bleed",
     copy_mode: str = "caption",
     kicker_text: str | None = None,
+    product_type: str = "sublimation",
 ) -> DesignBrief:
     return DesignBrief(
         concept="a groovy ghost",
-        product_type="sublimation",
+        product_type=product_type,
         specific_products=[],
         audience="halloween shoppers",
         visual_style="retro",
@@ -230,6 +231,23 @@ class TestHeroCopyFromBrief:
         copy = hero_copy_from_brief(brief)
 
         assert copy.kicker == "IN MY SPOOKY ERA"
+
+    def test_a_sublimation_brief_keeps_the_white_background(self) -> None:
+        brief = _brief(product_type="sublimation", scene_description="a ghost")
+
+        copy = hero_copy_from_brief(brief)
+
+        assert copy.background == "plain white background"
+
+    def test_a_dtf_brief_uses_a_keyable_magenta_background(self) -> None:
+        brief = _brief(product_type="dtf_apparel", scene_description="a white ghost")
+
+        copy = hero_copy_from_brief(brief)
+
+        assert copy.background == "solid pure magenta background, chroma key backdrop"
+        prompt = build_typographic_hero_prompt(copy)
+        assert "solid pure magenta background" in prompt
+        assert "plain white background" not in prompt
 
 
 class TestFeatureFlag:
