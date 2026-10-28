@@ -220,6 +220,19 @@ class TestBuildBriefPrompt:
         assert "without hiding them" in system
         assert "weaves through the letters" not in system
 
+    def test_the_prompt_asks_for_sellable_copy(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        system = messages[0]["content"]
+        assert "would a stranger wear" in system.lower()
+        assert "Through A Kitchen" in system
+        assert "Kitchen Commute" in system
+        assert "should usually be null" in system
+
 
 class TestParseBriefResponse:
     def test_parses_well_formed_json(self) -> None:
@@ -1011,6 +1024,69 @@ class TestGenerateDesignBriefs:
         assert kwargs["copy_mode"] == "type_hero"
         assert kwargs["kicker_text"] == "IN MY SPOOKY ERA"
 
+    def test_the_copy_review_drops_a_scene_tagline(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setenv("LLM_COPY_REVIEW", "true")
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        db = self._mock_db([_briefable(1, "gnome train shirt")])
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Night Train",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                            "layout_type": "type_hero",
+                            "copy_mode": "type_hero",
+                            "headline_text": "NIGHT TRAIN",
+                            "kicker_text": "GNOME ON THE MOVE",
+                            "tagline_text": "THROUGH A KITCHEN",
+                            "scene_description": "a garden gnome driving a night train through a kitchen",
+                        }
+                    ]
+                }
+            ),
+            self._raw(
+                {
+                    "reviews": [
+                        {
+                            "index": 1,
+                            "design_stands_alone": True,
+                            "headline": {
+                                "action": "KEEP",
+                                "rewrite": None,
+                                "reason": "Reads as the main line.",
+                            },
+                            "kicker": {
+                                "action": "KEEP",
+                                "rewrite": None,
+                                "reason": "Sets up the hero.",
+                            },
+                            "tagline": {
+                                "action": "DROP",
+                                "rewrite": None,
+                                "reason": "The design stands alone.",
+                            },
+                            "overall_action": "KEEP",
+                            "overall_reason": "One clear joke.",
+                            "confidence": 0.9,
+                        }
+                    ]
+                }
+            ),
+        ]
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        kwargs = db.insert_design_brief.call_args.kwargs
+        assert kwargs["headline_text"] == "NIGHT TRAIN"
+        assert kwargs["tagline_text"] is None
+        assert llm.with_raw_response.create.call_count == 2
+
     def test_stores_a_no_text_brief_without_copy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import store_listing.orchestration.design_briefs as mod
 
@@ -1644,14 +1720,16 @@ class TestTheTextGate:
         result = parse_brief_response(self._brief("Feast, fun, and fireworks"))
         assert result == []
 
-    def test_a_headline_that_only_restates_the_picture_is_dropped(self) -> None:
+    def test_semantic_copy_is_left_to_the_editor(self) -> None:
+        # A line that restates the picture is a job for the LLM copy editor,
+        # not the mechanical safety gate (issue #266).
         result = parse_brief_response(
             self._brief(
-                "A Stone Castle With A Wide Gate",
+                "Stone Castle Wide Gate",
                 scene_description="a stone castle with a wide gate",
             )
         )
-        assert result == []
+        assert len(result) == 1
 
     def test_the_reason_is_reported(self) -> None:
         rejections: list[str] = []

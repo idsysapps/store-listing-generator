@@ -73,24 +73,27 @@ class TestScreenText:
             is None
         )
 
-    def test_a_headline_that_only_restates_the_picture_is_rejected(self) -> None:
-        reason = screen_text(
-            "A Castle With Autumn Trees",
-            scene="a stone castle with autumn trees and falling leaves",
-            voice="deadpan",
+    def test_semantic_quality_is_left_to_the_copy_editor(self) -> None:
+        # The LLM editor decides whether a line restates the picture or says
+        # something worth wearing. The mechanical gate only checks hard
+        # constraints.
+        assert (
+            screen_text(
+                "A Castle With Autumn Trees",
+                scene="a stone castle with autumn trees and falling leaves",
+                voice="deadpan",
+            )
+            is None
         )
-        assert reason is not None
-        assert "picture" in reason.lower()
-
-    def test_a_tagline_that_repeats_the_headline_is_rejected(self) -> None:
-        reason = screen_text(
-            "Gobble Mode",
-            tagline="Gobble Mode All Day Long",
-            scene="a bird with a bib holding a drumstick",
-            voice="loud",
+        assert (
+            screen_text(
+                "Gobble Mode",
+                tagline="Gobble Mode All Day Long",
+                scene="a bird with a bib holding a drumstick",
+                voice="loud",
+            )
+            is None
         )
-        assert reason is not None
-        assert "tagline" in reason.lower()
 
     def test_a_too_long_headline_is_rejected(self) -> None:
         reason = screen_text(
@@ -101,22 +104,13 @@ class TestScreenText:
         assert reason is not None
         assert "long" in reason.lower()
 
-    def test_a_deadpan_headline_of_pure_sentiment_is_rejected(self) -> None:
-        # A deadpan line says something. "Warm love and happy memories" says
-        # nothing.
-        reason = screen_text(
-            "Warm Love And Happy Memories",
-            scene="two cats under a blanket",
-            voice="deadpan",
-        )
-        assert reason is not None
-
-    def test_the_same_sentiment_is_allowed_in_the_cozy_voice(self) -> None:
+    def test_sentiment_is_not_a_mechanical_rejection(self) -> None:
+        # Whether a sentimental line says something is an editorial judgment.
         assert (
             screen_text(
                 "Warm Love And Happy Memories",
                 scene="two cats under a blanket",
-                voice="cozy",
+                voice="deadpan",
             )
             is None
         )

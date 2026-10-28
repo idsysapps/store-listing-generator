@@ -30,12 +30,14 @@ __all__ = [
     "PRODUCT_CATALOG",
     "PRODUCT_CATALOG_BY_TYPE",
     "SEASONAL_WORDS",
+    "SELLABILITY_RULES",
     "VOICE_RULES",
     "art_direction_rules",
     "copy_mode_rules",
     "layout_rules",
     "product_belongs_to",
     "product_catalog",
+    "sellability_rules",
     "voice_rules",
 ]
 
@@ -134,7 +136,9 @@ def layout_rules(enabled: Sequence[str] | None = None) -> str:
         "- headline_text: (required unless copy_mode is 'no_text') the main text "
         "line, short and punchy (1-6 words). Words only - no emoji, no symbols, no "
         "punctuation-only text.\n"
-        "- tagline_text: (optional) secondary text line\n"
+        "- tagline_text: (optional) a second line that adds a joke, identity or "
+        "occasion; usually null, especially for type_hero. It never describes the "
+        "scene.\n"
         "- kicker_text: (optional, copy_mode 'type_hero' only) a short line above the "
         "hero word, 1-6 words\n"
         "- font_color: hex color for the text (e.g. '#000000' for black, '#FF8C42' for "
@@ -154,8 +158,9 @@ COPY_MODE_RULES: Final[str] = (
     "(1-3 words, at most 6) drawn giant as the illustration; scene_description is the "
     "subject that interacts with the letters without hiding them, not the product "
     "and not the words; kicker_text is an optional short line above it; tagline_text "
-    "is the short descriptor below. Pick it when the idea is a phrase that can become "
-    "the picture.\n"
+    "is optional and should usually be null. A tagline is allowed only when it adds "
+    "a second joke, an occasion, or a brand-like line; it must never describe the "
+    "scene. Pick it when the idea is a phrase that can become the picture.\n"
     "- 'caption': an illustration with a headline and optional tagline. The headline "
     "says something the picture does not. This is the ordinary path.\n"
     "- 'no_text': the illustration explains itself. headline_text, tagline_text and "
@@ -170,6 +175,32 @@ COPY_MODE_RULES: Final[str] = (
 def copy_mode_rules() -> str:
     """The copy-mode rules, for the prompts that write a brief."""
     return COPY_MODE_RULES
+
+
+SELLABILITY_RULES: Final[str] = (
+    "SELLABILITY - what makes a design a shirt someone buys:\n"
+    "- One idea, one joke, one identity. The buyer wears the line, not a "
+    "description of the picture.\n"
+    "- The illustration shows the scene. Never add a line that explains what "
+    "the image already shows.\n"
+    "- Every line must earn its place. One strong line beats two weak ones.\n"
+    "- The headline is the main line a person wears. It must work at thumbnail "
+    "size, from across the room, and up close.\n"
+    "- A tagline is optional. For type_hero, leave it null unless it adds a "
+    "second joke, an occasion, or a brand-like line. Drop it when the design "
+    "stands alone.\n"
+    "- A good tagline adds a new layer. BAD: 'Through A Kitchen' (describes the "
+    "scene). GOOD: 'Kitchen Commute' (a second joke).\n"
+    "- Specificity beats a broad pun: write for a niche, an inside joke, a "
+    "profession, or a subculture.\n"
+    "- Ask: would a stranger wear this without the product description? If not, "
+    "rewrite it or leave the design text-free.\n"
+)
+
+
+def sellability_rules() -> str:
+    """The design principles that make a line worth wearing."""
+    return SELLABILITY_RULES
 
 
 # The store sells three voices and every brief picks one. The operator curates

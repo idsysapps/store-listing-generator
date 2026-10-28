@@ -34,6 +34,7 @@ from store_listing.orchestration.brief_prompts import (
     layout_rules,
     product_belongs_to,
     product_catalog,
+    sellability_rules,
     voice_rules,
 )
 from store_listing.orchestration.context_seeds import get_upcoming_events
@@ -144,6 +145,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
         f"{layout_rules(types)}\n"
         f"{copy_mode_rules()}\n"
+        f"{sellability_rules()}\n"
         f"{voice_rules()}\n"
         f"{art_direction_rules()}\n"
         f"{idea_device_rules()}\n"
@@ -808,6 +810,27 @@ def generate_design_briefs(
     # The idea device is rotated too, so the batch is not eight still lifes
     # (issue #240).
     kept = assign_batch_devices(kept, batch_id)
+
+    # The text is the part the buyer reads, so the model edits it before the
+    # images are made. It can keep, drop or rewrite a line, and it decides
+    # whether the design stands alone without a tagline (issue #266).
+    from store_listing.orchestration.copy_review import (
+        copy_review_enabled,
+        review_batch_copy,
+    )
+
+    if copy_review_enabled():
+        kept, copy_issues = review_batch_copy(llm_completions, model, kept)
+        if copy_issues:
+            logger.info("Copy review: %s", "; ".join(copy_issues))
+        if not kept:
+            return {
+                "status": "success",
+                "briefs_created": 0,
+                "briefable": len(candidates),
+                "reason": "every brief was rejected by the copy review",
+            }
+
     # Now that the templates and devices are known, the model decides how the
     # words live in each design. It sees the whole batch and plans the mix; the
     # code only checks the plan and renders it (issue #246).

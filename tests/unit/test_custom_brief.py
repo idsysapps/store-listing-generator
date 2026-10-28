@@ -116,6 +116,14 @@ class TestBuildCustomBriefPrompt:
         assert "no_text" in system
         assert "kicker_text" in system
 
+    def test_system_prompt_asks_for_sellable_copy(self) -> None:
+        messages = build_custom_brief_prompt("a groovy ghost", "dtf_apparel")
+
+        system = messages[0]["content"]
+        assert "would a stranger wear" in system.lower()
+        assert "Through A Kitchen" in system
+        assert "Kitchen Commute" in system
+
     def test_returns_system_and_user_messages(self) -> None:
         messages = build_custom_brief_prompt("test", "dtf_apparel")
         assert len(messages) == 2
@@ -312,6 +320,62 @@ class TestCreateCustomBrief:
         assert result["status"] == "success"
         assert result["brief_id"] == 42
         db.insert_design_brief.assert_called_once()
+
+    def test_the_copy_review_drops_a_scene_tagline(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LLM_COPY_REVIEW", "true")
+        db = self._mock_db()
+        brief_llm = self._mock_llm(
+            _brief_response(
+                concept="Night Train",
+                layout_type="type_hero",
+                headline_text="NIGHT TRAIN",
+                kicker_text="GNOME ON THE MOVE",
+                tagline_text="THROUGH A KITCHEN",
+                scene_description="a garden gnome driving a night train through a kitchen",
+                copy_mode="type_hero",
+            )
+        )
+        review_llm = self._mock_llm(
+            json.dumps(
+                {
+                    "reviews": [
+                        {
+                            "index": 1,
+                            "design_stands_alone": True,
+                            "headline": {
+                                "action": "KEEP",
+                                "rewrite": None,
+                                "reason": "Reads as the main line.",
+                            },
+                            "kicker": {
+                                "action": "KEEP",
+                                "rewrite": None,
+                                "reason": "Sets up the hero.",
+                            },
+                            "tagline": {
+                                "action": "DROP",
+                                "rewrite": None,
+                                "reason": "The design stands alone.",
+                            },
+                            "overall_action": "KEEP",
+                            "overall_reason": "One clear joke.",
+                            "confidence": 0.9,
+                        }
+                    ]
+                }
+            )
+        )
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            brief_llm.with_raw_response.create.return_value,
+            review_llm.with_raw_response.create.return_value,
+        ]
+
+        result = create_custom_brief(db, llm, "model-x", "gnome train", "dtf_apparel")
+
+        assert result["status"] == "success"
+        assert db.insert_design_brief.call_args.kwargs["tagline_text"] is None
+        assert llm.with_raw_response.create.call_count == 2
 
     def test_passes_correct_fields_to_db(self) -> None:
         db = self._mock_db()
