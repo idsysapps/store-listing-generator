@@ -30,6 +30,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Protocol
 
+from store_listing.orchestration.copy_modes import NO_TEXT
+
 __all__ = [
     "ART_TEMPLATE_IDS",
     "FULL_BLEED_COMPOSITIONS",
@@ -300,6 +302,8 @@ class _HasCopy(Protocol):
 
 
 def _has_copy(brief: _HasCopy) -> bool:
+    if getattr(brief, "copy_mode", "caption") == NO_TEXT:
+        return False
     return bool((brief.headline_text or "").strip() or (brief.tagline_text or "").strip())
 
 

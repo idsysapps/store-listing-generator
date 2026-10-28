@@ -70,6 +70,18 @@ class TestBuildFluxPrompt:
 
         assert "do not include any text or lettering" in prompt.lower()
 
+    def test_a_no_text_brief_says_the_illustration_carries_the_idea(self) -> None:
+        brief = _make_brief(
+            copy_mode="no_text",
+            layout_type="full_bleed",
+            headline_text=None,
+            tagline_text=None,
+        )
+        prompt = build_flux_prompt(brief)
+
+        assert "do not include any text or lettering" in prompt.lower()
+        assert "illustration alone carries the idea" in prompt
+
     def test_full_bleed_does_not_contain_the_headline(self) -> None:
         brief = _make_brief(
             layout_type="full_bleed",

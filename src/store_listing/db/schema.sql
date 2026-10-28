@@ -168,6 +168,10 @@ CREATE TABLE design_briefs (
     layout_type VARCHAR(30) DEFAULT 'full_bleed',
     headline_text TEXT,
     tagline_text TEXT,
+    -- How the design carries its copy: 'type_hero', 'caption' or 'no_text'.
+    copy_mode VARCHAR(20) DEFAULT 'caption',
+    -- A short line above a typographic hero word.
+    kicker_text TEXT,
     font_color VARCHAR(20),
     regeneration_feedback TEXT,
     -- The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
@@ -181,6 +185,11 @@ CREATE TABLE design_briefs (
 );
 
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS text_plan JSONB;
+-- Add the mode without a default so the rows written before it existed stay
+-- NULL and can be derived from their copy; the default applies to new rows.
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS copy_mode VARCHAR(20);
+ALTER TABLE design_briefs ALTER COLUMN copy_mode SET DEFAULT 'caption';
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS kicker_text TEXT;
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);
 CREATE INDEX idx_design_briefs_created_at ON design_briefs(created_at);

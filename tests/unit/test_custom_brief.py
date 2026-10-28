@@ -36,6 +36,8 @@ def _brief_response(
     font_color: str | None = "#FFFFFF",
     scene_description: str | None = "a small child in a baseball cap holding a glove",
     voice: str | None = None,
+    copy_mode: str = "caption",
+    kicker_text: str | None = None,
 ) -> str:
     return json.dumps(
         {
@@ -53,6 +55,8 @@ def _brief_response(
                 "font_color": font_color,
                 "scene_description": scene_description,
                 "voice": voice,
+                "copy_mode": copy_mode,
+                "kicker_text": kicker_text,
             }
         }
     )
@@ -101,6 +105,16 @@ class TestBuildCustomBriefPrompt:
         messages = build_custom_brief_prompt("just a slogan", "dtf_apparel")
 
         assert "text_only" in messages[0]["content"]
+
+    def test_system_prompt_offers_the_three_copy_modes(self) -> None:
+        messages = build_custom_brief_prompt("a groovy ghost", "dtf_apparel")
+
+        system = messages[0]["content"]
+        assert "copy_mode" in system
+        assert "type_hero" in system
+        assert "caption" in system
+        assert "no_text" in system
+        assert "kicker_text" in system
 
     def test_returns_system_and_user_messages(self) -> None:
         messages = build_custom_brief_prompt("test", "dtf_apparel")
@@ -188,6 +202,53 @@ class TestParseCustomBriefResponse:
         assert brief is not None
         assert brief.tagline_text == "Her first swing"
 
+    def test_parses_a_hero_copy_mode_and_kicker(self) -> None:
+        brief = parse_custom_brief_response(
+            _brief_response(
+                concept="Groovy Ghost",
+                layout_type="auto",
+                copy_mode="type_hero",
+                headline_text="BOO JEE",
+                kicker_text="IN MY SPOOKY ERA",
+                scene_description="a ghost weaving through the letters",
+            )
+        )
+        assert brief is not None
+        assert brief.copy_mode == "type_hero"
+        assert brief.kicker_text == "IN MY SPOOKY ERA"
+        assert brief.layout_type == "auto"
+
+    def test_parses_a_no_text_brief_without_copy(self) -> None:
+        brief = parse_custom_brief_response(
+            _brief_response(
+                concept="Ghost In A Pumpkin",
+                layout_type="text_top",
+                copy_mode="no_text",
+                headline_text="BOO",
+                tagline_text="A GHOST",
+                kicker_text="SPOOKY",
+                scene_description="a ghost hiding inside a pumpkin",
+            )
+        )
+        assert brief is not None
+        assert brief.copy_mode == "no_text"
+        assert brief.layout_type == "full_bleed"
+        assert brief.headline_text is None
+        assert brief.tagline_text is None
+        assert brief.kicker_text is None
+
+    def test_a_kicker_on_a_caption_is_dropped(self) -> None:
+        brief = parse_custom_brief_response(
+            _brief_response(
+                copy_mode="caption",
+                headline_text="BOO JEE",
+                kicker_text="IN MY SPOOKY ERA",
+            )
+        )
+        assert brief is not None
+        assert brief.copy_mode == "caption"
+        assert brief.kicker_text is None
+
     def test_parses_a_typography_only_brief(self) -> None:
         brief = parse_custom_brief_response(
             _brief_response(
@@ -272,6 +333,27 @@ class TestCreateCustomBrief:
         assert call_kwargs.kwargs["scene_description"] == "child with bat"
         assert call_kwargs.kwargs["llm_model"] == "model-x"
         assert call_kwargs.kwargs["batch_id"] == "custom"
+        assert call_kwargs.kwargs["copy_mode"] == "caption"
+        assert call_kwargs.kwargs["kicker_text"] is None
+
+    def test_stores_a_hero_copy_mode_and_kicker(self) -> None:
+        db = self._mock_db()
+        llm = self._mock_llm(
+            _brief_response(
+                concept="Groovy Ghost",
+                layout_type="auto",
+                copy_mode="type_hero",
+                headline_text="BOO JEE",
+                kicker_text="IN MY SPOOKY ERA",
+                scene_description="a ghost weaving through the letters",
+            )
+        )
+
+        create_custom_brief(db, llm, "model-x", "groovy ghost", "dtf_apparel")
+
+        call_kwargs = db.insert_design_brief.call_args.kwargs
+        assert call_kwargs["copy_mode"] == "type_hero"
+        assert call_kwargs["kicker_text"] == "IN MY SPOOKY ERA"
 
     def test_returns_error_on_llm_failure(self) -> None:
         db = self._mock_db()

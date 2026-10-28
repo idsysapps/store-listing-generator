@@ -81,6 +81,19 @@ class TestMigrationOrder:
         assert "ON CONFLICT (query) DO NOTHING" in sql
 
 
+class TestCopyModeMigration:
+    def test_the_mode_is_not_backfilled_on_existing_rows(self) -> None:
+        sql = _migration_sql()
+        add_column = next(
+            line for line in sql.splitlines() if "ADD COLUMN IF NOT EXISTS copy_mode" in line
+        )
+
+        # A default on ADD COLUMN would write 'caption' into every legacy row
+        # and lose the no-text/hero meaning those rows already had.
+        assert "DEFAULT" not in add_column
+        assert "ALTER COLUMN copy_mode SET DEFAULT 'caption'" in sql
+
+
 class TestAppWaitsForTheSchema:
     def test_the_app_waits_for_the_schema_before_it_starts(self) -> None:
         deployment = APP_DEPLOYMENT.read_text()

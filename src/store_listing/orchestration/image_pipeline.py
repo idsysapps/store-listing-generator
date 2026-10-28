@@ -25,6 +25,12 @@ from store_listing.orchestration.artwork_validation import (
     ArtworkValidator,
 )
 from store_listing.orchestration.comfyui_client import ComfyUIClient
+from store_listing.orchestration.copy_modes import (
+    CAPTION,
+    NO_TEXT,
+    TYPE_HERO,
+    copy_mode_from_row,
+)
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.design_templates import composition_for, resolve_template
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE
@@ -105,6 +111,25 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
     # is drawn in the type of that look (issue #228).
     preset = preset_for(brief_row.get("style_preset"))
     font_family = family_for(preset, voice) if preset else brief_row.get("font_family")
+    # The stored mode, or the mode a row written before it existed implies.
+    # A no-text row may carry stale copy from an earlier plan; it is cleared
+    # here so neither the compositor nor the text gate can see it.
+    copy_mode = copy_mode_from_row(brief_row)
+    layout_type = brief_row.get("layout_type", "full_bleed")
+    headline_text = brief_row.get("headline_text")
+    tagline_text = brief_row.get("tagline_text")
+    kicker_text = brief_row.get("kicker_text") if copy_mode == TYPE_HERO else None
+    if copy_mode == NO_TEXT:
+        layout_type = "full_bleed"
+        headline_text = None
+        tagline_text = None
+        kicker_text = None
+    elif (copy_mode == TYPE_HERO and layout_type in ("full_bleed", "text_only")) or (
+        copy_mode == CAPTION
+        and layout_type == "full_bleed"
+        and (headline_text or tagline_text or brief_row.get("text_plan"))
+    ):
+        layout_type = "auto"
     return DesignBrief(
         concept=brief_row["concept"],
         product_type=brief_row["product_type"],
@@ -114,16 +139,20 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         confidence=0,
         reasoning="",
         source_seed_ids=[],
-        layout_type=brief_row.get("layout_type", "full_bleed"),
-        headline_text=brief_row.get("headline_text"),
-        tagline_text=brief_row.get("tagline_text"),
+        layout_type=layout_type,
+        headline_text=headline_text,
+        tagline_text=tagline_text,
+        copy_mode=copy_mode,
+        kicker_text=kicker_text,
         font_color=brief_row.get("font_color"),
         regeneration_feedback=brief_row.get("regeneration_feedback"),
         scene_description=scene or None,
         voice=voice,
         font_family=font_family,
         style_preset=brief_row.get("style_preset"),
-        text_plan=text_plan_from_value(brief_row.get("text_plan")),
+        text_plan=text_plan_from_value(brief_row.get("text_plan"))
+        if copy_mode != NO_TEXT
+        else None,
     )
 
 
@@ -364,12 +393,15 @@ def _generate_single_brief(
     brief = _brief_from_row(brief_row)
     brief_id = brief_row["id"]
     is_dtf = brief_row["product_type"] == "dtf_apparel"
+    copy_mode = brief.copy_mode
 
     # The typographic hero path is the only path where the image model draws
-    # the words. It is opt-in: a brief has to be marked as a hero layout, or
-    # named in a trial batch, and the feature flag has to be on (issue #254).
+    # the words. It is opt-in: a brief has to be marked as a hero layout or
+    # carry the type_hero copy mode, and the feature flag has to be on
+    # (issues #254 and #258).
     if (
-        typographic_hero_enabled()
+        copy_mode != NO_TEXT
+        and typographic_hero_enabled()
         and hero_validator is not None
         and is_typographic_hero_brief(brief_row, brief)
     ):
@@ -486,47 +518,71 @@ def _generate_single_brief(
         # The lettering gate: the artwork must not carry words of its own. The
         # image model cannot spell, and the text of the design is drawn on the
         # artwork afterwards, so a letter it drew is a letter that is wrong
-        # (issue #208).
+        # (issue #208). A no-text design has no compositor pass, so the same
+        # check is inverted: an explicit "no lettering" verdict is the only
+        # pass, and lettering is the design failing (issue #258).
         if artwork_text_validator is not None:
-            lettering = artwork_text_validator.validate(result.raw_bytes or result.image_bytes)
-            if lettering.has_text:
-                lettering_attempts += 1
-                if lettering_attempts <= max_lettering_retries:
-                    logger.warning(
-                        "Brief %d: the artwork came back with lettering in it, retrying",
-                        brief_id,
-                    )
-                    retry_hint = NO_LETTERING_RETRY_HINT
-                    if brief.text_plan is not None and brief.text_plan.needs_carrier:
-                        retry_hint += (
-                            " The planned carrier is blank; no other sign, menu, "
-                            "billboard or label may have writing."
-                        )
-                    continue
-                if needs_text_check:
-                    logger.warning(
-                        "Brief %d: the artwork carries lettering, falling back to the "
-                        "typography-only design",
-                        brief_id,
-                    )
-                    return _upload_text_only(
-                        brief_row,
-                        layout,
-                        storage=storage,
-                        db_client=db_client,
-                        text_validator=text_validator,
-                    )
-                return False, "the artwork came back with lettering in it and cannot be printed"
-            if lettering.verdict == "unknown":
-                logger.warning(
-                    "Brief %d: the lettering could not be judged (%s), keeping the image",
-                    brief_id,
-                    lettering.error or "unknown verdict",
+            if copy_mode == NO_TEXT:
+                no_text = artwork_text_validator.validate_no_text(
+                    result.raw_bytes or result.image_bytes
                 )
+                if not no_text.matched:
+                    lettering_attempts += 1
+                    if lettering_attempts <= max_lettering_retries:
+                        logger.warning(
+                            "Brief %d: the no-text design came back with lettering, retrying",
+                            brief_id,
+                        )
+                        retry_hint = (
+                            f"{NO_LETTERING_RETRY_HINT} This design must contain no words "
+                            "at all: no letters, no numbers, no signage and no labels."
+                        )
+                        continue
+                    return False, (
+                        "the no-text design came back with lettering in it and cannot be printed"
+                    )
+            else:
+                lettering = artwork_text_validator.validate(result.raw_bytes or result.image_bytes)
+                if lettering.has_text:
+                    lettering_attempts += 1
+                    if lettering_attempts <= max_lettering_retries:
+                        logger.warning(
+                            "Brief %d: the artwork came back with lettering in it, retrying",
+                            brief_id,
+                        )
+                        retry_hint = NO_LETTERING_RETRY_HINT
+                        if brief.text_plan is not None and brief.text_plan.needs_carrier:
+                            retry_hint += (
+                                " The planned carrier is blank; no other sign, menu, "
+                                "billboard or label may have writing."
+                            )
+                        continue
+                    if needs_text_check:
+                        logger.warning(
+                            "Brief %d: the artwork carries lettering, falling back to the "
+                            "typography-only design",
+                            brief_id,
+                        )
+                        return _upload_text_only(
+                            brief_row,
+                            layout,
+                            storage=storage,
+                            db_client=db_client,
+                            text_validator=text_validator,
+                        )
+                    return False, "the artwork came back with lettering in it and cannot be printed"
+                if lettering.verdict == "unknown":
+                    logger.warning(
+                        "Brief %d: the lettering could not be judged (%s), keeping the image",
+                        brief_id,
+                        lettering.error or "unknown verdict",
+                    )
 
         # The text is drawn onto the artwork, not asked of the model: it cannot
-        # spell, and a colour in a prompt is not a colour (issue #187).
-        raw_bytes = composite_text(_textured(result, brief, is_dtf), layout)
+        # spell, and a colour in a prompt is not a colour (issue #187). A
+        # no-text design has no compositor pass at all.
+        artwork = _textured(result, brief, is_dtf)
+        raw_bytes = composite_text(artwork, layout) if needs_text_check else artwork
 
         if text_validator is None or not needs_text_check:
             break
@@ -567,8 +623,11 @@ def _generate_single_brief(
 
     transparent_bytes: bytes | None = None
     if is_dtf and result.background_removed and result.image_bytes:
-        transparent_bytes = composite_text(
-            _textured(result, brief, is_dtf, keyed=True), layout, transparent=True
+        keyed_artwork = _textured(result, brief, is_dtf, keyed=True)
+        transparent_bytes = (
+            composite_text(keyed_artwork, layout, transparent=True)
+            if needs_text_check
+            else keyed_artwork
         )
 
     keys = storage.upload_design(

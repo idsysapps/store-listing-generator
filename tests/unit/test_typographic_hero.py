@@ -7,7 +7,6 @@ render the descriptor, so the descriptor stays out of this path.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 from typing import Any
 
 import pytest
@@ -27,19 +26,14 @@ from store_listing.orchestration.typographic_hero import (
 )
 
 
-@dataclass(frozen=True)
-class _BriefWithKicker(DesignBrief):
-    """A brief with the kicker field the briefing layer will gain later."""
-
-    kicker_text: str | None = None
-
-
 def _brief(
     *,
     headline_text: str | None = "GROOVY",
     tagline_text: str | None = None,
     scene_description: str | None = "a cute ghost",
     layout_type: str = "full_bleed",
+    copy_mode: str = "caption",
+    kicker_text: str | None = None,
 ) -> DesignBrief:
     return DesignBrief(
         concept="a groovy ghost",
@@ -53,12 +47,14 @@ def _brief(
         layout_type=layout_type,
         headline_text=headline_text,
         tagline_text=tagline_text,
+        copy_mode=copy_mode,
+        kicker_text=kicker_text,
         scene_description=scene_description,
     )
 
 
 def _brief_with_kicker(kicker: str | None, **overrides: Any) -> DesignBrief:
-    return _BriefWithKicker(**asdict(_brief(**overrides)), kicker_text=kicker)
+    return _brief(kicker_text=kicker, **overrides)
 
 
 def _result(image: bytes = b"image", seed: int | None = 1) -> ComfyUIResult:
@@ -203,6 +199,18 @@ class TestHeroCopyFromBrief:
         with pytest.raises(ValueError):
             hero_copy_from_brief(brief)
 
+    def test_maps_the_persisted_kicker(self) -> None:
+        brief = _brief(
+            headline_text="BOO JEE",
+            kicker_text="IN MY SPOOKY ERA",
+            copy_mode="type_hero",
+            scene_description="a ghost weaving through the letters",
+        )
+
+        copy = hero_copy_from_brief(brief)
+
+        assert copy.kicker == "IN MY SPOOKY ERA"
+
 
 class TestFeatureFlag:
     def test_is_off_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,6 +345,15 @@ class TestHeroSelection:
 
     def test_a_brief_without_a_headline_is_never_a_hero(self) -> None:
         brief = _brief(headline_text=None, layout_type="type_hero")
+        assert is_typographic_hero_brief({"id": 1}, brief) is False
+
+    def test_a_copy_mode_hero_opts_a_brief_in(self) -> None:
+        brief = _brief(layout_type="auto", copy_mode="type_hero")
+        assert is_typographic_hero_brief({"id": 1}, brief) is True
+
+    def test_a_no_text_brief_is_never_a_hero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_BRIEF_IDS", "1")
+        brief = _brief(layout_type="type_hero", copy_mode="no_text")
         assert is_typographic_hero_brief({"id": 1}, brief) is False
 
     def test_brief_ids_ignore_junk(self, monkeypatch: pytest.MonkeyPatch) -> None:
