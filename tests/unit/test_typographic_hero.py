@@ -127,6 +127,15 @@ class TestBuildPrompt:
         assert "fully visible and readable" in prompt
         assert "must not cover any letterform" in prompt
 
+    def test_asks_for_plain_words_without_quotation_marks(self) -> None:
+        # Qwen drew the kicker inside quote marks, and the OCR gate could not
+        # tell that apart from a clean render.
+        prompt = build_typographic_hero_prompt(
+            HeroCopy(hero="NIGHT TRAIN", kicker="GNOME ON THE MOVE", subject="a gnome")
+        )
+
+        assert "no quotation marks" in prompt
+
     def test_never_writes_the_descriptor(self) -> None:
         prompt = build_typographic_hero_prompt(
             HeroCopy(

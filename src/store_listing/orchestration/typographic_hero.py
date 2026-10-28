@@ -196,7 +196,8 @@ def build_typographic_hero_prompt(copy: HeroCopy) -> str:
     parts.append(
         "Thick black outline, hard offset shadow, flat "
         f"{' '.join(palette)} palette, {copy.background}, generous margin, "
-        "no other text."
+        "the words are printed plain with no quotation marks and no extra "
+        "punctuation, no other text."
     )
     return " ".join(parts)
 
