@@ -19,3 +19,13 @@ def _disable_text_planning(monkeypatch: pytest.MonkeyPatch) -> None:
     with ``monkeypatch.setenv("LLM_TEXT_PLAN", "true")``.
     """
     monkeypatch.setenv("LLM_TEXT_PLAN", "false")
+
+
+@pytest.fixture(autouse=True)
+def _disable_copy_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep unit tests hermetic: the copy editor is a separate LLM pass.
+
+    Tests that exercise the editor opt in with
+    ``monkeypatch.setenv("LLM_COPY_REVIEW", "true")``.
+    """
+    monkeypatch.setenv("LLM_COPY_REVIEW", "false")

@@ -15,6 +15,7 @@ from store_listing.orchestration.brief_prompts import (
     layout_rules,
     product_belongs_to,
     product_catalog,
+    sellability_rules,
     voice_rules,
 )
 from store_listing.orchestration.copy_modes import (
@@ -110,6 +111,7 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         "}}\n\n"
         f"{layout_rules(types)}\n"
         f"{copy_mode_rules()}\n"
+        f"{sellability_rules()}\n"
         f"{voice_rules()}\n"
         f"{art_direction_rules()}\n"
         f"{idea_device_rules()}\n"
@@ -409,6 +411,26 @@ def create_custom_brief(
     if brief.idea_device is None:
         # The model named no device we use; give the brief one anyway.
         brief = assign_batch_devices([brief], f"custom:{brief.concept}")[0]
+
+    # The copy editor is the taste-maker for the text. It may drop a tagline
+    # when the design stands alone, or rewrite one that only describes the
+    # scene (issue #266).
+    from store_listing.orchestration.copy_review import (
+        copy_review_enabled,
+        review_batch_copy,
+    )
+
+    if copy_review_enabled():
+        reviewed, copy_issues = review_batch_copy(llm_completions, model, [brief])
+        if copy_issues:
+            logger.info("Copy review: %s", "; ".join(copy_issues))
+        if not reviewed:
+            return {
+                "status": "error",
+                "error": "The brief was rejected by the copy review",
+            }
+        brief = reviewed[0]
+
     # The template is known now, so the model can choose how the words live
     # in it. A failed pass leaves the brief on the flat treatment.
     brief = plan_batch_text_integration(llm_completions, model, [brief])[0]

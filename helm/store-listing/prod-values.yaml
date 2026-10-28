@@ -10,6 +10,7 @@ config:
   llmCurationModel: "qwen38_briefs"
   llmSeedCurationEnabled: "true"
   llmDesignBriefsEnabled: "true"
+  llmCopyReview: "true"
   # The store focuses on DTF apparel for now. A stored setting in
   # app_settings wins over this value, so the scope can be changed without a
   # redeploy (issue #216).
