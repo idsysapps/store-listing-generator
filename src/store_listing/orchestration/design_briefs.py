@@ -30,12 +30,23 @@ from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
     DIVERSITY_RULES,
     art_direction_rules,
+    copy_mode_rules,
     layout_rules,
     product_belongs_to,
     product_catalog,
     voice_rules,
 )
 from store_listing.orchestration.context_seeds import get_upcoming_events
+from store_listing.orchestration.copy_modes import (
+    CAPTION,
+    HERO_LAYOUT_TYPES,
+    NO_TEXT,
+    TYPE_HERO,
+    assign_batch_copy_modes,
+    copy_mode_from_row,
+    normalise_copy_mode,
+    normalise_kicker,
+)
 from store_listing.orchestration.design_templates import (
     LEGACY_LAYOUTS,
     TEMPLATE_IDS,
@@ -132,6 +143,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         "trend signals)\n"
         "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
         f"{layout_rules(types)}\n"
+        f"{copy_mode_rules()}\n"
         f"{voice_rules()}\n"
         f"{art_direction_rules()}\n"
         f"{idea_device_rules()}\n"
@@ -150,7 +162,8 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         '"audience": "...", "visual_style": "...", "confidence": 0-100, '
         '"reasoning": "...", "source_seed_ids": [id1, id2], '
         '"layout_type": "auto", "headline_text": "...", '
-        '"tagline_text": "...", "font_color": "#000000", '
+        '"tagline_text": "...", "copy_mode": "type_hero | caption | no_text", '
+        '"kicker_text": "... or null", "font_color": "#000000", '
         '"voice": "deadpan | loud | cozy", '
         '"idea_device": "juxtaposition | transformation | scale | narrative | '
         'collection | pattern", '
@@ -220,6 +233,12 @@ class DesignBrief:
     layout_type: str = "full_bleed"
     headline_text: str | None = None
     tagline_text: str | None = None
+    # How the design carries its words: 'type_hero', 'caption' or 'no_text'.
+    # The template stays geometry; this is whether the design uses a copy
+    # treatment at all and which model draws it (issue #258).
+    copy_mode: str = CAPTION
+    # A short line above the hero word. Only the typographic hero path draws it.
+    kicker_text: str | None = None
     font_color: str | None = None
     regeneration_feedback: str | None = None
     scene_description: str | None = None
@@ -262,6 +281,8 @@ class DesignBriefDBClient(Protocol):
         layout_type: str = "full_bleed",
         headline_text: str | None = None,
         tagline_text: str | None = None,
+        copy_mode: str = CAPTION,
+        kicker_text: str | None = None,
         font_color: str | None = None,
         scene_description: str | None = None,
         personal_use: bool = False,
@@ -396,9 +417,11 @@ def _brief_from(
 
     source_seed_ids = [i for i in b.get("source_seed_ids", []) if isinstance(i, int)]
 
-    layout_type = b.get("layout_type", "full_bleed")
-    if layout_type not in VALID_LAYOUT_TYPES:
-        layout_type = "full_bleed"
+    raw_layout = b.get("layout_type")
+    layout_type = raw_layout if raw_layout in VALID_LAYOUT_TYPES else "full_bleed"
+    # A missing layout is not the same as an explicit full_bleed: a model that
+    # wrote a headline but forgot the layout wrote a caption, not art-only.
+    layout_hint = raw_layout if raw_layout in VALID_LAYOUT_TYPES else None
 
     headline_text = b.get("headline_text")
     if headline_text is not None and not isinstance(headline_text, str):
@@ -407,6 +430,40 @@ def _brief_from(
     tagline_text = b.get("tagline_text")
     if tagline_text is not None and not isinstance(tagline_text, str):
         tagline_text = None
+
+    raw_copy_mode = b.get("copy_mode")
+    if not isinstance(raw_copy_mode, str):
+        raw_copy_mode = None
+    copy_mode = normalise_copy_mode(
+        raw_copy_mode,
+        layout_type=layout_hint,
+        headline_text=headline_text,
+        tagline_text=tagline_text,
+    )
+    kicker_text = normalise_kicker(b.get("kicker_text"), copy_mode=copy_mode)
+    if copy_mode == NO_TEXT:
+        # A no-text design has no copy at all, even when the model ignored the
+        # instruction and wrote some. The layout is forced art-only so the
+        # renderer cannot accidentally composite the stale words.
+        layout_type = "full_bleed"
+        headline_text = None
+        tagline_text = None
+        kicker_text = None
+    elif copy_mode == TYPE_HERO:
+        # The hero path ignores the template, but the template is the fallback
+        # when Qwen is off. A hero brief cannot live on a full-bleed or
+        # text-only row.
+        if layout_type in ("full_bleed", "text_only"):
+            layout_type = "auto"
+    elif (
+        layout_type == "full_bleed"
+        and (headline_text or tagline_text)
+        and (raw_layout is None or (raw_copy_mode == CAPTION and raw_layout == "full_bleed"))
+    ):
+        # A caption with copy cannot be art-only. A missing layout is filled
+        # in; an explicit caption is corrected. An explicit full_bleed with
+        # stale copy was already treated as no_text above.
+        layout_type = "auto"
 
     font_color = b.get("font_color")
     if font_color is not None and not isinstance(font_color, str):
@@ -454,18 +511,19 @@ def _brief_from(
     # The text of a design is the part the buyer reads, so it is the part that
     # has to be good. A headline that names a brand, that lists three nouns or
     # that only restates the picture is dropped and the batch asks again
-    # (issue #225).
-    reason = screen_text(
-        headline_text,
-        tagline=tagline_text,
-        scene=scene_description,
-        voice=voice,
-    )
-    if reason is not None:
-        logger.warning("Skipping brief %r: %s", concept, reason)
-        if rejections is not None:
-            rejections.append(f"{reason} (headline: {headline_text!r})")
-        return None
+    # (issue #225). A no-text design has no text to screen.
+    if copy_mode != NO_TEXT:
+        reason = screen_text(
+            headline_text,
+            tagline=tagline_text,
+            scene=scene_description,
+            voice=voice,
+        )
+        if reason is not None:
+            logger.warning("Skipping brief %r: %s", concept, reason)
+            if rejections is not None:
+                rejections.append(f"{reason} (headline: {headline_text!r})")
+            return None
 
     recommended_materials = b.get("recommended_materials")
     if recommended_materials is not None and not isinstance(recommended_materials, list):
@@ -485,6 +543,8 @@ def _brief_from(
         layout_type=layout_type,
         headline_text=headline_text,
         tagline_text=tagline_text,
+        copy_mode=copy_mode,
+        kicker_text=kicker_text,
         font_color=font_color,
         scene_description=scene_description,
         recommended_materials=recommended_materials,
@@ -736,6 +796,10 @@ def generate_design_briefs(
                 briefs = retry_briefs
                 evergreen = retry_evergreen
 
+    # The copy mode is a batch decision too: a batch with no typographic hero
+    # gets one of its shortest captions promoted, and hero briefs are capped at
+    # half. No-text is never forced (issue #258).
+    kept = assign_batch_copy_modes(kept)
     # The geometry is rotated by the batch, not picked by the model: a batch
     # that the model answered with text_top for the eighth time still gets
     # eight different silhouettes (issue #238). This runs after the last
@@ -774,6 +838,8 @@ def generate_design_briefs(
             layout_type=brief.layout_type,
             headline_text=brief.headline_text,
             tagline_text=brief.tagline_text,
+            copy_mode=brief.copy_mode,
+            kicker_text=brief.kicker_text,
             font_color=brief.font_color,
             scene_description=brief.scene_description,
             recommended_materials=brief.recommended_materials,
@@ -837,12 +903,16 @@ def _plan_entry_indexes(briefs: Sequence[DesignBrief]) -> list[int]:
     """The positions of the briefs the text planner sees.
 
     A full-bleed brief has no words, so it has no text plan; the other briefs
-    keep their order, which is how the 1-based answer is matched back.
+    keep their order, which is how the 1-based answer is matched back. A
+    typographic hero draws its own words, so it is not sent either: a carrier
+    written into its scene would be drawn by Qwen and break the emblem.
     """
     return [
         index
         for index, brief in enumerate(briefs)
-        if resolve_template(brief.layout_type, brief.headline_text, brief.tagline_text)
+        if brief.copy_mode != TYPE_HERO
+        and brief.layout_type not in HERO_LAYOUT_TYPES
+        and resolve_template(brief.layout_type, brief.headline_text, brief.tagline_text)
         != "full_bleed"
     ]
 
@@ -1049,6 +1119,22 @@ class TextPlanDBClient(Protocol):
 
 def _brief_from_row(row: dict[str, Any]) -> DesignBrief:
     """A brief from a stored row, for a replan pass."""
+    copy_mode = copy_mode_from_row(row)
+    layout_type = str(row.get("layout_type") or "full_bleed")
+    headline_text = row.get("headline_text")
+    tagline_text = row.get("tagline_text")
+    kicker_text = row.get("kicker_text") if copy_mode == TYPE_HERO else None
+    if copy_mode == NO_TEXT:
+        layout_type = "full_bleed"
+        headline_text = None
+        tagline_text = None
+        kicker_text = None
+    elif (copy_mode == TYPE_HERO and layout_type in ("full_bleed", "text_only")) or (
+        copy_mode == CAPTION
+        and layout_type == "full_bleed"
+        and (headline_text or tagline_text or row.get("text_plan"))
+    ):
+        layout_type = "auto"
     return DesignBrief(
         concept=str(row.get("concept") or ""),
         product_type=str(row.get("product_type") or "dtf_apparel"),
@@ -1058,9 +1144,11 @@ def _brief_from_row(row: dict[str, Any]) -> DesignBrief:
         confidence=0,
         reasoning="",
         source_seed_ids=[],
-        layout_type=str(row.get("layout_type") or "full_bleed"),
-        headline_text=row.get("headline_text"),
-        tagline_text=row.get("tagline_text"),
+        layout_type=layout_type,
+        headline_text=headline_text,
+        tagline_text=tagline_text,
+        copy_mode=copy_mode,
+        kicker_text=kicker_text,
         font_color=row.get("font_color"),
         regeneration_feedback=row.get("regeneration_feedback"),
         scene_description=row.get("scene_description"),

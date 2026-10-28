@@ -196,6 +196,19 @@ class TestBuildBriefPrompt:
         total = sum(len(seeds) for seeds in user_data["signals_by_source"].values())
         assert total == 2
 
+    def test_system_prompt_offers_the_three_copy_modes(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        system = messages[0]["content"]
+        assert "type_hero" in system
+        assert "caption" in system
+        assert "no_text" in system
+        assert "kicker_text" in system
+
 
 class TestParseBriefResponse:
     def test_parses_well_formed_json(self) -> None:
@@ -674,6 +687,105 @@ class TestParseBriefResponse:
 
         assert result == []
 
+    def test_reads_the_copy_mode_and_the_kicker(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Groovy Ghost",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "auto",
+                        "copy_mode": "type_hero",
+                        "headline_text": "BOO JEE",
+                        "kicker_text": "IN MY SPOOKY ERA",
+                        "scene_description": "a ghost weaving through the letters",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].copy_mode == "type_hero"
+        assert result[0].kicker_text == "IN MY SPOOKY ERA"
+        assert result[0].headline_text == "BOO JEE"
+
+    def test_a_no_text_brief_drops_its_copy_and_becomes_full_bleed(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Ghost In A Pumpkin",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_top",
+                        "copy_mode": "no_text",
+                        "headline_text": "BOO",
+                        "tagline_text": "A GHOST",
+                        "kicker_text": "SPOOKY",
+                        "scene_description": "a ghost hiding inside a pumpkin",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].copy_mode == "no_text"
+        assert result[0].layout_type == "full_bleed"
+        assert result[0].headline_text is None
+        assert result[0].tagline_text is None
+        assert result[0].kicker_text is None
+
+    def test_a_legacy_art_only_brief_is_no_text(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Ghost In A Pumpkin",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "full_bleed",
+                        "headline_text": "A STALE HEADLINE",
+                        "scene_description": "a ghost hiding inside a pumpkin",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].copy_mode == "no_text"
+        assert result[0].headline_text is None
+
+    def test_a_kicker_on_a_caption_is_dropped(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Groovy Ghost",
+                        "product_type": "dtf_apparel",
+                        "confidence": 85,
+                        "source_seed_ids": [1],
+                        "layout_type": "auto",
+                        "copy_mode": "caption",
+                        "headline_text": "BOO JEE",
+                        "kicker_text": "IN MY SPOOKY ERA",
+                        "scene_description": "a ghost weaving through the letters",
+                    }
+                ]
+            }
+        )
+
+        result = parse_brief_response(response)
+
+        assert result[0].copy_mode == "caption"
+        assert result[0].kicker_text is None
+
 
 class _ApiError(Exception):
     """An error that carries an HTTP status, like the OpenAI SDK raises."""
@@ -858,6 +970,64 @@ class TestGenerateDesignBriefs:
         result = generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
 
         assert result["briefable"] == 1
+
+    def test_stores_the_copy_mode_and_the_kicker(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        db = self._mock_db([_briefable(1, "groovy ghost shirt")])
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Groovy Ghost",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                        "layout_type": "auto",
+                        "copy_mode": "type_hero",
+                        "headline_text": "BOO JEE",
+                        "kicker_text": "IN MY SPOOKY ERA",
+                        "scene_description": "a ghost weaving through the letters",
+                    }
+                ]
+            }
+        )
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        kwargs = db.insert_design_brief.call_args.kwargs
+        assert kwargs["copy_mode"] == "type_hero"
+        assert kwargs["kicker_text"] == "IN MY SPOOKY ERA"
+
+    def test_stores_a_no_text_brief_without_copy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        db = self._mock_db([_briefable(1, "ghost pumpkin shirt")])
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Ghost In A Pumpkin",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                        "layout_type": "text_top",
+                        "copy_mode": "no_text",
+                        "headline_text": "BOO",
+                        "scene_description": "a ghost hiding inside a pumpkin",
+                    }
+                ]
+            }
+        )
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        kwargs = db.insert_design_brief.call_args.kwargs
+        assert kwargs["copy_mode"] == "no_text"
+        assert kwargs["layout_type"] == "full_bleed"
+        assert kwargs["headline_text"] is None
 
     def test_the_briefs_past_the_event_quota_are_not_created(self) -> None:
         # Three briefs for the same event is a season taking the batch

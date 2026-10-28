@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from store_listing.orchestration.art_direction import negative_for, preset_for, prompt_for
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
+from store_listing.orchestration.copy_modes import NO_TEXT
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.design_templates import (
     canvas_size,
@@ -204,7 +205,9 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     parts.append(f"{look}, {product_context}, {NO_MOCKUP}.")
 
     if template_id == "full_bleed":
-        parts.append("Do not include any text or lettering.")
+        parts.append("Do not include any text or lettering: no text, no lettering, no words.")
+        if brief.copy_mode == NO_TEXT:
+            parts.append("The illustration alone carries the idea; no words are needed.")
     else:
         parts.append("Print artwork without any lettering: no text, no words, no watermark.")
 

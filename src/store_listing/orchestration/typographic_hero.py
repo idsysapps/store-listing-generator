@@ -26,6 +26,7 @@ from store_listing.orchestration.comfyui_client import (
     ComfyUIError,
     ComfyUIResult,
 )
+from store_listing.orchestration.copy_modes import HERO_LAYOUT_TYPES, NO_TEXT, TYPE_HERO
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.text_validation import StrictTextResult
@@ -47,7 +48,6 @@ DEFAULT_CANDIDATES = 2
 ENABLED_ENV = "TYPOGRAPHIC_HERO_ENABLED"
 BRIEF_IDS_ENV = "TYPOGRAPHIC_HERO_BRIEF_IDS"
 CANDIDATES_ENV = "TYPOGRAPHIC_HERO_CANDIDATES"
-HERO_LAYOUT_TYPES = frozenset({"type_hero", "wordmark_stack"})
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
@@ -99,12 +99,17 @@ def hero_candidate_count() -> int:
 def is_typographic_hero_brief(brief_row: Mapping[str, Any], brief: DesignBrief) -> bool:
     """Whether this brief should be drawn by the typographic hero path.
 
-    A dedicated layout type is the normal route. Until the briefing layer
-    emits one, a trial batch can opt specific briefs in by id, so the path can
-    be tested on real copy without reprocessing the whole catalogue.
+    A hero copy mode is the normal route now. A dedicated layout type still
+    works for the briefs written before the mode existed, and a trial batch can
+    opt specific briefs in by id. A no-text design is never a hero: it has no
+    words to draw.
     """
+    if brief.copy_mode == NO_TEXT:
+        return False
     if not (brief.headline_text or "").strip():
         return False
+    if brief.copy_mode == TYPE_HERO:
+        return True
     if (brief.layout_type or "").strip() in HERO_LAYOUT_TYPES:
         return True
     return brief_row.get("id") in hero_brief_ids()
@@ -192,16 +197,15 @@ def build_typographic_hero_prompt(copy: HeroCopy) -> str:
 def hero_copy_from_brief(brief: DesignBrief) -> HeroCopy:
     """Map the brief's copy onto the two blocks Qwen renders.
 
-    ``kicker_text`` is read with :func:`getattr` because it is being added to
-    the brief schema separately; until then a brief simply has no kicker. The
-    scene is stripped of any quoted lettering, because this path spells its
-    own words and must not inherit a caption from the scene.
+    ``kicker_text`` is part of the brief now. The scene is stripped of any
+    quoted lettering, because this path spells its own words and must not
+    inherit a caption from the scene.
     """
     hero = (brief.headline_text or "").strip()
     if not hero:
         raise ValueError("The brief has no headline_text to use as the hero word")
 
-    kicker = getattr(brief, "kicker_text", None)
+    kicker = brief.kicker_text
     kicker = kicker.strip() if isinstance(kicker, str) and kicker.strip() else None
     descriptor = (brief.tagline_text or "").strip() or None
     subject = strip_lettering((brief.scene_description or "").strip())

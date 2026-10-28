@@ -13,6 +13,7 @@ from PIL import Image
 from store_listing.orchestration.artwork_validation import (
     ArtworkTextResult,
     ArtworkValidationResult,
+    NoTextResult,
 )
 from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.image_pipeline import (
@@ -694,6 +695,13 @@ def _artwork_text_validator(*verdicts: bool) -> MagicMock:
     return validator
 
 
+def _no_text_validator(*results: NoTextResult) -> MagicMock:
+    """A validator that reports the inverted no-text verdicts, in order."""
+    validator = MagicMock()
+    validator.validate_no_text.side_effect = list(results)
+    return validator
+
+
 class TestArtworkLetteringGate:
     """The artwork must not carry words: the image model cannot spell.
 
@@ -701,8 +709,15 @@ class TestArtworkLetteringGate:
     (issue #208).
     """
 
+    def _caption_brief(self, **overrides: Any) -> dict[str, Any]:
+        return _brief(
+            layout_type="text_top",
+            headline_text="SKELETON YOGA",
+            **overrides,
+        )
+
     def test_artwork_with_lettering_is_retried(self) -> None:
-        db = _mock_db_client(briefs=[_brief()])
+        db = _mock_db_client(briefs=[self._caption_brief()])
         comfyui = _comfyui_client()
 
         result = generate_images_for_briefs(
@@ -717,7 +732,7 @@ class TestArtworkLetteringGate:
         assert comfyui.generate_image.call_count == 2
 
     def test_the_retry_asks_for_no_lettering(self) -> None:
-        db = _mock_db_client(briefs=[_brief()])
+        db = _mock_db_client(briefs=[self._caption_brief()])
         comfyui = _comfyui_client()
 
         generate_images_for_briefs(
@@ -730,22 +745,6 @@ class TestArtworkLetteringGate:
 
         second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"]
         assert "no lettering" in second_prompt.lower()
-
-    def test_artwork_with_lettering_is_never_uploaded(self) -> None:
-        db = _mock_db_client(briefs=[_brief()])
-        s3 = MagicMock()
-
-        result = generate_images_for_briefs(
-            db_client=db,
-            comfyui_client=_comfyui_client(),
-            s3_client=s3,
-            bucket="test-bucket",
-            artwork_text_validator=_artwork_text_validator(True, True, True),
-        )
-
-        assert result["images_generated"] == 0
-        assert result["errors"] == 1
-        s3.put_object.assert_not_called()
 
     def test_artwork_with_lettering_falls_back_to_the_typography_only_design(self) -> None:
         db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
@@ -792,6 +791,202 @@ class TestArtworkLetteringGate:
 
         checked = validator.validate.call_args.args[0]
         assert checked == b"raw-bytes"
+
+
+class TestNoTextDesigns:
+    """A no-text design is the illustration and nothing else.
+
+    The text compositor never runs, the text OCR gate is never asked, and the
+    inverted lettering gate is the only thing standing between the render and
+    the shop. It fails closed: an unreadable answer is not proof that the
+    design is free of words.
+    """
+
+    def _no_text_brief(self, **overrides: Any) -> dict[str, Any]:
+        row = _brief(
+            copy_mode="no_text",
+            layout_type="full_bleed",
+            headline_text=None,
+            tagline_text=None,
+            scene_description="a ghost hiding inside a pumpkin",
+        )
+        row.update(overrides)
+        return row
+
+    def _passed(self) -> NoTextResult:
+        return NoTextResult(matched=True, verdict="nolettering")
+
+    def _lettered(self) -> NoTextResult:
+        return NoTextResult(matched=False, verdict="text")
+
+    def _unreadable(self) -> NoTextResult:
+        return NoTextResult(matched=False, verdict="unknown", error="vision is down")
+
+    def test_a_no_text_design_never_reaches_the_text_compositor_or_ocr(self) -> None:
+        db = _mock_db_client(briefs=[self._no_text_brief()])
+        comfy = _comfyui_client()
+        text_validator = _validator()
+        lettering = _no_text_validator(self._passed())
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            bucket="test-bucket",
+            text_validator=text_validator,
+            artwork_text_validator=lettering,
+        )
+
+        assert result["images_generated"] == 1
+        text_validator.validate.assert_not_called()
+        lettering.validate.assert_not_called()
+        lettering.validate_no_text.assert_called_once()
+        assert s3.put_object.call_args.kwargs["Body"] == b"raw-bytes"
+
+    def test_the_prompt_asks_for_an_illustration_with_no_words(self) -> None:
+        db = _mock_db_client(briefs=[self._no_text_brief()])
+        comfy = _comfyui_client()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=_no_text_validator(self._passed()),
+        )
+
+        prompt = comfy.generate_image.call_args.kwargs["prompt"].lower()
+        assert "no text" in prompt
+        assert "no lettering" in prompt
+        assert "illustration alone carries the idea" in prompt
+
+    def test_lettering_is_retried_and_then_the_design_is_rejected(self) -> None:
+        db = _mock_db_client(briefs=[self._no_text_brief()])
+        comfy = _comfyui_client()
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_no_text_validator(self._lettered(), self._lettered()),
+        )
+
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        assert comfy.generate_image.call_count == 2
+        s3.put_object.assert_not_called()
+        db.update_brief_image_keys.assert_not_called()
+
+    def test_the_retry_asks_for_no_words_at_all(self) -> None:
+        db = _mock_db_client(briefs=[self._no_text_brief()])
+        comfy = _comfyui_client()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=_no_text_validator(self._lettered(), self._lettered()),
+        )
+
+        second_prompt = comfy.generate_image.call_args_list[1].kwargs["prompt"].lower()
+        assert "no words" in second_prompt
+
+    def test_an_unreadable_no_text_verdict_fails_closed(self) -> None:
+        db = _mock_db_client(briefs=[self._no_text_brief()])
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_no_text_validator(self._unreadable(), self._unreadable()),
+        )
+
+        assert result["images_generated"] == 0
+        s3.put_object.assert_not_called()
+
+    def test_a_no_text_design_never_falls_back_to_typography(self) -> None:
+        # There is no copy to fall back to, and a lettered illustration is not
+        # the design that was asked for.
+        db = _mock_db_client(briefs=[self._no_text_brief()])
+        comfy = _comfyui_client()
+        text_validator = _validator()
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            bucket="test-bucket",
+            text_validator=text_validator,
+            artwork_text_validator=_no_text_validator(self._lettered(), self._lettered()),
+        )
+
+        assert result["errors"] == 1
+        comfy.generate_image.assert_called()
+        text_validator.validate.assert_not_called()
+        s3.put_object.assert_not_called()
+
+    def test_a_dtf_no_text_design_uploads_the_keyed_artwork(self) -> None:
+        db = _mock_db_client(briefs=[self._no_text_brief(product_type="dtf_apparel")])
+        comfy = _comfyui_client(raw=b"raw", transparent=b"transparent")
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_no_text_validator(self._passed()),
+        )
+
+        assert result["images_generated"] == 1
+        bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
+        assert bodies == [b"raw", b"transparent"]
+
+    def test_a_no_text_design_without_a_validator_still_renders(self) -> None:
+        db = _mock_db_client(briefs=[self._no_text_brief()])
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        assert result["images_generated"] == 1
+        s3.put_object.assert_called_once()
+
+    def test_a_stale_headline_on_a_no_text_row_is_ignored(self) -> None:
+        db = _mock_db_client(
+            briefs=[
+                self._no_text_brief(
+                    layout_type="text_top",
+                    headline_text="BOO JEE",
+                    tagline_text="A GHOST",
+                )
+            ]
+        )
+        text_validator = _validator()
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(),
+            s3_client=s3,
+            bucket="test-bucket",
+            text_validator=text_validator,
+            artwork_text_validator=_no_text_validator(self._passed()),
+        )
+
+        text_validator.validate.assert_not_called()
+        assert s3.put_object.call_args.kwargs["Body"] == b"raw-bytes"
 
 
 class TestBrief100Regression:
@@ -1152,6 +1347,65 @@ class TestTypographicHeroPath:
     def test_the_path_is_off_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("TYPOGRAPHIC_HERO_ENABLED", raising=False)
         db = _mock_db_client(briefs=[self._hero_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_image.return_value = ComfyUIResult(image_bytes=_real_png())
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+            hero_validator=self._hero_validator(),
+        )
+
+        assert result["images_generated"] == 1
+        comfy.generate_image.assert_called_once()
+        comfy.generate_qwen_image.assert_not_called()
+
+    def test_a_copy_mode_hero_uses_qwen_even_with_a_normal_template(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        db = _mock_db_client(
+            briefs=[
+                self._hero_brief(
+                    layout_type="text_top",
+                    copy_mode="type_hero",
+                    headline_text="BOO JEE",
+                    kicker_text="IN MY SPOOKY ERA",
+                )
+            ]
+        )
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"hero")
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            hero_validator=self._hero_validator(),
+        )
+
+        assert result["images_generated"] == 1
+        comfy.generate_qwen_image.assert_called_once()
+        comfy.generate_image.assert_not_called()
+        prompt = comfy.generate_qwen_image.call_args.kwargs["prompt"]
+        assert "BOO JEE" in prompt
+        assert "IN MY SPOOKY ERA" in prompt
+
+    def test_a_copy_mode_hero_falls_back_to_a_caption_when_the_path_is_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("TYPOGRAPHIC_HERO_ENABLED", raising=False)
+        db = _mock_db_client(
+            briefs=[
+                self._hero_brief(
+                    layout_type="text_top",
+                    copy_mode="type_hero",
+                    headline_text="BOO JEE",
+                )
+            ]
+        )
         comfy = _comfyui_client()
         comfy.generate_image.return_value = ComfyUIResult(image_bytes=_real_png())
 

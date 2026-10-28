@@ -532,6 +532,8 @@ class DatabaseClient:
         layout_type: str = "full_bleed",
         headline_text: str | None = None,
         tagline_text: str | None = None,
+        copy_mode: str = "caption",
+        kicker_text: str | None = None,
         font_color: str | None = None,
         scene_description: str | None = None,
         personal_use: bool = False,
@@ -551,10 +553,10 @@ class DatabaseClient:
                 INSERT INTO design_briefs
                     (concept, product_type, specific_products, audience,
                      visual_style, confidence, reasoning, llm_model, batch_id,
-                     layout_type, headline_text, tagline_text, font_color,
-                     scene_description, personal_use, recommended_materials, voice,
+                     layout_type, headline_text, tagline_text, copy_mode, kicker_text,
+                     font_color, scene_description, personal_use, recommended_materials, voice,
                      font_family, style_preset, text_plan)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -570,6 +572,8 @@ class DatabaseClient:
                     layout_type,
                     headline_text,
                     tagline_text,
+                    copy_mode,
+                    kicker_text,
                     font_color,
                     scene_description,
                     personal_use,
@@ -614,7 +618,8 @@ class DatabaseClient:
                     SELECT id, concept, product_type, audience, visual_style,
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
-                           voice, font_family, style_preset, text_plan
+                           voice, font_family, style_preset, text_plan,
+                           copy_mode, kicker_text
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND product_type = ANY(%s)
@@ -629,7 +634,8 @@ class DatabaseClient:
                     SELECT id, concept, product_type, audience, visual_style,
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
-                           voice, font_family, style_preset, text_plan
+                           voice, font_family, style_preset, text_plan,
+                           copy_mode, kicker_text
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                     ORDER BY created_at DESC
@@ -657,6 +663,8 @@ class DatabaseClient:
                     "font_family": row[13],
                     "style_preset": row[14],
                     "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
+                    "copy_mode": row[16] or "caption",
+                    "kicker_text": row[17],
                 }
                 for row in cur.fetchall()
             ]
@@ -670,7 +678,8 @@ class DatabaseClient:
                 SELECT id, concept, product_type, audience, visual_style,
                        layout_type, headline_text, tagline_text, font_color,
                        regeneration_feedback, scene_description, recommended_materials,
-                       voice, font_family, style_preset, text_plan
+                       voice, font_family, style_preset, text_plan,
+                       copy_mode, kicker_text
                 FROM design_briefs
                 WHERE id = %s
                 """,
@@ -698,6 +707,8 @@ class DatabaseClient:
                 "font_family": row[13],
                 "style_preset": row[14],
                 "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
+                "copy_mode": row[16] or "caption",
+                "kicker_text": row[17],
             }
 
     def list_briefs_by_batch(self, batch_id: str) -> list[dict[str, Any]]:
@@ -710,7 +721,8 @@ class DatabaseClient:
                 SELECT id, concept, product_type, audience, visual_style,
                        layout_type, headline_text, tagline_text, font_color,
                        regeneration_feedback, scene_description, recommended_materials,
-                       voice, font_family, style_preset, text_plan
+                       voice, font_family, style_preset, text_plan,
+                       copy_mode, kicker_text
                 FROM design_briefs
                 WHERE batch_id = %s
                 ORDER BY id
@@ -737,6 +749,8 @@ class DatabaseClient:
                     "font_family": row[13],
                     "style_preset": row[14],
                     "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
+                    "copy_mode": row[16] or "caption",
+                    "kicker_text": row[17],
                 }
                 for row in cur.fetchall()
             ]

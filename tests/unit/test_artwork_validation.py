@@ -213,3 +213,46 @@ class TestArtworkTextValidator:
         text = call_kwargs["messages"][0]["content"][0]["text"]
         assert "TEXT" in text
         assert "NOTEXT" in text
+
+
+class TestNoTextGate:
+    """A no-text design is only valid when the artwork carries no words.
+
+    The normal artwork gate keeps an unreadable answer (the compositor will add
+    the copy anyway). A no-text design has no compositor pass, so an unreadable
+    answer is not proof that it is safe to print: the gate fails closed.
+    """
+
+    def test_a_design_without_lettering_passes(self) -> None:
+        validator = ArtworkTextValidator(client=_client("NOTEXT"), model="vl")
+
+        result = validator.validate_no_text(_image_bytes())
+
+        assert result.matched is True
+        assert result.verdict == NO_LETTERING
+
+    def test_a_design_with_lettering_fails(self) -> None:
+        validator = ArtworkTextValidator(client=_client("TEXT"), model="vl")
+
+        result = validator.validate_no_text(_image_bytes())
+
+        assert result.matched is False
+        assert result.verdict == HAS_TEXT
+
+    def test_an_unreadable_answer_fails_closed(self) -> None:
+        validator = ArtworkTextValidator(client=_client("maybe?"), model="vl")
+
+        result = validator.validate_no_text(_image_bytes())
+
+        assert result.matched is False
+        assert result.verdict == UNKNOWN
+
+    def test_a_client_error_fails_closed(self) -> None:
+        client = _client("NOTEXT")
+        client.chat.completions.create.side_effect = RuntimeError("vision is down")
+        validator = ArtworkTextValidator(client=client, model="vl")
+
+        result = validator.validate_no_text(_image_bytes())
+
+        assert result.matched is False
+        assert result.error is not None

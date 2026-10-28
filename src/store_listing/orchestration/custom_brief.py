@@ -11,10 +11,18 @@ from store_listing.orchestration.art_direction import family_for, preset_for
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
     art_direction_rules,
+    copy_mode_rules,
     layout_rules,
     product_belongs_to,
     product_catalog,
     voice_rules,
+)
+from store_listing.orchestration.copy_modes import (
+    CAPTION,
+    NO_TEXT,
+    TYPE_HERO,
+    normalise_copy_mode,
+    normalise_kicker,
 )
 from store_listing.orchestration.design_briefs import (
     VALID_LAYOUT_TYPES,
@@ -84,10 +92,12 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         '  "visual_style": "art direction (colors, style, typography). No text/slogans here.",\n'
         '  "confidence": 0-100,\n'
         '  "reasoning": "why this design works",\n'
+        '  "copy_mode": "type_hero | caption | no_text",\n'
         '  "layout_type": "auto | full_bleed | text_only",\n'
         '  "headline_text": "short punchy text (1-6 words, words only, no emoji) '
-        'or null if full_bleed",\n'
+        'or null for no_text",\n'
         '  "tagline_text": "secondary text or null",\n'
+        '  "kicker_text": "short top line for type_hero (1-6 words) or null",\n'
         '  "font_color": "#FFFFFF",\n'
         '  "voice": "deadpan | loud | cozy",\n'
         '  "idea_device": "juxtaposition | transformation | scale | narrative | '
@@ -99,6 +109,7 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         'no text. Under 35 words."\n'
         "}}\n\n"
         f"{layout_rules(types)}\n"
+        f"{copy_mode_rules()}\n"
         f"{voice_rules()}\n"
         f"{art_direction_rules()}\n"
         f"{idea_device_rules()}\n"
@@ -175,9 +186,9 @@ def _read_brief(
         confidence = 0
     confidence = max(0, min(100, confidence))
 
-    layout_type = b.get("layout_type", "full_bleed")
-    if layout_type not in VALID_LAYOUT_TYPES:
-        layout_type = "full_bleed"
+    raw_layout = b.get("layout_type")
+    layout_type = raw_layout if raw_layout in VALID_LAYOUT_TYPES else "full_bleed"
+    layout_hint = raw_layout if raw_layout in VALID_LAYOUT_TYPES else None
 
     headline_text = b.get("headline_text")
     if headline_text is not None and not isinstance(headline_text, str):
@@ -186,6 +197,31 @@ def _read_brief(
     tagline_text = b.get("tagline_text")
     if tagline_text is not None and not isinstance(tagline_text, str):
         tagline_text = None
+
+    raw_copy_mode = b.get("copy_mode")
+    if not isinstance(raw_copy_mode, str):
+        raw_copy_mode = None
+    copy_mode = normalise_copy_mode(
+        raw_copy_mode,
+        layout_type=layout_hint,
+        headline_text=headline_text,
+        tagline_text=tagline_text,
+    )
+    kicker_text = normalise_kicker(b.get("kicker_text"), copy_mode=copy_mode)
+    if copy_mode == NO_TEXT:
+        layout_type = "full_bleed"
+        headline_text = None
+        tagline_text = None
+        kicker_text = None
+    elif copy_mode == TYPE_HERO:
+        if layout_type in ("full_bleed", "text_only"):
+            layout_type = "auto"
+    elif (
+        layout_type == "full_bleed"
+        and (headline_text or tagline_text)
+        and (raw_layout is None or (raw_copy_mode == CAPTION and raw_layout == "full_bleed"))
+    ):
+        layout_type = "auto"
 
     font_color = b.get("font_color")
     if font_color is not None and not isinstance(font_color, str):
@@ -223,17 +259,19 @@ def _read_brief(
 
     # The text of a design is the part the buyer reads, so it is the part that
     # has to be good. A brief for personal use may name a franchise on
-    # purpose, so the brand is not screened there (issue #225).
-    reason = screen_text(
-        headline_text,
-        tagline=tagline_text,
-        scene=scene_description,
-        voice=voice,
-        allow_brands=personal_use,
-    )
-    if reason is not None:
-        logger.warning("Skipping the custom brief %r: %s", concept, reason)
-        return None, reason
+    # purpose, so the brand is not screened there (issue #225). A no-text
+    # design has no text to screen.
+    if copy_mode != NO_TEXT:
+        reason = screen_text(
+            headline_text,
+            tagline=tagline_text,
+            scene=scene_description,
+            voice=voice,
+            allow_brands=personal_use,
+        )
+        if reason is not None:
+            logger.warning("Skipping the custom brief %r: %s", concept, reason)
+            return None, reason
 
     return (
         DesignBrief(
@@ -248,6 +286,8 @@ def _read_brief(
             layout_type=layout_type,
             headline_text=headline_text,
             tagline_text=tagline_text,
+            copy_mode=copy_mode,
+            kicker_text=kicker_text,
             font_color=font_color,
             scene_description=scene_description,
             voice=voice,
@@ -386,6 +426,8 @@ def create_custom_brief(
         layout_type=brief.layout_type,
         headline_text=brief.headline_text,
         tagline_text=brief.tagline_text,
+        copy_mode=brief.copy_mode,
+        kicker_text=brief.kicker_text,
         font_color=brief.font_color,
         scene_description=brief.scene_description,
         personal_use=personal_use,

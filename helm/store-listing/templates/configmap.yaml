@@ -207,7 +207,11 @@ data:
         -- The look the design is drawn in.
         style_preset VARCHAR(40),
         -- How the words live in the design: method, carrier, surface, ink.
-        text_plan JSONB
+        text_plan JSONB,
+        -- How the design carries its words: 'type_hero', 'caption' or 'no_text'.
+        copy_mode VARCHAR(20) DEFAULT 'caption',
+        -- A short line above a typographic hero word.
+        kicker_text TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_design_briefs_product_type ON design_briefs(product_type);
@@ -499,6 +503,13 @@ data:
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS recommended_materials JSONB;
     -- How the words live in the design: method, carrier, surface, ink.
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS text_plan JSONB;
+    -- How the design carries its words: 'type_hero', 'caption' or 'no_text'.
+    -- Added without a default so existing rows stay NULL and the copy mode is
+    -- derived from their copy; the default is for new rows.
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS copy_mode VARCHAR(20);
+    ALTER TABLE design_briefs ALTER COLUMN copy_mode SET DEFAULT 'caption';
+    -- A short line above a typographic hero word.
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS kicker_text TEXT;
 
     -- Table: app_settings (the settings the operator can change without a
     -- redeploy, e.g. which product types the pipeline produces)

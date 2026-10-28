@@ -37,6 +37,7 @@ __all__ = [
     "ArtworkTextValidator",
     "ArtworkValidationResult",
     "ArtworkValidator",
+    "NoTextResult",
     "parse_text_verdict",
     "parse_verdict",
 ]
@@ -75,6 +76,21 @@ class ArtworkTextResult:
     """Whether the artwork carries lettering of its own."""
 
     has_text: bool
+    verdict: str
+    error: str | None = None
+
+
+@dataclass
+class NoTextResult:
+    """Whether a no-text design really carries no words.
+
+    ``matched`` is true only for an explicit ``NOTEXT`` verdict. The ordinary
+    lettering gate keeps an unreadable answer because the compositor will add
+    the copy anyway; a no-text design has no compositor, so an unreadable
+    answer is not proof that the artwork is safe to print.
+    """
+
+    matched: bool
     verdict: str
     error: str | None = None
 
@@ -193,6 +209,20 @@ class ArtworkTextValidator:
         if verdict == UNKNOWN:
             logger.warning("The artwork lettering verdict could not be read: %r", answer)
         return ArtworkTextResult(has_text=verdict == HAS_TEXT, verdict=verdict)
+
+    def validate_no_text(self, image_bytes: bytes) -> NoTextResult:
+        """The inverted gate: accept only an explicit "no lettering" verdict.
+
+        Unknown and failed readings fail closed. A no-text design has no
+        compositor pass to correct a letter that the image model drew, so the
+        absence of words has to be verified rather than assumed.
+        """
+        result = self.validate(image_bytes)
+        return NoTextResult(
+            matched=result.verdict == NO_LETTERING,
+            verdict=result.verdict,
+            error=result.error,
+        )
 
     def _classify(self, data_url: str) -> str:
         response = self._client.chat.completions.create(

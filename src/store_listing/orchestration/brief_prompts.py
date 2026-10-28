@@ -23,6 +23,7 @@ from typing import Final
 
 __all__ = [
     "ART_DIRECTION_RULES",
+    "COPY_MODE_RULES",
     "DESIGN_ONLY_RULES",
     "DIVERSITY_RULES",
     "LAYOUT_RULES",
@@ -31,6 +32,7 @@ __all__ = [
     "SEASONAL_WORDS",
     "VOICE_RULES",
     "art_direction_rules",
+    "copy_mode_rules",
     "layout_rules",
     "product_belongs_to",
     "product_catalog",
@@ -124,20 +126,49 @@ def layout_rules(enabled: Sequence[str] | None = None) -> str:
 
     return (
         "TEXT LAYOUT - what the design carries:\n"
-        "- layout_type: 'auto' when the design has a slogan (the pipeline picks one of its "
-        "templates and spreads the batch across them), 'full_bleed' only for a design with "
+        "- copy_mode decides whether the design has words at all; layout_type is the "
+        "geometry. Use 'auto' for a design with a slogan (the pipeline picks one of its "
+        "templates and spreads the batch across them), 'full_bleed' for a design with "
         "no text at all, and 'text_only' for a pure slogan design with no illustration. "
         "Do not name a specific template - the pipeline owns the geometry.\n"
-        "- headline_text: (required unless layout_type is 'full_bleed') the main text "
+        "- headline_text: (required unless copy_mode is 'no_text') the main text "
         "line, short and punchy (1-6 words). Words only - no emoji, no symbols, no "
         "punctuation-only text.\n"
         "- tagline_text: (optional) secondary text line\n"
+        "- kicker_text: (optional, copy_mode 'type_hero' only) a short line above the "
+        "hero word, 1-6 words\n"
         "- font_color: hex color for the text (e.g. '#000000' for black, '#FF8C42' for "
         f"orange). {' '.join(background_rules)}\n"
     )
 
 
 LAYOUT_RULES: Final[str] = layout_rules()
+
+
+COPY_MODE_RULES: Final[str] = (
+    "COPY MODE - how the design carries its words:\n"
+    "- copy_mode: 'type_hero', 'caption' or 'no_text'. This is not layout_type: the "
+    "layout is geometry, the copy mode is whether the design has words and who draws "
+    "them.\n"
+    "- 'type_hero': a stacked typographic emblem. headline_text is the hero word "
+    "(1-3 words, at most 6) drawn giant as the illustration; scene_description is the "
+    "subject that weaves through the letters, not the product and not the words; "
+    "kicker_text is an optional short line above it; tagline_text is the short "
+    "descriptor below. Pick it when the idea is a phrase that can become the picture.\n"
+    "- 'caption': an illustration with a headline and optional tagline. The headline "
+    "says something the picture does not. This is the ordinary path.\n"
+    "- 'no_text': the illustration explains itself. headline_text, tagline_text and "
+    "kicker_text are null, and layout_type is 'full_bleed'. Pick it only for a strong "
+    "visual pun, transformation or character moment that words would weaken.\n"
+    "- A batch is a mix: use type_hero for some strong short phrases, no_text for the "
+    "self-explaining scenes, and caption for the rest. At most half the briefs may be "
+    "type_hero and at most one third no_text.\n"
+)
+
+
+def copy_mode_rules() -> str:
+    """The copy-mode rules, for the prompts that write a brief."""
+    return COPY_MODE_RULES
 
 
 # The store sells three voices and every brief picks one. The operator curates
