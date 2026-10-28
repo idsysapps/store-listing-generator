@@ -191,6 +191,8 @@ SELLABILITY_RULES: Final[str] = (
     "stands alone.\n"
     "- A good tagline adds a new layer. BAD: 'Through A Kitchen' (describes the "
     "scene). GOOD: 'Kitchen Commute' (a second joke).\n"
+    "- A tagline is a line, not a list of words, and it never names a brand, a "
+    "franchise or a trademark.\n"
     "- Specificity beats a broad pun: write for a niche, an inside joke, a "
     "profession, or a subculture.\n"
     "- Ask: would a stranger wear this without the product description? If not, "

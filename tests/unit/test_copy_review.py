@@ -106,6 +106,8 @@ class TestBuildCopyReviewPrompt:
         assert "rewrite" in system
         assert "would a stranger wear" in system
         assert "do not explain" in system
+        assert "not a list of words" in system
+        assert "never names a brand" in system
         assert "night train" in user.lower()
         assert "through a kitchen" in user.lower()
 
@@ -287,8 +289,38 @@ class TestReviewBatchCopy:
         assert issues == []
         llm.with_raw_response.create.assert_not_called()
 
+    def test_every_brief_is_reviewed_on_its_own(self) -> None:
+        # Batching the editor changes its mind: the same design is judged
+        # differently depending on the briefs next to it. One design per call
+        # makes the decision a property of that design.
+        llm = self._llm(_response(index=1), _response(index=1))
+        briefs = [
+            _brief(headline="NIGHT TRAIN", tagline="THROUGH A KITCHEN"),
+            _brief(headline="CURSES AND COFFEE", tagline="WEEKEND WITCH"),
+        ]
+
+        review_batch_copy(llm, "model", briefs)
+
+        assert llm.with_raw_response.create.call_count == 2
+        for call in llm.with_raw_response.create.call_args_list:
+            user = json.loads(call.kwargs["messages"][1]["content"])
+            assert len(user["briefs"]) == 1
+
+    def test_a_dropped_connection_is_asked_again(self) -> None:
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            RuntimeError("boom"),
+            _raw(_response()),
+        ]
+
+        result, issues = review_batch_copy(llm, "model", [_brief()])
+
+        assert result[0].tagline_text is None
+        assert issues == []
+        assert llm.with_raw_response.create.call_count == 2
+
     def test_an_unreadable_answer_keeps_the_original_copy(self) -> None:
-        llm = self._llm("not json")
+        llm = self._llm("not json", "not json", "not json")
         brief = _brief()
 
         result, issues = review_batch_copy(llm, "model", [brief])

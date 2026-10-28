@@ -67,6 +67,8 @@ DESIGN PRINCIPLES
 - A tagline is optional. When the design already stands alone, DROP is the
   best answer. Only keep or rewrite a tagline when it adds a second joke,
   identity, occasion or brand-like line.
+- A tagline is a line, not a list of words.
+- A tagline never names a brand, a franchise or a trademark.
 - A rewrite is not a way to keep text for its own sake. If the design does not
   need a second line, drop it.
 
@@ -312,8 +314,14 @@ def request_copy_reviews(
     *,
     extra_instructions: Sequence[str] | None = None,
     re_review: bool = False,
+    attempts: int = 3,
 ) -> tuple[list[CopyReview], list[str]]:
-    """One editor call: the reviews and any reason the answer was unusable."""
+    """One editor call: the reviews and any reason the answer was unusable.
+
+    The endpoint is asked again when the answer cannot be used. A design that
+    is not reviewed is a design that keeps its copy, so one dropped
+    connection should not decide the outcome.
+    """
     if not any(brief.copy_mode != NO_TEXT for brief in briefs):
         return [], []
 
@@ -322,25 +330,32 @@ def request_copy_reviews(
         extra_instructions=extra_instructions,
         re_review=re_review,
     )
-    raw, error = create_answer(
-        llm_completions,
-        model,
-        messages,
-        "copy_review",
-        temperature=0,
-    )
-    if error is not None:
-        return [], [f"copy review failed: {error}"]
-
-    content, read_error = _answer_content(raw)
-    if read_error is not None or content is None:
-        return [], [f"copy review failed: {read_error or 'empty answer'}"]
-
     expected = {index for index, brief in enumerate(briefs, start=1) if brief.copy_mode != NO_TEXT}
-    reviews, parse_error = parse_copy_review_response(content, expected_indexes=expected)
-    if parse_error is not None:
-        return [], [f"copy review was incomplete: {parse_error}"]
-    return reviews, []
+    last: list[str] = []
+
+    for _ in range(max(1, attempts)):
+        raw, error = create_answer(
+            llm_completions,
+            model,
+            messages,
+            "copy_review",
+            temperature=0,
+        )
+        if error is not None:
+            last = [f"copy review failed: {error}"]
+            continue
+
+        content, read_error = _answer_content(raw)
+        if read_error is not None or content is None:
+            last = [f"copy review failed: {read_error or 'empty answer'}"]
+            continue
+
+        reviews, parse_error = parse_copy_review_response(content, expected_indexes=expected)
+        if parse_error is None:
+            return reviews, []
+        last = [f"copy review was incomplete: {parse_error}"]
+
+    return [], last
 
 
 def review_batch_copy(
@@ -354,6 +369,11 @@ def review_batch_copy(
 ) -> tuple[list[DesignBrief], list[str]]:
     """Ask the local model to edit the copy, then apply its decisions.
 
+    Every design is reviewed on its own. Batching the editor changes its
+    mind: the same design is judged differently depending on the briefs next
+    to it, so one call per design is what makes the decision a property of
+    that design.
+
     A rewrite is sent through one more review. If the model still wants to
     rewrite it, the next decision is applied as written; the caller only gets
     the final briefs, so the renderer never has to know about the review.
@@ -366,29 +386,42 @@ def review_batch_copy(
     if not any(brief.copy_mode != NO_TEXT for brief in original):
         return original, []
 
-    issues: list[str] = []
     current = original
     passes = max(1, max_passes)
     for pass_number in range(passes):
-        reviews, review_issues = request_copy_reviews(
-            llm_completions,
-            model,
-            current,
-            extra_instructions=extra_instructions,
-            re_review=pass_number > 0,
-        )
-        if review_issues:
-            return original, review_issues
+        reviewed: list[DesignBrief] = []
+        rewrote = False
+        for brief in current:
+            if brief.copy_mode == NO_TEXT:
+                reviewed.append(brief)
+                continue
 
-        uncertain = [review for review in reviews if review.confidence < min_confidence]
-        if uncertain:
-            indexes = ", ".join(str(review.index) for review in uncertain)
-            return original, [
-                f"copy review confidence was below {min_confidence:.2f} for briefs {indexes}"
-            ]
+            reviews, review_issues = request_copy_reviews(
+                llm_completions,
+                model,
+                [brief],
+                extra_instructions=extra_instructions,
+                re_review=pass_number > 0,
+            )
+            if review_issues:
+                return original, review_issues
 
-        current = apply_copy_reviews(current, reviews)
-        if not current or not _has_rewrite(reviews) or pass_number + 1 >= passes:
+            uncertain = [review for review in reviews if review.confidence < min_confidence]
+            if uncertain:
+                reason = (
+                    f"copy review confidence was below {min_confidence:.2f} for "
+                    f"brief {brief.concept!r}"
+                )
+                return original, [reason]
+
+            if _has_rewrite(reviews):
+                rewrote = True
+            applied = apply_copy_reviews([brief], reviews)
+            if applied:
+                reviewed.append(applied[0])
+
+        current = reviewed
+        if not current or not rewrote or pass_number + 1 >= passes:
             break
 
-    return current, issues
+    return current, []
