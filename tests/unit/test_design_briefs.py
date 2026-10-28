@@ -209,6 +209,17 @@ class TestBuildBriefPrompt:
         assert "no_text" in system
         assert "kicker_text" in system
 
+    def test_the_hero_subject_must_not_hide_the_letters(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+        )
+
+        system = messages[0]["content"]
+        assert "without hiding them" in system
+        assert "weaves through the letters" not in system
+
 
 class TestParseBriefResponse:
     def test_parses_well_formed_json(self) -> None:

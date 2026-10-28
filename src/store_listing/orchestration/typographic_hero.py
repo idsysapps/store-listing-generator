@@ -181,7 +181,9 @@ def build_typographic_hero_prompt(copy: HeroCopy) -> str:
     if subject:
         parts.append(
             f'Across the middle, the word "{hero}" in giant {second} bubble '
-            f"letters, with {subject} weaving through and overlapping the letters."
+            "letters, with the subject woven around and between the letters. "
+            "Keep every letter fully visible and readable: the subject must not "
+            "cover any letterform."
         )
     else:
         parts.append(f'Across the middle, the word "{hero}" in giant {second} bubble letters.')

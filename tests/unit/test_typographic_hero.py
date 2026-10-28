@@ -103,9 +103,28 @@ class TestBuildPrompt:
 
         assert 'the word "GROOVY"' in prompt
         assert 'the words "IN MY SPOOKY ERA"' in prompt
-        assert "a cute groovy ghost weaving through and overlapping" in prompt
+        assert "a cute groovy ghost" in prompt
+        assert "woven around and between the letters" in prompt
         assert "hard offset shadow" in prompt
         assert "plain white background" in prompt
+
+    def test_mentions_the_subject_once_when_it_already_describes_the_interlock(self) -> None:
+        subject = "a ghost weaving through the letters"
+
+        prompt = build_typographic_hero_prompt(
+            HeroCopy(hero="BOO JEE", kicker="IN MY SPOOKY ERA", subject=subject)
+        )
+
+        assert prompt.count(subject) == 1
+        assert "weaving through the letters weaving through" not in prompt
+
+    def test_tells_the_model_to_keep_every_letter_readable(self) -> None:
+        prompt = build_typographic_hero_prompt(
+            HeroCopy(hero="BOO JEE", subject="a ghost weaving through the letters")
+        )
+
+        assert "fully visible and readable" in prompt
+        assert "must not cover any letterform" in prompt
 
     def test_never_writes_the_descriptor(self) -> None:
         prompt = build_typographic_hero_prompt(
@@ -124,6 +143,7 @@ class TestBuildPrompt:
 
         assert "A die-cut sticker wordmark" in prompt
         assert "weaving through" not in prompt
+        assert "woven around and between" not in prompt
         assert "At the top" not in prompt
 
     def test_a_kicker_is_optional(self) -> None:
