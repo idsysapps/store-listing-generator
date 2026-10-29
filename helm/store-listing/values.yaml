@@ -106,6 +106,12 @@ redis:
 app:
   image: quay.io/idsysapps/store-listing-generator:latest
   replicas: 1
+  # Celery forks one child per CPU by default, and the node reports enough
+  # CPUs for 16 children. Each child holds about 125 MB of interpreter and
+  # client state, so the worker was OOM-killed on the 2Gi limit (issue #272).
+  celeryConcurrency: "4"
+  # A child is replaced after this many tasks, so a long run does not grow.
+  celeryMaxTasksPerChild: "25"
   resources:
     limits:
       cpu: 250m
