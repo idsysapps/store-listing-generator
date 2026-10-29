@@ -395,6 +395,24 @@ class DatabaseClient:
                 for row in cur.fetchall()
             ]
 
+    def list_recent_brief_concepts(self, days: int = 30) -> list[str]:
+        """The concepts the store already has, for the model to avoid.
+
+        The seed pool comes back every day and the model often writes the same
+        scene again, so the brief prompt is told what is already in the store
+        (issue #270).
+        """
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT concept
+                FROM design_briefs
+                WHERE created_at > now() - make_interval(days => %s)
+                """,
+                (days,),
+            )
+            return [row[0] for row in cur.fetchall() if row[0]]
+
     def list_briefable_seeds(
         self,
         cooldown_days: int | None = None,

@@ -13,6 +13,7 @@ from store_listing.orchestration.brief_prompts import SEASONAL_WORDS
 from store_listing.orchestration.design_briefs import (
     BriefableCandidate,
     DesignBrief,
+    _drop_repeated_concepts,
     assign_batch_devices,
     assign_batch_templates,
     build_brief_prompt,
@@ -1025,6 +1026,57 @@ class TestGenerateDesignBriefs:
         assert kwargs["copy_mode"] == "type_hero"
         assert kwargs["kicker_text"] == "IN MY SPOOKY ERA"
 
+    def test_a_brief_that_repeats_a_stored_concept_is_dropped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        db = self._mock_db([_briefable(1, "gnome train shirt")])
+        db.list_recent_brief_concepts.return_value = ["A paper crane unfolding into a real crane"]
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "A paper crane unfolding into a real crane",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                            "layout_type": "text_top",
+                            "headline_text": "CRANE",
+                            "scene_description": "a paper crane unfolding",
+                        }
+                    ]
+                }
+            ),
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "A completely different scene",
+                            "product_type": "dtf_apparel",
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                            "layout_type": "text_top",
+                            "headline_text": "NEW SCENE",
+                            "scene_description": "a lighthouse full of lemons",
+                        }
+                    ]
+                }
+            ),
+        ]
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        concepts = [call.kwargs["concept"] for call in db.insert_design_brief.call_args_list]
+        assert concepts == ["A completely different scene"]
+        first_prompt = llm.with_raw_response.create.call_args_list[0].kwargs["messages"][1][
+            "content"
+        ]
+        assert "concepts_to_avoid" in first_prompt
+
     def test_the_copy_review_drops_a_scene_tagline(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import store_listing.orchestration.design_briefs as mod
 
@@ -1929,6 +1981,76 @@ class TestTheTypeOfTheBrief:
         stored = db.insert_design_brief.call_args.kwargs
         assert stored["voice"] == "cozy"
         assert stored["font_family"] == family_for_voice("cozy")
+
+
+class TestConceptFreshness:
+    """The store must not be given the same concept twice (issue #270)."""
+
+    def _brief(self, concept: str, **overrides: Any) -> DesignBrief:
+        defaults: dict[str, Any] = {
+            "concept": concept,
+            "product_type": "dtf_apparel",
+            "specific_products": ["t-shirt"],
+            "audience": "everyone",
+            "visual_style": "bold",
+            "confidence": 50,
+            "reasoning": "trending",
+            "source_seed_ids": [1],
+            "layout_type": "auto",
+            "headline_text": "GOOD LINE",
+        }
+        defaults.update(overrides)
+        return DesignBrief(**defaults)
+
+    def test_the_prompt_carries_the_concepts_the_store_already_has(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 29),
+            recent_concepts=["A field of lightning bolts and daisies woven into a repeat"],
+        )
+
+        user = json.loads(messages[1]["content"])
+        assert user["concepts_to_avoid"] == [
+            "A field of lightning bolts and daisies woven into a repeat"
+        ]
+        assert "already in the store" in messages[0]["content"]
+
+    def test_a_repeated_concept_is_dropped(self) -> None:
+        briefs = [self._brief("A Paper Crane Unfolding Into A Real Crane")]
+        rejections: list[str] = []
+
+        kept = _drop_repeated_concepts(
+            briefs,
+            ["a paper crane unfolding into a real crane"],
+            rejections,
+        )
+
+        assert kept == []
+        assert rejections
+        assert "already" in rejections[0]
+
+    def test_a_repeat_inside_the_batch_is_dropped(self) -> None:
+        briefs = [
+            self._brief("Same Scene"),
+            self._brief("Same Scene"),
+            self._brief("Other Scene"),
+        ]
+        rejections: list[str] = []
+
+        kept = _drop_repeated_concepts(briefs, [], rejections)
+
+        assert [brief.concept for brief in kept] == ["Same Scene", "Other Scene"]
+        assert len(rejections) == 1
+
+    def test_a_new_concept_is_kept(self) -> None:
+        briefs = [self._brief("A New Scene")]
+        rejections: list[str] = []
+
+        kept = _drop_repeated_concepts(briefs, ["Something Else Entirely"], rejections)
+
+        assert len(kept) == 1
+        assert rejections == []
 
 
 class TestTheBatchTemplates:

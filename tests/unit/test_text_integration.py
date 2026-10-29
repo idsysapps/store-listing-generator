@@ -1119,6 +1119,9 @@ class _DB:
     def list_active_materials(self, product_type: str | None = None) -> list[dict[str, Any]]:
         return []
 
+    def list_recent_brief_concepts(self, days: int = 30) -> list[str]:
+        return []
+
 
 class _Recorder:
     def __init__(self, value: Any) -> None:

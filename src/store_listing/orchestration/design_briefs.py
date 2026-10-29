@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -30,6 +31,7 @@ from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
     DIVERSITY_RULES,
     art_direction_rules,
+    concept_freshness_rules,
     copy_mode_rules,
     layout_rules,
     product_belongs_to,
@@ -93,6 +95,12 @@ logger = logging.getLogger(__name__)
 MAX_SEEDS_PER_BRIEF = int(os.environ.get("LLM_MAX_BRIEF_SEEDS", "20"))
 MAX_BRIEFS = int(os.environ.get("LLM_MAX_BRIEFS", "8"))
 
+# How long a concept stays in the store before the model may write it again.
+# The same seed pool comes back every day, so without this the model wrote the
+# same scenes over and over and the store filled with duplicate products
+# (issue #270).
+BRIEF_CONCEPT_COOLDOWN_DAYS = int(os.environ.get("LLM_BRIEF_CONCEPT_COOLDOWN_DAYS", "30"))
+
 
 def _text_plan_enabled() -> bool:
     """Whether the batch gets a second pass that plans how its text lives."""
@@ -146,6 +154,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         f"{layout_rules(types)}\n"
         f"{copy_mode_rules()}\n"
         f"{sellability_rules()}\n"
+        f"{concept_freshness_rules()}\n"
         f"{voice_rules()}\n"
         f"{art_direction_rules()}\n"
         f"{idea_device_rules()}\n"
@@ -264,6 +273,8 @@ class DesignBriefDBClient(Protocol):
         self, cooldown_days: int | None = None, limit: int | None = None
     ) -> list[BriefableCandidate]: ...
 
+    def list_recent_brief_concepts(self, days: int = 30) -> list[str]: ...
+
     def list_active_materials(
         self,
         product_type: str | None = None,
@@ -306,6 +317,38 @@ def diversity_rules(
     return DIVERSITY_RULES.format(max_per_theme=max_per_theme, min_evergreen=min_evergreen)
 
 
+def _concept_key(concept: str) -> str:
+    """A concept as a key, so the same idea written twice reads the same."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", concept.lower()).split())
+
+
+def _drop_repeated_concepts(
+    briefs: Sequence[DesignBrief],
+    recent_concepts: Sequence[str],
+    rejections: list[str],
+) -> list[DesignBrief]:
+    """The briefs whose concept the store already has.
+
+    The model is asked to write something new, but the same seed pool comes
+    back every day and the model often lands on the same scene again. A
+    repeat is a duplicate product, so it is dropped and the reason is
+    collected for the batch that is asked again (issue #270).
+    """
+    seen = {_concept_key(concept) for concept in recent_concepts if concept and concept.strip()}
+    kept: list[DesignBrief] = []
+    for brief in briefs:
+        key = _concept_key(brief.concept)
+        if not key:
+            kept.append(brief)
+            continue
+        if key in seen:
+            rejections.append(f"the concept '{brief.concept}' is already in the store")
+            continue
+        seen.add(key)
+        kept.append(brief)
+    return kept
+
+
 def build_brief_prompt(
     candidates: list[BriefableCandidate],
     context: list[dict[str, Any]],
@@ -313,6 +356,7 @@ def build_brief_prompt(
     materials: list[dict[str, Any]] | None = None,
     extra_instructions: list[str] | None = None,
     enabled: Sequence[str] | None = None,
+    recent_concepts: Sequence[str] = (),
 ) -> list[dict[str, str]]:
     truncated = candidates[:MAX_SEEDS_PER_BRIEF]
 
@@ -351,6 +395,11 @@ def build_brief_prompt(
         ],
         "signals_by_source": dict(by_source),
     }
+
+    if recent_concepts:
+        # The store already has these scenes; the model must write others
+        # (issue #270).
+        payload["concepts_to_avoid"] = list(recent_concepts)
 
     if materials:
         payload["available_materials"] = materials
@@ -702,7 +751,18 @@ def generate_design_briefs(
     material_type = enabled[0] if enabled and len(enabled) == 1 else None
     materials = offered_materials(db_client, material_type)
     context = get_upcoming_events(today)
-    messages = build_brief_prompt(candidates, context, today, materials=materials, enabled=enabled)
+    # The store already holds these concepts. The model is told what they are
+    # so it writes something else, and a repeat is dropped afterwards
+    # (issue #270).
+    recent_concepts = list(db_client.list_recent_brief_concepts(BRIEF_CONCEPT_COOLDOWN_DAYS) or [])
+    messages = build_brief_prompt(
+        candidates,
+        context,
+        today,
+        materials=materials,
+        enabled=enabled,
+        recent_concepts=recent_concepts,
+    )
 
     rejections: list[str] = []
     briefs, error = _request_briefs_with_retry(
@@ -710,6 +770,8 @@ def generate_design_briefs(
     )
     if briefs is None:
         return {"status": "error", "error": error or "LLM brief generation failed"}
+
+    briefs = _drop_repeated_concepts(briefs, recent_concepts, rejections)
 
     if rejections and BRIEF_TEXT_REGENERATE_ONCE:
         # The text of some briefs was rejected. Ask once more and say what was
@@ -723,6 +785,7 @@ def generate_design_briefs(
             today,
             materials=materials,
             enabled=enabled,
+            recent_concepts=recent_concepts,
             extra_instructions=[
                 (
                     f"The previous answer had {len(rejections)} briefs whose text was "
@@ -740,6 +803,7 @@ def generate_design_briefs(
             logger.warning("The second brief attempt failed: %s", retry_error)
         if retry_briefs:
             briefs = _merge_briefs(briefs, retry_briefs)
+            briefs = _drop_repeated_concepts(briefs, recent_concepts, rejections)
 
     valid_ids = {c.active_seed_id for c in candidates}
     batch_id = today.isoformat()
