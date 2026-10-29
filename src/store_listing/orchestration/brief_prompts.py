@@ -23,6 +23,7 @@ from typing import Final
 
 __all__ = [
     "ART_DIRECTION_RULES",
+    "CONCEPT_FRESHNESS_RULES",
     "COPY_MODE_RULES",
     "DESIGN_ONLY_RULES",
     "DIVERSITY_RULES",
@@ -33,6 +34,7 @@ __all__ = [
     "SELLABILITY_RULES",
     "VOICE_RULES",
     "art_direction_rules",
+    "concept_freshness_rules",
     "copy_mode_rules",
     "layout_rules",
     "product_belongs_to",
@@ -203,6 +205,20 @@ SELLABILITY_RULES: Final[str] = (
 def sellability_rules() -> str:
     """The design principles that make a line worth wearing."""
     return SELLABILITY_RULES
+
+
+CONCEPT_FRESHNESS_RULES: Final[str] = (
+    "CONCEPT FRESHNESS - the store already has designs:\n"
+    "- The concepts in 'concepts_to_avoid' are already in the store. Do not write "
+    "them again. Write a different scene for the same seed, even when the seed is "
+    "the same one.\n"
+    "- A repeat is a duplicate product, not a second chance at the same idea.\n"
+)
+
+
+def concept_freshness_rules() -> str:
+    """The rule that keeps a second copy of a design out of the store."""
+    return CONCEPT_FRESHNESS_RULES
 
 
 # The store sells three voices and every brief picks one. The operator curates

@@ -25,6 +25,8 @@ config:
   # The copy editor is a separate local-LLM pass that keeps, drops or
   # rewrites design text before an image is generated.
   llmCopyReview: "true"
+  # How long a concept stays in the store before the model may write it again.
+  llmBriefConceptCooldownDays: "30"
   llmMaxActiveSeeds: "200"
   llmMinBriefableSeeds: "30"
   llmBriefSeedCooldownDays: "14"

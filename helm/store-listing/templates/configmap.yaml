@@ -23,6 +23,7 @@ data:
   LLM_MAX_BRIEF_SEEDS: {{ .Values.config.llmMaxBriefSeeds | default "20" | quote }}
   LLM_TEXT_PLAN: {{ .Values.config.llmTextPlan | default "true" | quote }}
   LLM_TEXT_PLAN_REGENERATE: {{ .Values.config.llmTextPlanRegenerate | default "true" | quote }}
+  LLM_BRIEF_CONCEPT_COOLDOWN_DAYS: {{ .Values.config.llmBriefConceptCooldownDays | default "30" | quote }}
   LLM_MAX_ACTIVE_SEEDS: {{ .Values.config.llmMaxActiveSeeds | default "200" | quote }}
   LLM_MIN_BRIEFABLE_SEEDS: {{ .Values.config.llmMinBriefableSeeds | default "30" | quote }}
   LLM_BRIEF_SEED_COOLDOWN_DAYS: {{ .Values.config.llmBriefSeedCooldownDays | default "14" | quote }}

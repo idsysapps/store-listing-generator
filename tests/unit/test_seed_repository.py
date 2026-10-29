@@ -303,6 +303,26 @@ def test_list_active_seeds_by_tag_filters() -> None:
     assert params == ("dtf_apparel",)
 
 
+def test_list_recent_brief_concepts_returns_the_stored_concepts() -> None:
+    # The brief prompt is told what the store already has, so the model can
+    # write something else (issue #270).
+    cursor = FakeCursor()
+    cursor.fetchall_value = [
+        ("A paper crane unfolding into a real crane",),
+        ("A raccoon caught mid-heist",),
+    ]
+    with connected_db(cursor) as (db, _conn):
+        result = db.list_recent_brief_concepts(30)
+
+    assert result == [
+        "A paper crane unfolding into a real crane",
+        "A raccoon caught mid-heist",
+    ]
+    sql, params = cursor.executed_params[0]
+    assert "design_briefs" in sql
+    assert params == (30,)
+
+
 def test_list_briefable_seeds_skips_seeds_used_inside_the_cooldown() -> None:
     # A seed that already produced a brief is offered again only after the
     # cooldown, otherwise the brief pool drains to nothing (issue #192).

@@ -183,6 +183,8 @@ spec:
                   key: LLM_MAX_TOKENS
             - name: LLM_COPY_REVIEW
               value: {{ .Values.config.llmCopyReview | default "true" | quote }}
+            - name: LLM_BRIEF_CONCEPT_COOLDOWN_DAYS
+              value: {{ .Values.config.llmBriefConceptCooldownDays | default "30" | quote }}
             {{- if .Values.config.enabledProductTypes }}
             - name: ENABLED_PRODUCT_TYPES
               valueFrom:
@@ -416,6 +418,8 @@ spec:
                   key: LLM_MAX_TOKENS
             - name: LLM_COPY_REVIEW
               value: {{ .Values.config.llmCopyReview | default "true" | quote }}
+            - name: LLM_BRIEF_CONCEPT_COOLDOWN_DAYS
+              value: {{ .Values.config.llmBriefConceptCooldownDays | default "30" | quote }}
             {{- if .Values.config.enabledProductTypes }}
             - name: ENABLED_PRODUCT_TYPES
               valueFrom:
