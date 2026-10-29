@@ -64,6 +64,8 @@ spec:
             - store_listing.orchestration.tasks
             - worker
             - --loglevel=info
+            - --concurrency={{ .Values.app.celeryConcurrency | default "4" }}
+            - --max-tasks-per-child={{ .Values.app.celeryMaxTasksPerChild | default "25" }}
           env:
             - name: DATABASE_HOST
               valueFrom:
