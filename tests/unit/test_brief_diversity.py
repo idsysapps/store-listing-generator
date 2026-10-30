@@ -38,6 +38,14 @@ class TestSharedRulesHaveNoSeasonalExample:
             assert not re.search(rf"\b{re.escape(word)}", rules), f"the rules mention {word}"
 
 
+class TestTheConceptRule:
+    def test_says_the_concept_is_the_idea_not_the_scene(self) -> None:
+        rules = DESIGN_ONLY_RULES.lower()
+
+        assert "the concept is the idea" in rules
+        assert "not a description of the picture" in rules
+
+
 class TestDiversityRules:
     def test_the_rules_name_the_quota_per_event(self) -> None:
         rules = diversity_rules(max_per_theme=2, min_evergreen=4)

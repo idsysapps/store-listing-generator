@@ -43,8 +43,9 @@ REWRITE: Final[str] = "rewrite"
 REJECT: Final[str] = "reject"
 
 _BLOCK_ACTIONS: Final[frozenset[str]] = frozenset({KEEP, DROP, REWRITE})
-_HEADLINE_ACTIONS: Final[frozenset[str]] = frozenset({KEEP, REWRITE})
+_HEADLINE_ACTIONS: Final[frozenset[str]] = frozenset({KEEP, DROP, REWRITE})
 _OVERALL_ACTIONS: Final[frozenset[str]] = frozenset({KEEP, REJECT})
+_ART_ONLY_LAYOUT: Final[str] = "full_bleed"
 
 _SYSTEM_PROMPT: Final[str] = """You are the creative director for a print-on-demand t-shirt store.
 You review the copy of a design before any image is generated. Your job is to
@@ -54,6 +55,11 @@ dropped or rewritten.
 DESIGN PRINCIPLES
 - A buyer wears an identity, a joke, an occasion or an attitude, not a product
   description.
+- The concept is the idea the design sells: a joke, an identity, an occasion,
+  an attitude or a visual pun. A concept that only names a scene is a picture,
+  not an idea.
+- The scene is the execution of the idea, not the idea itself. A scene that
+  lists objects, or a single object sitting still, is clip art.
 - The illustration shows the scene. Do not explain what the image already
   shows.
 - One idea, one joke, one identity. Extra text dilutes the design.
@@ -62,7 +68,11 @@ DESIGN PRINCIPLES
 - Ask: would a stranger wear this without the product description?
 - Specificity beats a broad pun. A line for a niche, an inside joke, a
   profession or a subculture is stronger than a line for everyone.
-- A headline must work as the main line a person wears.
+- The strongest design often has no words at all. A line that only
+  re-describes the picture is worse than no line.
+- A headline must work as the main line a person wears. A headline that only
+  names what the picture shows — the object, the setting — describes the
+  picture; it is a caption, not a line.
 - A kicker sets up the hero; it must not repeat it.
 - A tagline is optional. When the design already stands alone, DROP is the
   best answer. Only keep or rewrite a tagline when it adds a second joke,
@@ -71,15 +81,35 @@ DESIGN PRINCIPLES
 - A tagline never names a brand, a franchise or a trademark.
 - A rewrite is not a way to keep text for its own sake. If the design does not
   need a second line, drop it.
+- Some scenes carry the words in the picture: a blank sign, banner, headstone,
+  screen, label or band. A design with a carrier does not stand alone — the
+  blank place is where the line goes. KEEP or REWRITE the headline to fill it;
+  do not DROP it.
+
+Examples of a description and a line:
+- "Tiny Office with Giant Coffee Mug" describes the picture; "Powered by
+  Coffee" is a line.
+- "Ghost in a Business Suit" describes the picture; "Ghosting the Meeting"
+  is a line.
 
 Return one review for every brief. Use these actions:
-- headline: KEEP or REWRITE. If no headline can work, set overall_action to
-  REJECT.
+- headline: KEEP, DROP or REWRITE. DROP is the preferred answer when the
+  illustration explains the idea by itself and the scene has no blank
+  carrier: the design becomes art-only, with no words at all, and the kicker
+  and the tagline go with it. REWRITE only when the line adds a joke, an
+  identity, an attitude or an occasion the picture cannot show. If the best
+  rewrite would still describe the picture, DROP the headline instead.
+- A caption is picture-first: when the picture already carries the idea, DROP
+  the headline. A type_hero is line-first: a description must become a phrase
+  worth wearing, or the brief is rejected; drop a hero's headline only when
+  the scene is strong enough to be the whole design.
 - kicker: KEEP, DROP or REWRITE.
 - tagline: KEEP, DROP or REWRITE.
-- overall_action: KEEP or REJECT.
-- design_stands_alone: true when the concept, kicker, hero and illustration
-  already deliver the idea without a tagline.
+- overall_action: KEEP when the idea is worth making; REJECT when the concept
+  is only a scene, a product description or a list of objects, even if a line
+  could be written for it. Judge the idea before the copy.
+- design_stands_alone: true when the concept and the illustration already
+  deliver the idea without words.
 - Give a short reason for every decision and a confidence from 0 to 1.
 
 Return ONLY valid JSON with this shape:
@@ -277,10 +307,27 @@ def apply_copy_reviews(
             )
             continue
 
+        headline = _apply_block(brief.headline_text, review.headline)
+        if headline is None:
+            # The editor decided the picture explains itself. An art-only
+            # design carries no words at all, so a kicker or tagline that
+            # survived the drop goes too.
+            result.append(
+                replace(
+                    brief,
+                    headline_text=None,
+                    kicker_text=None,
+                    tagline_text=None,
+                    copy_mode=NO_TEXT,
+                    layout_type=_ART_ONLY_LAYOUT,
+                )
+            )
+            continue
+
         result.append(
             replace(
                 brief,
-                headline_text=_apply_block(brief.headline_text, review.headline),
+                headline_text=headline,
                 kicker_text=_apply_block(brief.kicker_text, review.kicker),
                 tagline_text=_apply_block(brief.tagline_text, review.tagline),
             )

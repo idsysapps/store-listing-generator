@@ -119,6 +119,20 @@ class TestBuildCopyReviewPrompt:
         user = json.loads(messages[1]["content"])
         assert user["briefs"] == []
 
+    def test_says_the_headline_can_be_dropped_when_the_picture_explains_it(self) -> None:
+        system = build_copy_review_prompt([_brief()])[0]["content"].lower()
+
+        assert "drop the headline" in system
+        assert "art-only" in system
+        assert "describes the picture" in system
+
+    def test_judges_the_idea_before_the_copy(self) -> None:
+        system = build_copy_review_prompt([_brief()])[0]["content"].lower()
+
+        assert "the concept is the idea" in system
+        assert "only names a scene" in system
+        assert "judge the idea before the copy" in system
+
 
 class TestParseCopyReviewResponse:
     def test_reads_decisions(self) -> None:
@@ -152,6 +166,21 @@ class TestParseCopyReviewResponse:
 
         assert reviews == []
         assert error is not None
+
+    def test_a_dropped_headline_is_read(self) -> None:
+        reviews, error = parse_copy_review_response(
+            _response(
+                headline={
+                    "action": "DROP",
+                    "rewrite": None,
+                    "reason": "The picture explains it.",
+                }
+            ),
+            expected_indexes={1},
+        )
+
+        assert error is None
+        assert reviews[0].headline.action == "drop"
 
 
 class TestApplyCopyReviews:
@@ -213,6 +242,42 @@ class TestApplyCopyReviews:
         result = apply_copy_reviews([brief], [review])
 
         assert result[0].headline_text == "PAPER CRANE"
+
+    def test_a_dropped_headline_makes_the_design_art_only(self) -> None:
+        brief = _brief()
+        review = CopyReview(
+            index=1,
+            design_stands_alone=True,
+            headline=CopyBlockReview("drop", reason="The picture explains it."),
+            kicker=CopyBlockReview("drop"),
+            tagline=CopyBlockReview("drop"),
+        )
+
+        result = apply_copy_reviews([brief], [review])
+
+        assert result[0].copy_mode == "no_text"
+        assert result[0].layout_type == "full_bleed"
+        assert result[0].headline_text is None
+        assert result[0].kicker_text is None
+        assert result[0].tagline_text is None
+
+    def test_a_dropped_headline_clears_a_surviving_kicker_and_tagline(self) -> None:
+        # An art-only design carries no words at all: a kicker or tagline that
+        # survived the drop would be text with no headline to anchor it.
+        brief = _brief()
+        review = CopyReview(
+            index=1,
+            design_stands_alone=True,
+            headline=CopyBlockReview("drop"),
+            kicker=CopyBlockReview("keep"),
+            tagline=CopyBlockReview("keep"),
+        )
+
+        result = apply_copy_reviews([brief], [review])
+
+        assert result[0].copy_mode == "no_text"
+        assert result[0].kicker_text is None
+        assert result[0].tagline_text is None
 
 
 class TestReviewBatchCopy:
