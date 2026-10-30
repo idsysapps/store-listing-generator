@@ -279,8 +279,11 @@ def art_direction_rules() -> str:
 
 DESIGN_ONLY_RULES: Final[str] = (
     "DESIGN vs PRODUCT - the design is the artwork, never the product it is printed on:\n"
-    "- concept: the design idea, NOT the product. Bad: 'Weekend Tote with Coffee Beans'. "
-    "Good: 'Coffee Beans' - the bag itself belongs in specific_products.\n"
+    "- concept: the design idea, NOT the product and NOT a description of the picture. "
+    "The concept is the idea the buyer wears: a joke, an identity, an occasion, an "
+    "attitude or a visual pun. Bad: 'Weekend Tote with Coffee Beans' (a product). Bad: "
+    "'Tiny Office with Giant Coffee Mug' (a scene). Good: 'Powered by Coffee' (an office "
+    "identity); the scene shows it. The bag itself belongs in specific_products.\n"
     "- scene_description: a concise visual description of ONLY the illustration to draw "
     "(no text, no slogans, no words - just the visual scene). Under 35 words. It is what "
     "the image generator sees, so it has to be the print artwork itself, not a photo of a "
