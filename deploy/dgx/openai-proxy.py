@@ -24,7 +24,10 @@ from typing import Any
 PORT = 9000
 
 MODEL_ROUTES: dict[str, str] = {
-    "qwen38_briefs": "http://localhost:8002",
+    # One vLLM serves both names: the 27B writes the briefs and judges the
+    # artwork. Keeping both aliases means the app and Helm values do not
+    # change.
+    "qwen38_briefs": "http://localhost:8003",
     # Vision model used to verify the text rendered into a generated image.
     "qwen_vl_ocr": "http://localhost:8003",
 }
@@ -52,13 +55,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/v1/models":
             models = []
+            seen: set[str] = set()
             for name, url in MODEL_ROUTES.items():
                 try:
                     with urllib.request.urlopen(f"{url}/v1/models", timeout=5) as resp:
                         data = json.loads(resp.read())
-                        models.extend(data.get("data", []))
+                        for model in data.get("data", []):
+                            model_id = model.get("id")
+                            if model_id in seen:
+                                continue
+                            seen.add(model_id)
+                            models.append(model)
                 except Exception:  # noqa: BLE001
-                    models.append({"id": name, "object": "model", "owned_by": "local"})
+                    if name not in seen:
+                        seen.add(name)
+                        models.append({"id": name, "object": "model", "owned_by": "local"})
             self._json(200, {"object": "list", "data": models})
         elif self.path in ("/health", "/v1/health"):
             healthy = {}
