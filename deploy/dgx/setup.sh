@@ -48,7 +48,7 @@ fi
 echo "==> Stopping old services"
 sudo systemctl stop ollama.service 2>/dev/null || true
 sudo systemctl disable ollama.service 2>/dev/null || true
-sudo docker stop vllm-briefs vllm-vision comfyui vllm-proxy 2>/dev/null || true
+sudo docker stop vllm vllm-briefs vllm-vision comfyui vllm-proxy 2>/dev/null || true
 
 # The TensorRT-LLM systemd unit is retired - the compose services autostart on
 # boot through Docker's restart policy, and the old unit would start them twice.
@@ -70,8 +70,7 @@ echo "==> Stack starting. First run may take several minutes for model downloads
 echo "    Monitor: sudo docker compose -f $INSTALL_DIR/docker-compose.yml logs -f"
 echo ""
 echo "    Services:"
-echo "      vllm-briefs  (port 8002) - Qwen3-14B (design briefs)"
-echo "      vllm-vision  (port 8003) - Qwen2.5-VL-7B (image text validation)"
+echo "      vllm         (port 8003) - Qwen3.8-27B (design briefs + vision)"
 echo "      comfyui      (port 8188) - Flux Schnell + BiRefNet"
 echo "      openai-proxy (port 9000) - Unified routing"
 echo ""

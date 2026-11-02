@@ -133,6 +133,12 @@ class TestBuildCopyReviewPrompt:
         assert "only names a scene" in system
         assert "judge the idea before the copy" in system
 
+    def test_requires_a_confidence_field(self) -> None:
+        system = build_copy_review_prompt([_brief()])[0]["content"].lower()
+
+        assert "every review object must include a numeric" in system
+        assert "never omit it" in system
+
 
 class TestParseCopyReviewResponse:
     def test_reads_decisions(self) -> None:

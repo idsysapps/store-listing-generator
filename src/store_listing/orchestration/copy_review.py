@@ -111,6 +111,8 @@ Return one review for every brief. Use these actions:
 - design_stands_alone: true when the concept and the illustration already
   deliver the idea without words.
 - Give a short reason for every decision and a confidence from 0 to 1.
+- REQUIRED: every review object MUST include a numeric "confidence" field
+  between 0 and 1. Never omit it.
 
 Return ONLY valid JSON with this shape:
 {"reviews":[{"index":1,"design_stands_alone":true,"headline":{"action":"KEEP","rewrite":null,"reason":"..."},"kicker":{"action":"KEEP","rewrite":null,"reason":"..."},"tagline":{"action":"DROP","rewrite":null,"reason":"..."},"overall_action":"KEEP","overall_reason":"...","confidence":0.9}]}
