@@ -31,7 +31,10 @@ PRODUCT_TYPE_CONTEXT: dict[str, str] = {
     #
     # The composition is not described here: it belongs to the template, so
     # the prompt does not ask for a centred object every time (issue #238).
-    "dtf_apparel": ("sticker illustration, bold outlines, flat colors, DTF transfer print"),
+    "dtf_apparel": (
+        "screen-printed apparel graphic, bold outlines, flat colors, DTF transfer "
+        "print, no sticker border, no printed background"
+    ),
     # These are printed full-bleed, so their background is kept and has to be
     # white - it becomes the paper.
     "sublimation": "full-color sublimation print, seamless edges, vibrant colors",
@@ -203,6 +206,13 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     # its own style.
     look = prompt_for(preset_for(brief.style_preset)) or brief.visual_style
     parts.append(f"{look}, {product_context}, {NO_MOCKUP}.")
+    if brief.product_type == "dtf_apparel":
+        # The magenta backdrop is a key, not printed. The design itself must
+        # not paint a backdrop behind the subject (issue #288).
+        parts.append(
+            "Isolated on the garment: no printed background, no backdrop, no scene "
+            "behind the subject; the garment colour is the background."
+        )
 
     if template_id == "full_bleed":
         parts.append("Do not include any text or lettering: no text, no lettering, no words.")
@@ -217,6 +227,17 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     # replaced the fixed "compact centered composition" that made every design
     # an object in the middle (issue #238).
     composition = composition_for(template_id, brief.concept)
+    if brief.product_type == "dtf_apparel":
+        # The template's "edge to edge" is a printed background on a DTF
+        # shirt. Keep the subject and the text zone, not the plate (issue
+        # #288).
+        composition = composition.replace(
+            "the artwork fills the whole canvas edge to edge",
+            "the subject is isolated on the garment, with the garment colour around it",
+        ).replace(
+            "covers the whole canvas edge to edge",
+            "is isolated on the garment, with the garment colour around it",
+        )
     carrier = brief.text_plan is not None and brief.text_plan.needs_carrier
     if carrier:
         # The clear band the template reserved for type now holds the carrier
@@ -259,7 +280,14 @@ def build_negative_prompt(brief: DesignBrief) -> str:
     (issue #246).
     """
     allow_surface = brief.text_plan is not None and brief.text_plan.needs_carrier
-    return negative_for(preset_for(brief.style_preset), allow_surface=allow_surface)
+    negative = negative_for(preset_for(brief.style_preset), allow_surface=allow_surface)
+    if brief.product_type == "dtf_apparel":
+        negative += (
+            ", no background, no backdrop, no printed background, no solid "
+            "background, no sticker border, no white outline, no rectangular "
+            "background"
+        )
+    return negative
 
 
 def generate_image(

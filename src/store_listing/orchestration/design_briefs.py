@@ -33,6 +33,7 @@ from store_listing.orchestration.brief_prompts import (
     art_direction_rules,
     concept_freshness_rules,
     copy_mode_rules,
+    dtf_rules,
     layout_rules,
     product_belongs_to,
     product_catalog,
@@ -152,6 +153,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         "trend signals)\n"
         "- source_seed_ids: array of seed IDs from the input that inspired this brief\n\n"
         f"{layout_rules(types)}\n"
+        f"{dtf_rules(types)}\n"
         f"{copy_mode_rules()}\n"
         f"{sellability_rules()}\n"
         f"{concept_freshness_rules()}\n"

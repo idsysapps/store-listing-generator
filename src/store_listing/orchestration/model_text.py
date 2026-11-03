@@ -66,6 +66,7 @@ class QwenImageClient(Protocol):
         seed: int | None = None,
         width: int = QWEN_SIZE,
         height: int = QWEN_SIZE,
+        negative_prompt: str = "",
     ) -> ComfyUIResult: ...
 
 
@@ -106,6 +107,7 @@ class ModelTextCopy:
     integration: str = "painted into the artwork"
     ink: str = "dark lettering"
     background: str = DEFAULT_BACKGROUND
+    sticker: bool = True
 
     def __post_init__(self) -> None:
         if not self.headline or not self.headline.strip():
@@ -179,6 +181,7 @@ def model_text_copy_from_brief(brief: DesignBrief) -> ModelTextCopy:
         integration=integration,
         ink=ink,
         background=background,
+        sticker=brief.product_type != "dtf_apparel",
     )
 
 
@@ -189,11 +192,20 @@ def build_model_text_prompt(copy: ModelTextCopy) -> str:
     style = _clean_copy(copy.style) or "hand-painted lettering"
     integration = _clean_copy(copy.integration) or "painted into the artwork"
 
+    medium = (
+        "A die-cut sticker design of" if copy.sticker else "A screen-printed apparel graphic of"
+    )
+    border = (
+        ""
+        if copy.sticker
+        else " No white sticker border; the garment is the background; no offset shadow."
+    )
     return (
-        f"A die-cut sticker design of {subject}, with the words "
+        f"{medium} {subject}, with the words "
         f'"{headline}" {style}, {integration}. '
         "The art flows around the letters without covering any letterform; "
-        "keep every letter fully visible and readable. "
+        "keep every letter fully visible and readable."
+        f"{border} "
         f"{copy.ink.capitalize()}, {copy.background}, generous margin, the "
         "words are printed plain with no quotation marks and no extra "
         "punctuation, no other text."
@@ -218,6 +230,11 @@ class ModelTextGenerator:
 
     def generate(self, copy: ModelTextCopy, *, seed: int | None = None) -> ModelTextResult:
         prompt = build_model_text_prompt(copy)
+        negative = (
+            ""
+            if copy.sticker
+            else "white sticker border, die-cut outline, background, backdrop, offset shadow"
+        )
         base_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
         errors: list[str] = []
         last_validation: StrictTextResult | None = None
@@ -228,6 +245,7 @@ class ModelTextGenerator:
                 result = self._client.generate_qwen_image(
                     prompt=prompt,
                     seed=attempt_seed,
+                    negative_prompt=negative,
                 )
             except ComfyUIError as error:
                 errors.append(f"attempt {attempt + 1}: {error}")

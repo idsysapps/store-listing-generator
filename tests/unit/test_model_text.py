@@ -139,6 +139,26 @@ class TestCopy:
 
 
 class TestPrompt:
+    def test_a_dtf_text_design_has_no_default_sticker_border(self) -> None:
+        copy = model_text_copy_from_brief(_brief())
+
+        prompt = build_model_text_prompt(copy)
+
+        assert copy.sticker is False
+        assert "screen-printed apparel graphic" in prompt.lower()
+        assert "no white sticker border" in prompt.lower()
+        assert "die-cut sticker" not in prompt.lower()
+
+    def test_a_dtf_text_design_gets_the_no_sticker_negative(self) -> None:
+        comfy = _FakeComfy([ComfyUIResult(image_bytes=b"good")])
+        generator = ModelTextGenerator(
+            comfyui_client=comfy, validator=_FakeValidator([True]), candidates=1
+        )
+
+        generator.generate(model_text_copy_from_brief(_brief()), seed=1)
+
+        assert "white sticker border" in comfy.calls[0]["negative_prompt"]
+
     def test_carries_the_line_the_scene_and_the_style(self) -> None:
         prompt = build_model_text_prompt(model_text_copy_from_brief(_brief()))
 

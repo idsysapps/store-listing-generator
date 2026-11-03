@@ -27,6 +27,7 @@ from store_listing.orchestration.artwork_validation import (
     ArtworkTextValidator,
     ArtworkValidator,
 )
+from store_listing.orchestration.chroma_key import opaque_fraction, trim_sticker_border
 from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.copy_modes import (
     CAPTION,
@@ -78,6 +79,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_TEXT_RETRIES = 2
 DEFAULT_MAX_ARTWORK_RETRIES = 1
 DEFAULT_MAX_LETTERING_RETRIES = 1
+# A DTF design that covers most of its placement prints as a solid sheet and
+# feels like plastic. This is a warning, not a rejection (issue #288).
+DTF_COVERAGE_WARN = 0.65
 
 
 def _max_text_retries() -> int:
@@ -282,6 +286,7 @@ def _upload_text_only(
         transparent_bytes = composite_text(
             blank_canvas(product_type, transparent=True), layout, transparent=True
         )
+    _log_dtf_coverage(brief_id, transparent_bytes)
 
     if text_validator is not None:
         verdict = text_validator.validate(
@@ -370,9 +375,13 @@ def _generate_typographic_hero_brief(
         if keyed.image_bytes is None:
             logger.warning("Background removal failed for hero brief %d: %s", brief_id, keyed.error)
         else:
+            keyed_bytes = keyed.image_bytes
+            if not copy.sticker:
+                keyed_bytes = trim_sticker_border(keyed_bytes)
             transparent_bytes = _hero_with_descriptor(
-                keyed.image_bytes, copy.descriptor, transparent=True
+                keyed_bytes, copy.descriptor, transparent=True
             )
+    _log_dtf_coverage(brief_id, transparent_bytes)
 
     keys = storage.upload_design(
         raw_bytes=raw_bytes,
@@ -386,6 +395,22 @@ def _generate_typographic_hero_brief(
         image_key_transparent=keys.get("transparent"),
     )
     return True, None
+
+
+def _log_dtf_coverage(brief_id: int, image_bytes: bytes | None) -> None:
+    """Log how much of the DTF print area is ink, and warn when it is large."""
+    if image_bytes is None:
+        return
+    coverage = opaque_fraction(image_bytes)
+    logger.info("Brief %d: DTF opaque coverage %.1f%%", brief_id, coverage * 100)
+    if coverage > DTF_COVERAGE_WARN:
+        logger.warning(
+            "Brief %d: DTF coverage %.1f%% is above %.0f%%; the design may "
+            "print as a large solid area and feel like plastic",
+            brief_id,
+            coverage * 100,
+            DTF_COVERAGE_WARN * 100,
+        )
 
 
 def _flatten_for_ocr(image_bytes: bytes) -> bytes:
@@ -455,8 +480,11 @@ def _generate_model_text_brief(
                 )
                 last_error = keyed.error or "background removal failed"
                 continue
+            keyed_bytes = keyed.image_bytes
+            if not copy.sticker:
+                keyed_bytes = trim_sticker_border(keyed_bytes)
             transparent_bytes = _hero_with_descriptor(
-                keyed.image_bytes, copy.descriptor, transparent=True
+                keyed_bytes, copy.descriptor, transparent=True
             )
             keyed_check = validator.validate(
                 _flatten_for_ocr(transparent_bytes),
@@ -470,6 +498,7 @@ def _generate_model_text_brief(
                 )
                 last_error = "the keyed artwork lost the text"
                 continue
+        _log_dtf_coverage(brief_id, transparent_bytes)
 
         keys = storage.upload_design(
             raw_bytes=raw_bytes,
@@ -755,6 +784,7 @@ def _generate_single_brief(
             if needs_text_check
             else keyed_artwork
         )
+    _log_dtf_coverage(brief_id, transparent_bytes)
 
     keys = storage.upload_design(
         raw_bytes=raw_bytes,

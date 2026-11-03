@@ -70,6 +70,27 @@ class TestBuildFluxPrompt:
 
         assert "do not include any text or lettering" in prompt.lower()
 
+    def test_a_dtf_prompt_keeps_the_garment_as_the_background(self) -> None:
+        prompt = build_flux_prompt(_make_brief())
+
+        assert "no printed background" in prompt
+        assert "garment colour is the background" in prompt
+
+    def test_a_dtf_prompt_does_not_ask_for_a_sticker_or_a_full_bleed_plate(self) -> None:
+        prompt = build_flux_prompt(
+            _make_brief(layout_type="mid_ribbon", headline_text="POWERED BY COFFEE")
+        )
+
+        assert "sticker illustration" not in prompt
+        assert "the subject is isolated on the garment" in prompt
+        assert "fills the whole canvas edge to edge" not in prompt
+
+    def test_a_dtf_negative_keeps_the_background_and_sticker_border_out(self) -> None:
+        negative = build_negative_prompt(_make_brief())
+
+        assert "no background" in negative
+        assert "no sticker border" in negative
+
     def test_a_no_text_brief_says_the_illustration_carries_the_idea(self) -> None:
         brief = _make_brief(
             copy_mode="no_text",
@@ -475,7 +496,10 @@ class TestTheTemplates:
 
     def test_the_composition_of_the_template_is_in_the_prompt(self) -> None:
         for template_id in ART_TEMPLATE_IDS:
+            # DTF replaces the edge-to-edge composition with an isolated
+            # subject, so this test uses a print-through product.
             brief = _make_brief(
+                product_type="sublimation",
                 layout_type=template_id,
                 headline_text="GOBBLE",
                 tagline_text="TILL THE BELL",

@@ -4,6 +4,10 @@
 
 This document establishes coding standards and practices for the Store Listing Generator project. All code changes should follow these guidelines.
 
+## DTF Design Guidelines
+
+A DTF print is ink on the shirt: transparent areas are the garment. Keep the printed area to the subject, the words and intentional carriers; do not print a backdrop, a solid plate behind the text, or a default die-cut sticker border. Large solid ink fields make the shirt feel like plastic. See [docs/dtf-design-guidelines.md](docs/dtf-design-guidelines.md) for the full rules and how they map to the pipeline.
+
 ---
 
 ## Testing Requirements

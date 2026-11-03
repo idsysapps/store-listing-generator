@@ -21,8 +21,13 @@ from store_listing.orchestration.brief_prompts import (
     SEASONAL_WORDS,
     SELLABILITY_RULES,
     VOICE_RULES,
+    layout_rules,
 )
-from store_listing.orchestration.design_briefs import build_brief_prompt, diversity_rules
+from store_listing.orchestration.design_briefs import (
+    build_brief_prompt,
+    diversity_rules,
+    system_prompt,
+)
 
 
 @dataclass
@@ -187,3 +192,22 @@ class TestTheTaglineRule:
 
         assert "the tagline names the occasion" not in rules
         assert "only names the occasion" in rules
+
+
+class TestTheDtfRules:
+    def test_the_dtf_batch_is_told_the_garment_is_the_background(self) -> None:
+        prompt = system_prompt(["dtf_apparel"]).lower()
+
+        assert "the garment is the background" in prompt
+        assert "printed backdrop" in prompt
+
+    def test_a_non_dtf_batch_does_not_get_the_dtf_rules(self) -> None:
+        prompt = system_prompt(["sublimation"]).lower()
+
+        assert "the garment is the background" not in prompt
+
+    def test_the_dtf_layout_note_says_the_shirt_is_the_background(self) -> None:
+        rules = layout_rules(["dtf_apparel"]).lower()
+
+        assert "garment colour is the background" in rules
+        assert "do not fill the print area" in rules

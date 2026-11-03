@@ -63,6 +63,7 @@ class QwenImageClient(Protocol):
         seed: int | None = None,
         width: int = QWEN_SIZE,
         height: int = QWEN_SIZE,
+        negative_prompt: str = "",
     ) -> ComfyUIResult: ...
 
 
@@ -134,6 +135,7 @@ class HeroCopy:
     style: str = DEFAULT_STYLE
     palette: tuple[str, ...] = DEFAULT_PALETTE
     background: str = DEFAULT_BACKGROUND
+    sticker: bool = True
 
     def __post_init__(self) -> None:
         if not self.hero or not self.hero.strip():
@@ -175,10 +177,16 @@ def build_typographic_hero_prompt(copy: HeroCopy) -> str:
     palette = [colour.strip() for colour in copy.palette if colour.strip()]
     first, second = palette[0], palette[1]
 
-    if subject:
-        opening = f"A die-cut sticker design of {subject}."
+    if copy.sticker:
+        opening = (
+            f"A die-cut sticker design of {subject}." if subject else "A die-cut sticker wordmark."
+        )
     else:
-        opening = "A die-cut sticker wordmark."
+        opening = (
+            f"A screen-printed apparel graphic of {subject}."
+            if subject
+            else "A screen-printed apparel wordmark."
+        )
 
     parts = [opening]
     if kicker:
@@ -193,9 +201,13 @@ def build_typographic_hero_prompt(copy: HeroCopy) -> str:
     else:
         parts.append(f'Across the middle, the word "{hero}" in giant {second} bubble letters.')
 
-    parts.append(
+    finish = (
         "Thick black outline, hard offset shadow, flat "
-        f"{' '.join(palette)} palette, {copy.background}, generous margin, "
+        if copy.sticker
+        else "Clean outline, no offset shadow, no white sticker border, flat "
+    )
+    parts.append(
+        finish + f"{' '.join(palette)} palette, {copy.background}, generous margin, "
         "the words are printed plain with no quotation marks and no extra "
         "punctuation, no other text."
     )
@@ -225,6 +237,7 @@ def hero_copy_from_brief(brief: DesignBrief) -> HeroCopy:
         descriptor=descriptor,
         subject=subject,
         background=background,
+        sticker=brief.product_type != "dtf_apparel",
     )
 
 
@@ -246,6 +259,11 @@ class TypographicHeroGenerator:
 
     def generate(self, copy: HeroCopy, *, seed: int | None = None) -> HeroResult:
         prompt = build_typographic_hero_prompt(copy)
+        negative = (
+            ""
+            if copy.sticker
+            else "white sticker border, die-cut outline, background, backdrop, offset shadow"
+        )
         base_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
         errors: list[str] = []
         last_validation: StrictTextResult | None = None
@@ -256,6 +274,7 @@ class TypographicHeroGenerator:
                 result = self._client.generate_qwen_image(
                     prompt=prompt,
                     seed=attempt_seed,
+                    negative_prompt=negative,
                 )
             except ComfyUIError as error:
                 errors.append(f"attempt {attempt + 1}: {error}")

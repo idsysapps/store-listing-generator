@@ -178,6 +178,21 @@ def key_out_background(
     return bleed_transparent_pixels(buffer.getvalue())
 
 
+def opaque_fraction(rgba_bytes: bytes) -> float:
+    """The share of the canvas that is printed ink (alpha above zero).
+
+    A test double or a failed render may not be a decodable image; coverage is
+    only a diagnostic, so an unreadable image reports no coverage instead of
+    failing the render.
+    """
+    try:
+        with Image.open(io.BytesIO(rgba_bytes)) as opened:
+            alpha = np.asarray(opened.convert("RGBA").getchannel("A"))
+    except OSError:
+        return 0.0
+    return float((alpha > 0).mean())
+
+
 def background_fraction(
     image_bytes: bytes, *, key_colour: tuple[int, int, int] | None = None
 ) -> float:
@@ -298,6 +313,49 @@ def bleed_transparent_pixels(rgba_bytes: bytes, *, rounds: int = 8) -> bytes:
     # The far background is never reached; white is a neutral hidden colour.
     rgb[~known] = 255
     values[..., :3] = np.clip(rgb, 0, 255)
+    output = Image.fromarray(values.astype(np.uint8), "RGBA")
+    buffer = io.BytesIO()
+    output.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _dilate(mask: np.ndarray) -> np.ndarray:
+    output = mask.copy()
+    output[1:, :] |= mask[:-1, :]
+    output[:-1, :] |= mask[1:, :]
+    output[:, 1:] |= mask[:, :-1]
+    output[:, :-1] |= mask[:, 1:]
+    return output
+
+
+def trim_sticker_border(rgba_bytes: bytes) -> bytes:
+    """Remove a near-white die-cut border that touches the transparent edge.
+
+    Qwen sometimes wraps a DTF design in a white sticker border even when the
+    prompt forbids it. The border is a near-white ring just inside the edge;
+    clear that band and leave the interior white highlights alone.
+    """
+    try:
+        with Image.open(io.BytesIO(rgba_bytes)) as opened:
+            result = opened.convert("RGBA")
+    except OSError:
+        # A test double or a failed render may not be a decodable image.
+        return rgba_bytes
+
+    values = np.asarray(result).astype(np.int16)
+    rgb = values[..., :3]
+    alpha = values[..., 3]
+    low = rgb.min(axis=2)
+    high = rgb.max(axis=2)
+    near_white = (low > 220) & ((high - low) < 30) & (alpha > 0)
+    transparent = alpha < 10
+    # The sticker ring is a near-white band just inside the transparent edge.
+    # The artwork's own white outlines are deeper than this band.
+    band = transparent.copy()
+    for _ in range(max(3, int(0.02 * min(result.size)))):
+        band = _dilate(band)
+
+    values[..., 3][near_white & band] = 0
     output = Image.fromarray(values.astype(np.uint8), "RGBA")
     buffer = io.BytesIO()
     output.save(buffer, format="PNG")
