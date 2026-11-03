@@ -169,13 +169,13 @@ def key_out_background(
         keyed = Image.frombytes("RGBA", (width, height), bytes(out))
         buffer = io.BytesIO()
         keyed.save(buffer, format="PNG")
-        return buffer.getvalue()
+        return bleed_transparent_pixels(buffer.getvalue())
 
     result = rgb.convert("RGBA")
     result.putalpha(alpha)
     buffer = io.BytesIO()
     result.save(buffer, format="PNG")
-    return buffer.getvalue()
+    return bleed_transparent_pixels(buffer.getvalue())
 
 
 def background_fraction(
@@ -244,6 +244,63 @@ def despill_key_spill(
     despilled = Image.frombytes("RGBA", (width, height), bytes(out))
     buffer = io.BytesIO()
     despilled.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def bleed_transparent_pixels(rgba_bytes: bytes, *, rounds: int = 8) -> bytes:
+    """Fill the hidden colour under transparent pixels from the nearest artwork.
+
+    The alpha says the background is gone, but its RGB still holds the key
+    colour. A viewer or a printer that ignores or premultiplies the alpha shows
+    that colour as a pink fringe. Replace the hidden RGB with the nearest
+    opaque colour; the alpha channel is untouched.
+    """
+    with Image.open(io.BytesIO(rgba_bytes)) as opened:
+        result = opened.convert("RGBA")
+
+    values = np.asarray(result).astype(np.float32)
+    rgb = values[..., :3]
+    alpha = values[..., 3]
+    known = alpha >= 250
+    if not known.any():
+        return rgba_bytes
+
+    for _ in range(rounds):
+        if known.all():
+            break
+        sum_rgb = np.zeros_like(rgb)
+        count = np.zeros(alpha.shape, dtype=np.float32)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dy == 0 and dx == 0:
+                    continue
+                shifted_known = np.roll(known, (dy, dx), (0, 1))
+                shifted_rgb = np.roll(rgb, (dy, dx), (0, 1))
+                if dy == 1:
+                    shifted_known[0, :] = False
+                    shifted_rgb[0, :] = 0
+                if dy == -1:
+                    shifted_known[-1, :] = False
+                    shifted_rgb[-1, :] = 0
+                if dx == 1:
+                    shifted_known[:, 0] = False
+                    shifted_rgb[:, 0] = 0
+                if dx == -1:
+                    shifted_known[:, -1] = False
+                    shifted_rgb[:, -1] = 0
+                add = shifted_known & ~known
+                sum_rgb[add] += shifted_rgb[add]
+                count[add] += 1
+        fill = (~known) & (count > 0)
+        rgb[fill] = sum_rgb[fill] / count[fill, None]
+        known |= fill
+
+    # The far background is never reached; white is a neutral hidden colour.
+    rgb[~known] = 255
+    values[..., :3] = np.clip(rgb, 0, 255)
+    output = Image.fromarray(values.astype(np.uint8), "RGBA")
+    buffer = io.BytesIO()
+    output.save(buffer, format="PNG")
     return buffer.getvalue()
 
 

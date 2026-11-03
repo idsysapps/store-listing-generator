@@ -8,6 +8,7 @@ from PIL import Image
 
 from store_listing.orchestration.chroma_key import (
     background_fraction,
+    bleed_transparent_pixels,
     correct_key_mix,
     despill_key_spill,
     estimate_key_colour,
@@ -304,6 +305,38 @@ class TestDespillKeySpill:
         with Image.open(io.BytesIO(result)) as image:
             red, green, blue = _rgb_at(image, 2, 2)
         assert red >= 0 and green >= 0 and blue >= 0
+
+
+class TestBleedTransparentPixels:
+    def test_the_hidden_colour_is_not_the_key(self) -> None:
+        image = Image.new("RGBA", (16, 16), (255, 0, 255, 0))
+        for x in range(6, 10):
+            for y in range(6, 10):
+                image.putpixel((x, y), (255, 255, 255, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = bleed_transparent_pixels(buffer.getvalue())
+
+        with Image.open(io.BytesIO(result)) as output:
+            red, green, blue = _rgb_at(output, 0, 0)
+            alpha = _alpha_at(output, 0, 0)
+        assert alpha == 0
+        # The old background kept (255, 0, 255) under alpha 0; a viewer that
+        # ignores alpha showed the key colour.
+        assert not (red > 200 and blue > 150 and green < 120)
+
+    def test_the_alpha_channel_is_untouched(self) -> None:
+        image = Image.new("RGBA", (16, 16), (255, 0, 255, 0))
+        image.putpixel((8, 8), (255, 255, 255, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = bleed_transparent_pixels(buffer.getvalue())
+
+        with Image.open(io.BytesIO(result)) as output:
+            assert _alpha_at(output, 0, 0) == 0
+            assert _alpha_at(output, 8, 8) == 255
 
 
 class TestBackgroundFraction:
