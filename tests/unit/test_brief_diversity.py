@@ -19,6 +19,8 @@ from store_listing.orchestration.brief_prompts import (
     LAYOUT_RULES,
     PRODUCT_CATALOG,
     SEASONAL_WORDS,
+    SELLABILITY_RULES,
+    VOICE_RULES,
 )
 from store_listing.orchestration.design_briefs import build_brief_prompt, diversity_rules
 
@@ -177,3 +179,11 @@ class TestEnforceBriefMix:
         seed_themes = {1: "halloween", 2: None}
 
         assert evergreen_count(briefs, seed_themes) == 1
+
+
+class TestTheTaglineRule:
+    def test_does_not_ask_the_tagline_to_name_the_occasion(self) -> None:
+        rules = (SELLABILITY_RULES + VOICE_RULES).lower()
+
+        assert "the tagline names the occasion" not in rules
+        assert "only names the occasion" in rules

@@ -144,6 +144,14 @@ class TestBuildCopyReviewPrompt:
 
         assert system.startswith("every review object must begin with a numeric")
 
+    def test_says_an_occasion_only_tagline_is_dropped(self) -> None:
+        system = build_copy_review_prompt([_brief()])[0]["content"].lower()
+
+        assert "only names the occasion" in system
+        assert "describing the brief" in system
+        assert "do not keep a tagline just because it names the occasion" in system
+        assert "all souls day" in system
+
 
 class TestParseCopyReviewResponse:
     def test_reads_decisions(self) -> None:
