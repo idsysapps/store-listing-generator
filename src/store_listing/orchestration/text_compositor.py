@@ -80,6 +80,20 @@ BLOCK_PADDING = 0.18
 # The margin the text keeps inside a band, as a share of the band.
 BAND_INSET = 0.08
 
+# The alpha value above which a pixel counts as printed ink when the compositor
+# looks for a clear band (issue #292).
+INK_ALPHA_THRESHOLD = 8
+# A box is clear when less than this share of it is ink.
+CLEAR_INK_SHARE = 0.01
+# The gap between a text box and the artwork, as a share of the canvas height.
+TEXT_ART_GAP = 0.01
+# The margin a moved text box keeps from the canvas edge, as a share of the
+# canvas height.
+CANVAS_MARGIN = 0.02
+# A clear template zone is kept unless moving buys a lot: the penalty is
+# larger than any possible ink-share saving.
+KEEP_TEMPLATE_PENALTY = 1.0
+
 # A typography-only design has no artwork to make room for, so the text sits
 # in the middle of the canvas instead of at its edges.
 TEXT_ONLY_HEADLINE_TOP = 0.25
@@ -171,6 +185,14 @@ class LayoutSpec:
             # garment, draw the whole line in the main ink instead.
             return replace(treatment, accent_word=None)
         return treatment
+
+
+@dataclass(frozen=True)
+class ClearPlacements:
+    """Pixel boxes for the text, chosen so they do not cross the artwork."""
+
+    headline: tuple[int, int, int, int] | None = None
+    tagline: tuple[int, int, int, int] | None = None
 
 
 def blank_canvas(
@@ -673,12 +695,181 @@ def _bar_colour(layout: LayoutSpec, template: DesignTemplate) -> str | None:
     return accent_for(layout.font_color)
 
 
-def composite_text(image_bytes: bytes, layout: LayoutSpec, *, transparent: bool = False) -> bytes:
+def _alpha_mask(image_bytes: bytes) -> np.ndarray | None:
+    """The alpha channel of a keyed render, or None when it has none."""
+    try:
+        with Image.open(BytesIO(image_bytes)) as opened:
+            if "A" not in opened.getbands():
+                return None
+            alpha = np.asarray(opened.convert("RGBA").getchannel("A"))
+    except OSError:
+        return None
+    # The array may be a view into the image that the context manager closes.
+    return alpha.copy()
+
+
+def _ink_share(alpha: np.ndarray, box: tuple[int, int, int, int]) -> float:
+    """The share of a pixel box that is printed ink."""
+    x, y, width, height = box
+    region = alpha[y : y + height, x : x + width]
+    if region.size == 0:
+        return 1.0
+    return float((region > INK_ALPHA_THRESHOLD).mean())
+
+
+def _candidate_boxes(
+    placement: tuple[int, int, int, int],
+    alpha: np.ndarray,
+    *,
+    gap: int,
+    margin: int,
+) -> list[tuple[int, int, int, int]]:
+    """The places a text box could go: its zone, above the art, below it, or an edge.
+
+    The ink extent is measured only inside the columns the text occupies, so a
+    side-column template whose own column is clear is not moved by artwork
+    elsewhere on the canvas.
+    """
+    x, _y, width, height = placement
+    canvas_height, canvas_width = alpha.shape
+    candidates = [placement]
+
+    columns = alpha[:, x : x + width] > INK_ALPHA_THRESHOLD
+    ink_rows = np.flatnonzero(columns.sum(axis=1) >= 2)
+    if ink_rows.size:
+        top = int(ink_rows[0])
+        bottom = int(ink_rows[-1])
+        above = top - gap - height
+        below = bottom + gap
+        if above >= 0:
+            candidates.append((x, above, width, height))
+        if below + height <= canvas_height:
+            candidates.append((x, below, width, height))
+
+    candidates.append((x, margin, width, height))
+    candidates.append((x, canvas_height - height - margin, width, height))
+
+    unique: list[tuple[int, int, int, int]] = []
+    for candidate in candidates:
+        if candidate[0] < 0 or candidate[0] + candidate[2] > canvas_width:
+            continue
+        if candidate[1] < 0 or candidate[1] + candidate[3] > canvas_height:
+            continue
+        if candidate not in unique:
+            unique.append(candidate)
+    return unique
+
+
+def _boxes_overlap(first: tuple[int, int, int, int], second: tuple[int, int, int, int]) -> bool:
+    """Whether two text boxes share any pixels."""
+    x1, y1, width1, height1 = first
+    x2, y2, width2, height2 = second
+    return not (x1 + width1 <= x2 or x2 + width2 <= x1 or y1 + height1 <= y2 or y2 + height2 <= y1)
+
+
+def _clear_placements(
+    layout: LayoutSpec,
+    ink_mask_bytes: bytes | None,
+    width: int,
+    height: int,
+) -> ClearPlacements | None:
+    """Choose text boxes that keep the headline and tagline off the artwork.
+
+    The template's clear band is a request to the image model, not a promise:
+    a subject can reach into it. The keyed alpha is the truth, so the text is
+    moved to the nearest band that the ink leaves clear. A clear template zone
+    is kept; a band that is already crossed is moved (issue #292).
+    """
+    if ink_mask_bytes is None or layout.layout_type == "text_only":
+        return None
+    alpha = _alpha_mask(ink_mask_bytes)
+    if alpha is None or alpha.shape != (height, width):
+        return None
+
+    template = template_for(layout.layout_type)
+    headline_template = (
+        _box(template.headline, width, height)
+        if layout.headline_text and template.headline
+        else None
+    )
+    tagline_template = (
+        _box(template.tagline, width, height) if layout.tagline_text and template.tagline else None
+    )
+    if headline_template is None and tagline_template is None:
+        return None
+
+    gap = max(1, int(height * TEXT_ART_GAP))
+    margin = int(height * CANVAS_MARGIN)
+    headline_candidates = (
+        _candidate_boxes(headline_template, alpha, gap=gap, margin=margin)
+        if headline_template is not None
+        else []
+    )
+    tagline_candidates = (
+        _candidate_boxes(tagline_template, alpha, gap=gap, margin=margin)
+        if tagline_template is not None
+        else []
+    )
+    # A roundel's tagline follows the bottom of the circle. Moving it would
+    # turn the arc upside down, so its own band is the only candidate.
+    if template.arc_tagline and tagline_template is not None:
+        tagline_candidates = [tagline_template]
+
+    headline_clear = (
+        headline_template is not None and _ink_share(alpha, headline_template) <= CLEAR_INK_SHARE
+    )
+    tagline_clear = (
+        tagline_template is not None and _ink_share(alpha, tagline_template) <= CLEAR_INK_SHARE
+    )
+
+    best: tuple[float, ClearPlacements] | None = None
+    for headline_box in headline_candidates or [None]:
+        for tagline_box in tagline_candidates or [None]:
+            if (
+                headline_box is not None
+                and tagline_box is not None
+                and _boxes_overlap(headline_box, tagline_box)
+            ):
+                continue
+            score = 0.0
+            if headline_box is not None:
+                score += _ink_share(alpha, headline_box)
+                if headline_clear and headline_box != headline_template:
+                    score += KEEP_TEMPLATE_PENALTY
+                if headline_template is not None:
+                    score += 0.001 * abs(headline_box[1] - headline_template[1]) / height
+            if tagline_box is not None:
+                score += _ink_share(alpha, tagline_box)
+                if tagline_clear and tagline_box != tagline_template:
+                    score += KEEP_TEMPLATE_PENALTY
+                if tagline_template is not None:
+                    score += 0.001 * abs(tagline_box[1] - tagline_template[1]) / height
+            if best is None or score < best[0]:
+                best = (score, ClearPlacements(headline=headline_box, tagline=tagline_box))
+
+    if best is None:
+        return ClearPlacements(headline=headline_template, tagline=tagline_template)
+    return best[1]
+
+
+def composite_text(
+    image_bytes: bytes,
+    layout: LayoutSpec,
+    *,
+    transparent: bool = False,
+    ink_mask_bytes: bytes | None = None,
+) -> bytes:
     """Draw the brief's headline and tagline onto the artwork.
 
     ``transparent`` marks the keyed DTF render, which is shown on whatever the
     garment or the catalog page is. The text gets a contrasting outline there
     so a light brief colour does not disappear into the background.
+
+    ``ink_mask_bytes`` is the keyed render whose alpha says which pixels are
+    printed ink. The raw file has no alpha (it still carries the key colour),
+    so the raw compositor pass passes the keyed file here. When neither a mask
+    nor a transparent render is available, the template zones are used
+    unchanged (issue #292).
     """
     if layout.layout_type == "full_bleed" or not layout.needs_text:
         return image_bytes
@@ -690,6 +881,14 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec, *, transparent: bool 
         return image_bytes
 
     width, height = image.size
+    plan = layout.text_plan
+    placements: ClearPlacements | None = None
+    if plan is None or not plan.needs_carrier:
+        mask = ink_mask_bytes
+        if mask is None and transparent:
+            mask = image_bytes
+        placements = _clear_placements(layout, mask, width, height)
+
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
@@ -700,7 +899,7 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec, *, transparent: bool 
     if layout.text_plan is not None and (
         layout.text_plan.method != "typographic" or layout.text_plan.needs_carrier
     ):
-        planned = _composite_planned(image, layout, transparent=transparent)
+        planned = _composite_planned(image, layout, transparent=transparent, placements=placements)
         if planned is not None:
             return planned
 
@@ -719,7 +918,11 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec, *, transparent: bool 
     bar = _bar_colour(layout, template)
 
     if layout.headline_text and template.headline:
-        box = _box(template.headline, width, height)
+        box = (
+            placements.headline
+            if placements is not None and placements.headline is not None
+            else _box(template.headline, width, height)
+        )
         _draw_text(
             draw,
             layout.headline_text,
@@ -732,7 +935,11 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec, *, transparent: bool 
             force_outline=transparent,
         )
     if layout.tagline_text and template.tagline:
-        box = _box(template.tagline, width, height)
+        box = (
+            placements.tagline
+            if placements is not None and placements.tagline is not None
+            else _box(template.tagline, width, height)
+        )
         if template.arc_tagline:
             _draw_arc_text(
                 draw,
@@ -813,7 +1020,11 @@ _REGION_RECTS: dict[str, tuple[float, float, float, float]] = {
 
 
 def _composite_planned(
-    image: Image.Image, layout: LayoutSpec, *, transparent: bool
+    image: Image.Image,
+    layout: LayoutSpec,
+    *,
+    transparent: bool,
+    placements: ClearPlacements | None = None,
 ) -> bytes | None:
     """Draw the text the way the brief planned it.
 
@@ -847,9 +1058,13 @@ def _composite_planned(
             int(height * TEXT_ONLY_TAGLINE_HEIGHT),
         )
     else:
-        if template.headline is not None:
+        if placements is not None and placements.headline is not None:
+            headline_box = placements.headline
+        elif template.headline is not None:
             headline_box = _box(template.headline, width, height)
-        if template.tagline is not None:
+        if placements is not None and placements.tagline is not None:
+            tagline_box = placements.tagline
+        elif template.tagline is not None:
             tagline_box = _box(template.tagline, width, height)
 
     surface_colour: tuple[int, int, int] | None = None

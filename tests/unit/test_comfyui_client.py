@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -537,6 +537,29 @@ class TestRemoveBackgroundPolarity:
         alpha = Image.open(io.BytesIO(result.image_bytes)).convert("RGBA").getchannel("A")
         assert _alpha_at(alpha, 32, 32) == 255
         assert _alpha_at(alpha, 2, 2) == 0
+
+    def test_the_cut_edge_is_soft_and_free_of_the_key_colour(self) -> None:
+        # The matte is eroded to a hard edge so the contaminated rim falls
+        # inside the subject, then feathered so the print does not show a
+        # staircase at print size. The RGB under the feather has already been
+        # despilled, so the softened edge must not be the magenta key.
+        source = self._source()
+        counter = [0]
+        client = _client(
+            self._handler([self._server_output(source, inverted=False)], counter),
+            bg_model_name="birefnet.safetensors",
+        )
+
+        result = client.remove_background(source)
+
+        assert result.image_bytes is not None
+        image = Image.open(io.BytesIO(result.image_bytes)).convert("RGBA")
+        alphas = [_alpha_at(image, x, 32) for x in range(14, 20)]
+        assert any(0 < value < 255 for value in alphas), "the cut edge should be feathered"
+        edge = cast(tuple[int, int, int, int], image.getpixel((16, 32)))[:3]
+        assert not (edge[0] > 200 and edge[2] > 150 and edge[1] < 120), (
+            "the feathered edge should not carry the key colour"
+        )
 
     def test_an_empty_mask_falls_back_to_keying_the_background_colour(self) -> None:
         # BiRefNet is a salient-object model: an all-over repeat has no subject

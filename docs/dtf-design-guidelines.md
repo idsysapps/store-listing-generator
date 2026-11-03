@@ -33,6 +33,14 @@ needs.
 - For `dtf_apparel`, the artwork is generated on a magenta key background and
   keyed out. The magenta is **not** printed; the alpha channel is the print
   area.
+- The keyed matte gets a sub-pixel alpha feather before the despill and the
+  colour bleed, so a subject's edge does not print as a staircase and the
+  colour under the soft edge is cleaned up afterwards. Letter counters are
+  punched out after the feather, so a hole stays a hole.
+- The compositor reads the keyed alpha and moves a caption to a clear band
+  above or below the art when the subject reaches into the template's clear
+  zone. A clear template zone is kept as it is; if the ink leaves no clear
+  band, the template zone is the fallback.
 - `build_flux_prompt` asks for an isolated subject with no printed background
   or backdrop.
 - The brief prompt carries `DTF_RULES`: the garment is the background, keep the

@@ -319,6 +319,38 @@ def bleed_transparent_pixels(rgba_bytes: bytes, *, rounds: int = 8) -> bytes:
     return buffer.getvalue()
 
 
+# A sub-pixel feather on the keyed alpha. The matte is eroded to a hard edge
+# so the contaminated rim falls inside the subject; the feather removes the
+# staircase that edge shows at print size. The feather runs before the hole
+# punch, so a letter's counter stays fully transparent, and before the despill
+# and the colour bleed, which then clean the colour under the soft edge
+# (issue #292).
+ALPHA_FEATHER_RADIUS = 0.8
+
+
+def feather_alpha(rgba_bytes: bytes, *, radius: float = ALPHA_FEATHER_RADIUS) -> bytes:
+    """Soften a hard keyed edge without touching the artwork colour.
+
+    Only the alpha channel is blurred. The colour channels are left for the
+    caller to despill and bleed afterwards, so the softened edge carries the
+    artwork colour rather than the key.
+    """
+    if radius <= 0:
+        return rgba_bytes
+    try:
+        with Image.open(io.BytesIO(rgba_bytes)) as opened:
+            result = opened.convert("RGBA")
+    except OSError:
+        # A test double or a failed render may not be a decodable image.
+        return rgba_bytes
+
+    alpha = result.getchannel("A").filter(ImageFilter.GaussianBlur(radius))
+    result.putalpha(alpha)
+    buffer = io.BytesIO()
+    result.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def remove_dark_ink(
     rgba_bytes: bytes,
     *,

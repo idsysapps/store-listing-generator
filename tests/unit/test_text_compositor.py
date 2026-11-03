@@ -8,9 +8,9 @@ duplicated or dropped (issue #187).
 from __future__ import annotations
 
 import io
-from typing import Any
+from typing import Any, cast
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from store_listing.orchestration.design_templates import ART_TEMPLATE_IDS, TEMPLATES
 from store_listing.orchestration.text_compositor import (
@@ -59,6 +59,38 @@ def _zone_colours(data: bytes, top: bool) -> set[tuple[int, int, int]]:
     else:
         box = (0, int(height * (1 - TAGLINE_ZONE)), width, height)
     return _distinct_colours(image.crop(box))
+
+
+def _artwork_with_band(
+    *,
+    top: float,
+    bottom: float = 1.0,
+    size: tuple[int, int] = (256, 256),
+    colour: tuple[int, int, int, int] = (120, 120, 120, 255),
+) -> bytes:
+    """A transparent canvas with an opaque band of artwork across it."""
+    image = Image.new("RGBA", size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle(
+        (0, int(size[1] * top), size[0], int(size[1] * bottom)),
+        fill=colour,
+    )
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _red_rows(data: bytes) -> list[int]:
+    """The rows that carry the red headline or tagline."""
+    image = Image.open(io.BytesIO(data)).convert("RGBA")
+    rows: list[int] = []
+    for y in range(image.height):
+        for x in range(image.width):
+            red, green, blue, alpha = cast(tuple[int, int, int, int], image.getpixel((x, y)))
+            if alpha > 0 and red > 150 and red - max(green, blue) > 60:
+                rows.append(y)
+                break
+    return rows
 
 
 class TestFullBleed:
@@ -177,6 +209,98 @@ class TestTagline:
         )
 
         assert all(colour == (255, 255, 255) for colour in _zone_colours(result, top=False))
+
+
+class TestCaptionClearOfArtwork:
+    """The caption stays on the garment, not across the subject.
+
+    The template reserves a clear band, but the image model does not always
+    respect it. The keyed alpha is the truth: the compositor measures where
+    the ink actually is and moves the text to the nearest clear band
+    (issue #292).
+    """
+
+    def test_the_tagline_moves_above_artwork_that_reaches_the_bottom_zone(self) -> None:
+        artwork = _artwork_with_band(top=0.55)
+
+        result = composite_text(
+            artwork,
+            LayoutSpec(
+                layout_type="emblem",
+                tagline_text="POWERED BY COFFEE",
+                font_color="#FF0000",
+            ),
+            transparent=True,
+        )
+
+        rows = _red_rows(result)
+        assert rows, "the tagline should still be drawn"
+        assert max(rows) < int(256 * 0.55), "the tagline should sit above the artwork"
+
+    def test_the_tagline_stays_in_the_template_zone_when_the_art_leaves_it_clear(self) -> None:
+        artwork = _artwork_with_band(top=0.30, bottom=0.65)
+
+        result = composite_text(
+            artwork,
+            LayoutSpec(
+                layout_type="emblem",
+                tagline_text="POWERED BY COFFEE",
+                font_color="#FF0000",
+            ),
+            transparent=True,
+        )
+
+        rows = _red_rows(result)
+        assert rows
+        assert min(rows) >= int(256 * 0.80), "a clear template zone should not be abandoned"
+
+    def test_the_tagline_stays_in_place_when_the_whole_canvas_is_ink(self) -> None:
+        artwork = _artwork_with_band(top=0.0)
+
+        result = composite_text(
+            artwork,
+            LayoutSpec(
+                layout_type="emblem",
+                tagline_text="POWERED BY COFFEE",
+                font_color="#FF0000",
+            ),
+            transparent=True,
+        )
+
+        rows = _red_rows(result)
+        assert rows
+        assert min(rows) >= int(256 * 0.80), "with no clear band the text should not wander"
+
+    def test_an_opaque_canvas_keeps_the_template_zone(self) -> None:
+        result = composite_text(
+            _canvas((256, 256)),
+            LayoutSpec(
+                layout_type="emblem",
+                tagline_text="POWERED BY COFFEE",
+                font_color="#FF0000",
+            ),
+        )
+
+        rows = _red_rows(result)
+        assert rows
+        assert min(rows) >= int(256 * 0.80)
+
+    def test_the_headline_moves_below_artwork_that_reaches_the_top_zone(self) -> None:
+        artwork = _artwork_with_band(top=0.0, bottom=0.60)
+
+        result = composite_text(
+            artwork,
+            LayoutSpec(
+                layout_type="hero_bottom",
+                headline_text="SPOOKY",
+                font_color="#FF0000",
+            ),
+            transparent=True,
+        )
+
+        rows = _red_rows(result)
+        assert rows
+        assert min(rows) >= int(256 * 0.60), "the headline should sit below the artwork"
 
 
 class TestUnsupportedGlyphs:

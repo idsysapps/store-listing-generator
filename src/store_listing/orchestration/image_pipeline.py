@@ -289,6 +289,7 @@ def _quality_candidate(
             blank_canvas("dtf_apparel", transparent=True, size=size),
             layout,
             transparent=True,
+            ink_mask_bytes=subject_bytes,
         )
         metrics = replace(metrics, text_overlap=text_overlap(overlay, subject_bytes))
     metrics = with_contrast(
@@ -887,8 +888,13 @@ def _generate_single_brief(
         # The text is drawn onto the artwork, not asked of the model: it cannot
         # spell, and a colour in a prompt is not a colour (issue #187). A
         # no-text design has no compositor pass at all.
+        ink_mask = result.image_bytes if is_dtf and result.background_removed else None
         artwork = _textured(result, brief, is_dtf)
-        raw_bytes = composite_text(artwork, layout) if needs_text_check else artwork
+        raw_bytes = (
+            composite_text(artwork, layout, ink_mask_bytes=ink_mask)
+            if needs_text_check
+            else artwork
+        )
         # The distressed embed is intentionally hard for OCR to read. Validate
         # the same lockup without the wear, while keeping the embedded render
         # for the uploaded asset. The font, not the model, still owns spelling.
@@ -897,6 +903,7 @@ def _generate_single_brief(
             validation_bytes = composite_text(
                 artwork,
                 replace(layout, text_embed_profile=None),
+                ink_mask_bytes=ink_mask,
             )
 
         if text_validator is None or not needs_text_check:
@@ -942,7 +949,7 @@ def _generate_single_brief(
         keyed_artwork = _textured(result, brief, is_dtf, keyed=True)
         subject_bytes = keyed_artwork
         transparent_bytes = (
-            composite_text(keyed_artwork, layout, transparent=True)
+            composite_text(keyed_artwork, layout, transparent=True, ink_mask_bytes=ink_mask)
             if needs_text_check
             else keyed_artwork
         )
