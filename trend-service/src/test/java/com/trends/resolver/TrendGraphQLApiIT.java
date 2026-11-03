@@ -80,6 +80,22 @@ class TrendGraphQLApiIT {
 
     @Test
     @TestSecurity(user = "admin", roles = "admin")
+    void shouldExposeThePricingSnapshot() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"query":"query { designBriefs(productType: \\"dtf_apparel\\", limit: 1) { items { id pricing { effective_positioning status quotes { external_id recommended_price size_prices { size price } print_size { width_in height_in required_pixels { width height } } } } } } }"}
+                        """)
+                .when()
+                .post("/graphql")
+                .then()
+                .statusCode(200)
+                .body("data.designBriefs.items", notNullValue())
+                .body("errors", nullValue());
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = "admin")
     void shouldExposeTheMaterialCatalogue() {
         given()
                 .contentType(ContentType.JSON)

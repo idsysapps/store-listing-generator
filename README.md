@@ -395,29 +395,29 @@ query {
       concept
       productType
       recommendedMaterials {
-        externalId
+        external_id
         name
         color
-        substrateType
-        unitCost
+        substrate_type
+        unit_cost
       }
       pricing {
-        requestedPositioning
-        effectivePositioning
+        requested_positioning
+        effective_positioning
         status
         quotes {
-          externalId
-          recommendedPrice
-          sizePrices {
+          external_id
+          recommended_price
+          size_prices {
             size
             price
           }
-          printSize {
-            widthIn
-            heightIn
+          print_size {
+            width_in
+            height_in
             placement
-            targetDpi
-            requiredPixels {
+            target_dpi
+            required_pixels {
               width
               height
             }
@@ -442,9 +442,11 @@ query {
 }
 ```
 
-A material can serve several product types, so `productTypes` is a list. A
-recommendation the model invented, or one that does not serve the product type
-of the brief, is dropped when the brief is read.
+The nested material and pricing fields keep the stored snake_case names
+(`external_id`, `recommended_price`, `print_size`); the top-level brief fields
+stay camelCase. A material can serve several product types, so `productTypes`
+is a list. A recommendation the model invented, or one that does not serve the
+product type of the brief, is dropped when the brief is read.
 
 The material list is filtered by the product type in production, and when that
 filter matches nothing the list falls back to every active material. Cost-book

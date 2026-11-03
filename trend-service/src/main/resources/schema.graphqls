@@ -81,32 +81,41 @@ type DesignBriefSummary {
   voice: String
   stylePreset: String
   fontFamily: String
+  recommendedMaterials: [MaterialRecommendation!]!
   pricing: BriefPricing
 }
 
+type MaterialRecommendation {
+  external_id: String
+  name: String
+  color: String
+  substrate_type: String
+  unit_cost: Float
+}
+
 type BriefPricing {
-  requestedPositioning: String
-  effectivePositioning: String
-  positioningReason: String
+  requested_positioning: String
+  effective_positioning: String
+  positioning_reason: String
   confidence: Int
-  targetMargin: Float
+  target_margin: Float
   status: String
   currency: String
-  policyVersion: Int
-  printRatePerSqIn: Float
+  policy_version: Int
+  print_rate_per_sq_in: Float
   quotes: [MaterialQuote!]!
 }
 
 type MaterialQuote {
-  externalId: String
-  requestedPositioning: String
+  external_id: String
+  requested_positioning: String
   positioning: String
   status: String
-  recommendedPrice: Float
+  recommended_price: Float
   currency: String
-  sizePrices: [SizePrice!]!
-  printSize: PrintSize
-  priceBreakdown: PriceBreakdown
+  size_prices: [SizePrice!]!
+  print_size: PrintSize
+  price_breakdown: PriceBreakdown
 }
 
 type SizePrice {
@@ -115,13 +124,13 @@ type SizePrice {
 }
 
 type PrintSize {
-  widthIn: Float
-  heightIn: Float
+  width_in: Float
+  height_in: Float
   placement: String
-  targetDpi: Int
-  requiredPixels: PixelSize
-  sourcePixels: PixelSize
-  upscaleFactor: Float
+  target_dpi: Int
+  required_pixels: PixelSize
+  source_pixels: PixelSize
+  upscale_factor: Float
   estimated: Boolean
 }
 
@@ -131,12 +140,12 @@ type PixelSize {
 }
 
 type PriceBreakdown {
-  materialCost: Float
-  printCost: Float
-  printRatePerSqIn: Float
-  marketplaceFee: Float
-  targetMargin: Float
-  actualMargin: Float
+  material_cost: Float
+  print_cost: Float
+  print_rate_per_sq_in: Float
+  marketplace_fee: Float
+  target_margin: Float
+  actual_margin: Float
 }
 
 type Query {
