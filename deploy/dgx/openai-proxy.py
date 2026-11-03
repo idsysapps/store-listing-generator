@@ -34,6 +34,10 @@ MODEL_ROUTES: dict[str, str] = {
 
 DEFAULT_MODEL = "qwen38_briefs"
 MAX_COMPLETION_TOKENS = 16384
+# The 27B generates at about 12 tokens/s, so a full 8K answer takes ~12
+# minutes. The old 300s backend deadline cut every curation and brief call
+# off in the middle, and the OpenAI SDK then retried it twice (issue #286).
+BACKEND_TIMEOUT = 900
 
 
 def _clamp_tokens(body: dict) -> dict:
@@ -207,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
             headers["Authorization"] = auth
         req = urllib.request.Request(url, data=data, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=BACKEND_TIMEOUT) as resp:
                 chat_resp = json.loads(resp.read())
         except urllib.error.HTTPError as e:
             resp_body = e.read()
@@ -279,7 +283,7 @@ class Handler(BaseHTTPRequestHandler):
     def _responses_streaming(self, backend: str, chat_body: dict, orig: dict) -> None:
         parsed = urllib.parse.urlparse(backend)
         conn = http.client.HTTPConnection(
-            parsed.hostname or "localhost", parsed.port or 80, timeout=300
+            parsed.hostname or "localhost", parsed.port or 80, timeout=BACKEND_TIMEOUT
         )
         data = json.dumps(chat_body).encode()
         headers = {"Content-Type": "application/json"}
@@ -572,7 +576,7 @@ class Handler(BaseHTTPRequestHandler):
     def _proxy_streaming(self, backend: str, body: dict) -> None:
         parsed = urllib.parse.urlparse(backend)
         conn = http.client.HTTPConnection(
-            parsed.hostname or "localhost", parsed.port or 80, timeout=300
+            parsed.hostname or "localhost", parsed.port or 80, timeout=BACKEND_TIMEOUT
         )
         data = json.dumps(body).encode()
         headers = {"Content-Type": "application/json"}
@@ -625,7 +629,7 @@ class Handler(BaseHTTPRequestHandler):
             headers["Authorization"] = auth
         req = urllib.request.Request(url, data=data, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=BACKEND_TIMEOUT) as resp:
                 resp_body = resp.read()
                 self.send_response(resp.status)
                 for key in ("Content-Type",):

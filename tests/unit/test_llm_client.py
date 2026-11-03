@@ -134,6 +134,14 @@ class TestLLMClient:
 
         assert str(client.base_url).rstrip("/") == "http://proxy:9000/v1"
 
+    def test_a_timed_out_call_is_not_retried(self) -> None:
+        # The proxy already waited its full backend deadline. The SDK's
+        # default two retries turned a 5-minute timeout into 15 minutes.
+        with patch.dict(os.environ, {"LLM_BASE_URL": "http://proxy:9000/v1", "LLM_API_KEY": "key"}):
+            client = get_llm_client()
+
+        assert client.max_retries == 0
+
 
 class _ApiError(Exception):
     """An error that carries an HTTP status, like the OpenAI SDK raises."""

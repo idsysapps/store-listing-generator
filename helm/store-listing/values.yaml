@@ -16,7 +16,11 @@ config:
   llmModel: "llama-3.3-70b-versatile"
   llmCurationModel: ""
   llmSeedCurationEnabled: "false"
-  llmMaxCandidates: "10"
+  llmMaxCandidates: "5"
+  llmMaxTokens: "4096"
+  # Six runs a day, after the 07:00 brief batch. An hourly curation kept the
+  # 27B busy and overlapped the briefs (issue #286).
+  llmCurationSchedule: "20 2,6,10,14,18,22 * * *"
   llmDesignBriefsEnabled: "false"
   llmMaxBriefs: "8"
   llmMaxBriefSeeds: "20"

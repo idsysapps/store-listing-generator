@@ -46,9 +46,13 @@ def reasoning_body(model: str) -> dict[str, Any]:
 
 
 def get_llm_client() -> OpenAI:
+    # A timed-out call already waited the proxy's full backend deadline.
+    # Retrying it twice, as the SDK does by default, triples the wait for a
+    # result that will not change; the task-level retry decides instead.
     return OpenAI(
         base_url=os.environ.get("LLM_BASE_URL") or DEFAULT_BASE_URL,
         api_key=os.environ.get("LLM_API_KEY", ""),
+        max_retries=0,
     )
 
 
