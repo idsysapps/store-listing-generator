@@ -274,6 +274,9 @@ class DesignBrief:
     font_color: str | None = None
     regeneration_feedback: str | None = None
     scene_description: str | None = None
+    # The copy a buyer reads on the product page. This is not the scene
+    # description used to generate the artwork (issue #297).
+    listing_description: str | None = None
     recommended_materials: list[dict[str, Any]] | None = None
     # The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
     voice: str = DEFAULT_VOICE
@@ -345,6 +348,7 @@ class DesignBriefDBClient(Protocol):
         style_preset: str | None = None,
         text_plan: dict[str, Any] | None = None,
         pricing: dict[str, Any] | None = None,
+        listing_description: str | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -1028,6 +1032,15 @@ def generate_design_briefs(
         for index, brief in enumerate(kept, start=1)
     ]
 
+    # The design and its copy are final. Write the text a buyer will read on
+    # the product page; the scene description stays with the image pipeline
+    # (issue #297).
+    from store_listing.orchestration.listing_copy import write_batch_listing_copy
+
+    kept, listing_issues = write_batch_listing_copy(llm_completions, model, kept)
+    if listing_issues:
+        logger.warning("Listing copy fell back: %s", "; ".join(listing_issues))
+
     created = 0
     for brief in kept:
         brief_id = db_client.insert_design_brief(
@@ -1053,6 +1066,7 @@ def generate_design_briefs(
             style_preset=brief.style_preset,
             text_plan=brief.text_plan.to_dict() if brief.text_plan else None,
             pricing=brief.pricing,
+            listing_description=brief.listing_description,
         )
         linked = 0
         for seed_id in brief.source_seed_ids:

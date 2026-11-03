@@ -419,6 +419,34 @@ class TestCreateCustomBrief:
         assert call_kwargs["copy_mode"] == "type_hero"
         assert call_kwargs["kicker_text"] == "IN MY SPOOKY ERA"
 
+    def test_a_sellable_custom_brief_gets_a_listing_description(self) -> None:
+        db = self._mock_db()
+        llm = self._mock_llm(
+            _brief_response(scene_description="a small child in a baseball cap holding a glove")
+        )
+
+        create_custom_brief(db, llm, "model-x", "baseball shirt", "dtf_apparel")
+
+        description = db.insert_design_brief.call_args.kwargs["listing_description"]
+        assert description
+        assert "holding a glove" not in description.lower()
+        assert "t-shirts" in description.lower()
+
+    def test_a_personal_use_brief_has_no_storefront_description(self) -> None:
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response())
+
+        create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "baseball shirt",
+            "dtf_apparel",
+            personal_use=True,
+        )
+
+        assert db.insert_design_brief.call_args.kwargs["listing_description"] is None
+
     def test_returns_error_on_llm_failure(self) -> None:
         db = self._mock_db()
         llm = MagicMock()

@@ -25,6 +25,7 @@ public class DesignBriefSummary {
     private String taglineText;
     private String fontColor;
     private String sceneDescription;
+    private String listingDescription;
     private String voice;
     private String stylePreset;
     private String fontFamily;
@@ -117,6 +118,11 @@ public class DesignBriefSummary {
 
     public String getSceneDescription() { return sceneDescription; }
     public void setSceneDescription(String sceneDescription) { this.sceneDescription = sceneDescription; }
+
+    public String getListingDescription() { return listingDescription; }
+    public void setListingDescription(String listingDescription) {
+        this.listingDescription = listingDescription;
+    }
 
     public String getVoice() { return voice; }
     public void setVoice(String voice) { this.voice = voice; }

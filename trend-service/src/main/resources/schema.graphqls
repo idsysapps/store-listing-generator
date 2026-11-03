@@ -78,6 +78,7 @@ type DesignBriefSummary {
   imageKeyTransparent: String
   imageUrl: String
   imageTransparentUrl: String
+  listingDescription: String
   voice: String
   stylePreset: String
   fontFamily: String

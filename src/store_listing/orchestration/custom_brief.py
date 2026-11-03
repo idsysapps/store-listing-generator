@@ -435,6 +435,16 @@ def create_custom_brief(
     # in it. A failed pass leaves the brief on the flat treatment.
     brief = plan_batch_text_integration(llm_completions, model, [brief])[0]
 
+    # A personal-use design is not going on a marketplace, so it gets no
+    # storefront copy. A sellable custom brief gets the same listing pass as
+    # the daily batch (issue #297).
+    if not personal_use:
+        from store_listing.orchestration.listing_copy import write_batch_listing_copy
+
+        [brief], listing_issues = write_batch_listing_copy(llm_completions, model, [brief])
+        if listing_issues:
+            logger.warning("Listing copy fell back: %s", "; ".join(listing_issues))
+
     brief_id = db_client.insert_design_brief(
         concept=brief.concept,
         product_type=brief.product_type,
@@ -457,6 +467,7 @@ def create_custom_brief(
         font_family=brief.font_family,
         style_preset=brief.style_preset,
         text_plan=brief.text_plan.to_dict() if brief.text_plan else None,
+        listing_description=brief.listing_description,
     )
 
     return {"status": "success", "brief_id": brief_id, "personal_use": personal_use}

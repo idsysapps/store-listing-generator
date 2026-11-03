@@ -561,6 +561,7 @@ class DatabaseClient:
         style_preset: str | None = None,
         text_plan: dict[str, Any] | None = None,
         pricing: dict[str, Any] | None = None,
+        listing_description: str | None = None,
     ) -> int:
         import json as _json
 
@@ -575,8 +576,8 @@ class DatabaseClient:
                      visual_style, confidence, reasoning, llm_model, batch_id,
                      layout_type, headline_text, tagline_text, copy_mode, kicker_text,
                      font_color, scene_description, personal_use, recommended_materials, voice,
-                     font_family, style_preset, text_plan, pricing)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     font_family, style_preset, text_plan, pricing, listing_description)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -603,6 +604,7 @@ class DatabaseClient:
                     style_preset,
                     text_plan_json,
                     pricing_json,
+                    listing_description,
                 ),
             )
             result = cur.fetchone()

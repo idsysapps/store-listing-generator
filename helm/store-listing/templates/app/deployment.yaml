@@ -211,6 +211,8 @@ spec:
               value: {{ .Values.config.pricingTargetDpi | default "300" | quote }}
             - name: PRICING_CURRENCY
               value: {{ .Values.config.pricingCurrency | default "USD" | quote }}
+            - name: LLM_LISTING_COPY
+              value: {{ .Values.config.llmListingCopy | default "true" | quote }}
             - name: LLM_BRIEF_CONCEPT_COOLDOWN_DAYS
               value: {{ .Values.config.llmBriefConceptCooldownDays | default "30" | quote }}
             {{- if .Values.config.enabledProductTypes }}
@@ -474,6 +476,8 @@ spec:
               value: {{ .Values.config.pricingTargetDpi | default "300" | quote }}
             - name: PRICING_CURRENCY
               value: {{ .Values.config.pricingCurrency | default "USD" | quote }}
+            - name: LLM_LISTING_COPY
+              value: {{ .Values.config.llmListingCopy | default "true" | quote }}
             - name: LLM_BRIEF_CONCEPT_COOLDOWN_DAYS
               value: {{ .Values.config.llmBriefConceptCooldownDays | default "30" | quote }}
             {{- if .Values.config.enabledProductTypes }}
