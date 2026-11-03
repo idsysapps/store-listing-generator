@@ -91,6 +91,31 @@ class TestBuildFluxPrompt:
         assert "no background" in negative
         assert "no sticker border" in negative
 
+    def test_the_preset_palette_reaches_the_prompt(self) -> None:
+        brief = _make_brief(
+            style_preset="hand_inked_woodcut",
+            visual_style="dark green and amber",
+        )
+
+        prompt = build_flux_prompt(brief)
+
+        assert "forest green" in prompt
+
+    def test_a_dtf_prompt_says_the_magenta_is_only_the_backdrop(self) -> None:
+        prompt = build_flux_prompt(_make_brief())
+
+        assert "magenta is only the empty key backdrop" in prompt
+
+    def test_a_dtf_negative_forbids_magenta_when_the_palette_has_none(self) -> None:
+        brief = _make_brief(style_preset="hand_inked_woodcut")
+
+        assert "no hot pink" in build_negative_prompt(brief)
+
+    def test_a_pink_palette_keeps_its_pink(self) -> None:
+        brief = _make_brief(style_preset="kawaii_flat")
+
+        assert "no hot pink" not in build_negative_prompt(brief)
+
     def test_a_no_text_brief_says_the_illustration_carries_the_idea(self) -> None:
         brief = _make_brief(
             copy_mode="no_text",

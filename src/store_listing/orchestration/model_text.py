@@ -19,6 +19,7 @@ import random
 from dataclasses import dataclass
 from typing import Protocol
 
+from store_listing.orchestration.art_direction import palette_phrase, preset_for
 from store_listing.orchestration.comfyui_client import (
     QWEN_SIZE,
     ComfyUIError,
@@ -172,12 +173,16 @@ def model_text_copy_from_brief(brief: DesignBrief) -> ModelTextCopy:
     subject = strip_lettering((brief.scene_description or "").strip()) or "the design"
     background = DTF_BACKGROUND if brief.product_type == "dtf_apparel" else DEFAULT_BACKGROUND
     descriptor = (brief.tagline_text or "").strip() or None
+    palette = palette_phrase(preset_for(brief.style_preset))
+    style = _voice_style(brief) + _look_style(brief)
+    if palette:
+        style = f"{style}, {palette}"
 
     return ModelTextCopy(
         headline=headline,
         descriptor=descriptor,
         subject=subject,
-        style=_voice_style(brief) + _look_style(brief),
+        style=style,
         integration=integration,
         ink=ink,
         background=background,

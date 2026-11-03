@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from store_listing.orchestration.art_direction import palette_names, preset_for
 from store_listing.orchestration.comfyui_client import (
     QWEN_SIZE,
     ComfyUIError,
@@ -230,12 +231,14 @@ def hero_copy_from_brief(brief: DesignBrief) -> HeroCopy:
     descriptor = (brief.tagline_text or "").strip() or None
     subject = strip_lettering((brief.scene_description or "").strip())
     background = DTF_BACKGROUND if brief.product_type == "dtf_apparel" else DEFAULT_BACKGROUND
+    palette = palette_names(preset_for(brief.style_preset)) or DEFAULT_PALETTE
 
     return HeroCopy(
         hero=hero,
         kicker=kicker,
         descriptor=descriptor,
         subject=subject,
+        palette=palette,
         background=background,
         sticker=brief.product_type != "dtf_apparel",
     )

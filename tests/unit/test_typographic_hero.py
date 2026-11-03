@@ -35,6 +35,7 @@ def _brief(
     copy_mode: str = "caption",
     kicker_text: str | None = None,
     product_type: str = "sublimation",
+    style_preset: str | None = None,
 ) -> DesignBrief:
     return DesignBrief(
         concept="a groovy ghost",
@@ -51,6 +52,7 @@ def _brief(
         copy_mode=copy_mode,
         kicker_text=kicker_text,
         scene_description=scene_description,
+        style_preset=style_preset,
     )
 
 
@@ -102,6 +104,16 @@ class TestBuildPrompt:
         assert "screen-printed apparel graphic" in prompt
         assert "no white sticker border" in prompt
         assert "die-cut sticker" not in prompt
+
+    def test_the_hero_uses_the_preset_palette(self) -> None:
+        copy = hero_copy_from_brief(_brief(style_preset="vintage_screenprint"))
+
+        prompt = build_typographic_hero_prompt(copy)
+
+        assert copy.palette == ("cream", "rust", "navy", "gold")
+        assert "cream" in prompt
+        assert "rust" in prompt
+        assert "lavender" not in prompt
 
     def test_a_dtf_hero_gets_the_no_sticker_negative(self) -> None:
         comfy = _FakeComfy([_result()])

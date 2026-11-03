@@ -38,6 +38,7 @@ def _brief(
     ink: str = "light",
     voice: str = "cozy",
     visual_style: str = "vintage screenprint",
+    style_preset: str | None = "vintage_screenprint",
     product_type: str = "dtf_apparel",
 ) -> DesignBrief:
     return DesignBrief(
@@ -55,6 +56,7 @@ def _brief(
         copy_mode=copy_mode,
         voice=voice,
         scene_description=scene_description,
+        style_preset=style_preset,
         text_plan=TextPlan(
             method=method,
             carrier=carrier,
@@ -148,6 +150,12 @@ class TestPrompt:
         assert "screen-printed apparel graphic" in prompt.lower()
         assert "no white sticker border" in prompt.lower()
         assert "die-cut sticker" not in prompt.lower()
+
+    def test_the_text_design_uses_the_preset_palette(self) -> None:
+        copy = model_text_copy_from_brief(_brief())
+
+        assert "palette: cream, rust, navy, gold" in copy.style
+        assert "palette: cream, rust, navy, gold" in build_model_text_prompt(copy)
 
     def test_a_dtf_text_design_gets_the_no_sticker_negative(self) -> None:
         comfy = _FakeComfy([ComfyUIResult(image_bytes=b"good")])

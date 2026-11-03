@@ -9,7 +9,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from store_listing.orchestration.art_direction import negative_for, preset_for, prompt_for
+from store_listing.orchestration.art_direction import (
+    negative_for,
+    palette_allows_magenta,
+    palette_phrase,
+    preset_for,
+    prompt_for,
+)
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
 from store_listing.orchestration.copy_modes import NO_TEXT
 from store_listing.orchestration.design_briefs import DesignBrief
@@ -204,8 +210,17 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     # text made every design come out as the same flat vector clip-art
     # (issue #227). A brief that was written before the presets existed keeps
     # its own style.
-    look = prompt_for(preset_for(brief.style_preset)) or brief.visual_style
-    parts.append(f"{look}, {product_context}, {NO_MOCKUP}.")
+    preset = preset_for(brief.style_preset)
+    look_parts = [text for text in (prompt_for(preset), palette_phrase(preset)) if text]
+    if preset is None and brief.visual_style:
+        # The free style is only for briefs written before the presets. A
+        # preset decides the look; letting the free text through made every
+        # design the same flat clip-art (issue #227).
+        look_parts.append(brief.visual_style)
+    look = ", ".join(look_parts)
+    parts.append(
+        f"{look}, {product_context}, {NO_MOCKUP}." if look else f"{product_context}, {NO_MOCKUP}."
+    )
     if brief.product_type == "dtf_apparel":
         # The magenta backdrop is a key, not printed. The design itself must
         # not paint a backdrop behind the subject (issue #288).
@@ -213,6 +228,7 @@ def build_flux_prompt(brief: DesignBrief) -> str:
             "Isolated on the garment: no printed background, no backdrop, no scene "
             "behind the subject; the garment colour is the background."
         )
+        parts.append("The magenta is only the empty key backdrop, never a colour in the artwork.")
 
     if template_id == "full_bleed":
         parts.append("Do not include any text or lettering: no text, no lettering, no words.")
@@ -280,13 +296,16 @@ def build_negative_prompt(brief: DesignBrief) -> str:
     (issue #246).
     """
     allow_surface = brief.text_plan is not None and brief.text_plan.needs_carrier
-    negative = negative_for(preset_for(brief.style_preset), allow_surface=allow_surface)
+    preset = preset_for(brief.style_preset)
+    negative = negative_for(preset, allow_surface=allow_surface)
     if brief.product_type == "dtf_apparel":
         negative += (
             ", no background, no backdrop, no printed background, no solid "
             "background, no sticker border, no white outline, no rectangular "
             "background"
         )
+        if not palette_allows_magenta(preset):
+            negative += ", no hot pink, no magenta in the artwork"
     return negative
 
 
