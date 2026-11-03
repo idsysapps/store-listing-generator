@@ -185,6 +185,32 @@ spec:
                   key: LLM_MAX_TOKENS
             - name: LLM_COPY_REVIEW
               value: {{ .Values.config.llmCopyReview | default "true" | quote }}
+            - name: LLM_PRICING_REVIEW
+              value: {{ .Values.config.llmPricingReview | default "true" | quote }}
+            - name: DTF_PRINT_COST_PER_SQ_IN
+              value: {{ .Values.config.dtfPrintCostPerSqIn | default "0.005" | quote }}
+            - name: AMAZON_REFERRAL_FEE_RATE
+              value: {{ .Values.config.amazonReferralFeeRate | default "0.15" | quote }}
+            - name: PRICING_BUDGET_MARGIN
+              value: {{ .Values.config.pricingBudgetMargin | default "0.30" | quote }}
+            - name: PRICING_STANDARD_MARGIN
+              value: {{ .Values.config.pricingStandardMargin | default "0.40" | quote }}
+            - name: PRICING_PREMIUM_MARGIN
+              value: {{ .Values.config.pricingPremiumMargin | default "0.50" | quote }}
+            - name: PRICING_BUDGET_FLOOR
+              value: {{ .Values.config.pricingBudgetFloor | default "14.99" | quote }}
+            - name: PRICING_STANDARD_FLOOR
+              value: {{ .Values.config.pricingStandardFloor | default "19.99" | quote }}
+            - name: PRICING_PREMIUM_FLOOR
+              value: {{ .Values.config.pricingPremiumFloor | default "24.99" | quote }}
+            - name: PRICING_2XL_UPCHARGE
+              value: {{ .Values.config.pricing2xlUpcharge | default "2.00" | quote }}
+            - name: PRICING_3XL_UPCHARGE
+              value: {{ .Values.config.pricing3xlUpcharge | default "3.00" | quote }}
+            - name: PRICING_TARGET_DPI
+              value: {{ .Values.config.pricingTargetDpi | default "300" | quote }}
+            - name: PRICING_CURRENCY
+              value: {{ .Values.config.pricingCurrency | default "USD" | quote }}
             - name: LLM_BRIEF_CONCEPT_COOLDOWN_DAYS
               value: {{ .Values.config.llmBriefConceptCooldownDays | default "30" | quote }}
             {{- if .Values.config.enabledProductTypes }}
@@ -422,6 +448,32 @@ spec:
                   key: LLM_MAX_TOKENS
             - name: LLM_COPY_REVIEW
               value: {{ .Values.config.llmCopyReview | default "true" | quote }}
+            - name: LLM_PRICING_REVIEW
+              value: {{ .Values.config.llmPricingReview | default "true" | quote }}
+            - name: DTF_PRINT_COST_PER_SQ_IN
+              value: {{ .Values.config.dtfPrintCostPerSqIn | default "0.005" | quote }}
+            - name: AMAZON_REFERRAL_FEE_RATE
+              value: {{ .Values.config.amazonReferralFeeRate | default "0.15" | quote }}
+            - name: PRICING_BUDGET_MARGIN
+              value: {{ .Values.config.pricingBudgetMargin | default "0.30" | quote }}
+            - name: PRICING_STANDARD_MARGIN
+              value: {{ .Values.config.pricingStandardMargin | default "0.40" | quote }}
+            - name: PRICING_PREMIUM_MARGIN
+              value: {{ .Values.config.pricingPremiumMargin | default "0.50" | quote }}
+            - name: PRICING_BUDGET_FLOOR
+              value: {{ .Values.config.pricingBudgetFloor | default "14.99" | quote }}
+            - name: PRICING_STANDARD_FLOOR
+              value: {{ .Values.config.pricingStandardFloor | default "19.99" | quote }}
+            - name: PRICING_PREMIUM_FLOOR
+              value: {{ .Values.config.pricingPremiumFloor | default "24.99" | quote }}
+            - name: PRICING_2XL_UPCHARGE
+              value: {{ .Values.config.pricing2xlUpcharge | default "2.00" | quote }}
+            - name: PRICING_3XL_UPCHARGE
+              value: {{ .Values.config.pricing3xlUpcharge | default "3.00" | quote }}
+            - name: PRICING_TARGET_DPI
+              value: {{ .Values.config.pricingTargetDpi | default "300" | quote }}
+            - name: PRICING_CURRENCY
+              value: {{ .Values.config.pricingCurrency | default "USD" | quote }}
             - name: LLM_BRIEF_CONCEPT_COOLDOWN_DAYS
               value: {{ .Values.config.llmBriefConceptCooldownDays | default "30" | quote }}
             {{- if .Values.config.enabledProductTypes }}

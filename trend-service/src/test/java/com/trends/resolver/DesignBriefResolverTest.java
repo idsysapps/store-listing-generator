@@ -2,12 +2,14 @@ package com.trends.resolver;
 
 import com.trends.config.ImageStorageConfig;
 import com.trends.config.MaterialRecommendationReader;
+import com.trends.config.PricingReader;
 import com.trends.domain.ActiveSeed;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefConnection;
 import com.trends.dto.DesignBriefOrderBy;
 import com.trends.dto.DesignBriefSummary;
+import com.trends.dto.BriefPricing;
 import com.trends.dto.MaterialRecommendation;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
@@ -36,6 +38,9 @@ class DesignBriefResolverTest {
 
     @Mock
     MaterialRecommendationReader materialRecommendationReader;
+
+    @Mock
+    PricingReader pricingReader;
 
     @Mock
     CeleryTaskDispatcher celeryTaskDispatcher;
@@ -117,6 +122,25 @@ class DesignBriefResolverTest {
         assertEquals(1, materials.size());
         assertEquals("bc3001-white", materials.get(0).getExternalId());
         assertEquals("Bella Canvas 3001", materials.get(0).getName());
+    }
+
+    @Test
+    void testGetDesignBriefs_ReturnsThePricingSnapshot() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
+        brief.pricing = "{\"effective_positioning\":\"standard\"}";
+        BriefPricing pricing = new BriefPricing();
+        pricing.setEffectivePositioning("standard");
+        pricing.setStatus("ok");
+        when(pricingReader.read(brief.pricing)).thenReturn(pricing);
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = queryBriefs(null, null, 10);
+
+        assertNotNull(result.getItems().get(0).getPricing());
+        assertEquals("standard", result.getItems().get(0).getPricing().getEffectivePositioning());
+        assertEquals("ok", result.getItems().get(0).getPricing().getStatus());
     }
 
     @Test

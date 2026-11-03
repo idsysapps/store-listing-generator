@@ -322,7 +322,9 @@ class TestGenerateDesignBriefs:
 
         assert result["briefs_created"] == 1
         call_kwargs = db.insert_design_brief.call_args.kwargs
-        assert call_kwargs["recommended_materials"] == [_recommendation()]
+        # The offered material is kept, not the model's shortened echo: the
+        # pricing and print size need the canonical cost, sizes and substrate.
+        assert call_kwargs["recommended_materials"] == [_material()]
 
     def test_every_material_is_offered_when_several_types_are_in_production(self) -> None:
         db = self._mock_db()

@@ -258,6 +258,7 @@ class TestDatabaseClient:
                 ["substrate", "dtf_apparel"],
                 "BC3001-WHT",
                 4.5,
+                {"print_width_in": 12.0, "print_height_in": 16.0},
             )
         ]
         mock_conn = MagicMock()
@@ -268,6 +269,7 @@ class TestDatabaseClient:
             materials = DatabaseClient().list_active_materials(product_type="dtf_apparel")
 
         assert materials[0]["product_type"] == ["substrate", "dtf_apparel"]
+        assert materials[0]["attributes"] == {"print_width_in": 12.0, "print_height_in": 16.0}
 
     def test_get_app_setting_returns_the_stored_value(self) -> None:
         mock_cursor = MagicMock()

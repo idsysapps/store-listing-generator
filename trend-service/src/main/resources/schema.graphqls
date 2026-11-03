@@ -81,6 +81,62 @@ type DesignBriefSummary {
   voice: String
   stylePreset: String
   fontFamily: String
+  pricing: BriefPricing
+}
+
+type BriefPricing {
+  requestedPositioning: String
+  effectivePositioning: String
+  positioningReason: String
+  confidence: Int
+  targetMargin: Float
+  status: String
+  currency: String
+  policyVersion: Int
+  printRatePerSqIn: Float
+  quotes: [MaterialQuote!]!
+}
+
+type MaterialQuote {
+  externalId: String
+  requestedPositioning: String
+  positioning: String
+  status: String
+  recommendedPrice: Float
+  currency: String
+  sizePrices: [SizePrice!]!
+  printSize: PrintSize
+  priceBreakdown: PriceBreakdown
+}
+
+type SizePrice {
+  size: String
+  price: Float
+}
+
+type PrintSize {
+  widthIn: Float
+  heightIn: Float
+  placement: String
+  targetDpi: Int
+  requiredPixels: PixelSize
+  sourcePixels: PixelSize
+  upscaleFactor: Float
+  estimated: Boolean
+}
+
+type PixelSize {
+  width: Int
+  height: Int
+}
+
+type PriceBreakdown {
+  materialCost: Float
+  printCost: Float
+  printRatePerSqIn: Float
+  marketplaceFee: Float
+  targetMargin: Float
+  actualMargin: Float
 }
 
 type Query {

@@ -181,10 +181,13 @@ CREATE TABLE design_briefs (
     -- The look the design is drawn in.
     style_preset VARCHAR(40),
     -- How the words live in the design: method, carrier, surface, ink.
-    text_plan JSONB
+    text_plan JSONB,
+    -- The recommended price and DTF print size snapshot.
+    pricing JSONB
 );
 
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS text_plan JSONB;
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS pricing JSONB;
 -- Add the mode without a default so the rows written before it existed stay
 -- NULL and can be derived from their copy; the default applies to new rows.
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS copy_mode VARCHAR(20);

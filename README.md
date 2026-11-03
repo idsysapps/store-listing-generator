@@ -401,6 +401,29 @@ query {
         substrateType
         unitCost
       }
+      pricing {
+        requestedPositioning
+        effectivePositioning
+        status
+        quotes {
+          externalId
+          recommendedPrice
+          sizePrices {
+            size
+            price
+          }
+          printSize {
+            widthIn
+            heightIn
+            placement
+            targetDpi
+            requiredPixels {
+              width
+              height
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -429,6 +452,35 @@ publishes a material without a product type, so the typed list can be empty
 while the catalogue is full - and a brief without a substrate is a brief nobody
 can print. Both the prompt and the query fall back the same way, and both say
 so in the log.
+
+### Price and DTF print size
+
+Each DTF brief also carries a `pricing` snapshot. The model may choose a
+positioning (`budget`, `standard` or `premium`), but the code computes the
+price from the blank cost, the DTF print cost at `$0.005/in²`, the 15% Amazon
+referral fee, the target margin and the positioning floor. A tier that would
+break the substrate's price ceiling is downgraded; the snapshot records both
+the requested and the effective positioning.
+
+The `printSize` is the physical print area fitted to the design canvas aspect
+ratio. `requiredPixels` is what the operator needs after upscaling at 300 DPI;
+the rendering pipeline does not resize the image itself.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_PRICING_REVIEW` | `false` (chart: `true`) | Ask the model to choose a price positioning per brief |
+| `DTF_PRINT_COST_PER_SQ_IN` | `0.005` | DTF ink, film and powder cost per square inch |
+| `AMAZON_REFERRAL_FEE_RATE` | `0.15` | Amazon referral fee included in the price |
+| `PRICING_BUDGET_MARGIN` | `0.30` | Target margin for the budget tier |
+| `PRICING_STANDARD_MARGIN` | `0.40` | Target margin for the standard tier |
+| `PRICING_PREMIUM_MARGIN` | `0.50` | Target margin for the premium tier |
+| `PRICING_BUDGET_FLOOR` | `14.99` | Minimum budget price |
+| `PRICING_STANDARD_FLOOR` | `19.99` | Minimum standard price |
+| `PRICING_PREMIUM_FLOOR` | `24.99` | Minimum premium price |
+| `PRICING_2XL_UPCHARGE` | `2.00` | Added to the 2XL size price |
+| `PRICING_3XL_UPCHARGE` | `3.00` | Added to the 3XL size price |
+| `PRICING_TARGET_DPI` | `300` | DPI the operator upscales to |
+| `PRICING_CURRENCY` | `USD` | Currency of the snapshot |
 
 ### Seed pool and brief mix
 | Variable | Default | Description |

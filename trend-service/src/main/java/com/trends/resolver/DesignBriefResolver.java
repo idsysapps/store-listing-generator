@@ -2,6 +2,7 @@ package com.trends.resolver;
 
 import com.trends.config.ImageStorageConfig;
 import com.trends.config.MaterialRecommendationReader;
+import com.trends.config.PricingReader;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefConnection;
@@ -39,6 +40,9 @@ public class DesignBriefResolver {
 
     @Inject
     MaterialRecommendationReader materialRecommendationReader;
+
+    @Inject
+    PricingReader pricingReader;
 
     @Inject
     CeleryTaskDispatcher celeryTaskDispatcher;
@@ -208,6 +212,7 @@ public class DesignBriefResolver {
         summary.setPersonalUse(brief.personalUse);
         summary.setRecommendedMaterials(
                 materialRecommendationReader.read(brief.recommendedMaterials));
+        summary.setPricing(pricingReader.read(brief.pricing));
         return summary;
     }
 }

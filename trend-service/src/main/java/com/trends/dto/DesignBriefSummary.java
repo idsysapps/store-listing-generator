@@ -30,6 +30,7 @@ public class DesignBriefSummary {
     private String fontFamily;
     private Boolean personalUse;
     private List<MaterialRecommendation> recommendedMaterials;
+    private BriefPricing pricing;
 
     public DesignBriefSummary() {}
 
@@ -133,4 +134,7 @@ public class DesignBriefSummary {
     public void setRecommendedMaterials(List<MaterialRecommendation> recommendedMaterials) {
         this.recommendedMaterials = recommendedMaterials;
     }
+
+    public BriefPricing getPricing() { return pricing; }
+    public void setPricing(BriefPricing pricing) { this.pricing = pricing; }
 }

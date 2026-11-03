@@ -89,6 +89,10 @@ public class DesignBrief extends PanacheEntityBase {
     @Column(name = "recommended_materials", columnDefinition = "JSONB")
     public String recommendedMaterials;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "pricing", columnDefinition = "JSONB")
+    public String pricing;
+
     @OneToMany(mappedBy = "designBrief", fetch = FetchType.LAZY)
     public List<DesignBriefSource> sources;
 
