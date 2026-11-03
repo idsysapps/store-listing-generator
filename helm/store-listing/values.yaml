@@ -47,6 +47,9 @@ config:
   typographicHeroBriefIds: ""
   typographicHeroCandidates: "2"
   typographicHeroDescriptor: "1"
+  # A "painted" text plan goes to Qwen-Image so the words live in the art
+  # instead of being overlaid by the compositor (issue #133).
+  modelTextEnabled: "0"
   visionLlmBaseUrl: ""
   visionLlmModel: "qwen_vl_ocr"
   artworkVisionModel: ""

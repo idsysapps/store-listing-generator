@@ -47,7 +47,11 @@ _HEADLINE_ACTIONS: Final[frozenset[str]] = frozenset({KEEP, DROP, REWRITE})
 _OVERALL_ACTIONS: Final[frozenset[str]] = frozenset({KEEP, REJECT})
 _ART_ONLY_LAYOUT: Final[str] = "full_bleed"
 
-_SYSTEM_PROMPT: Final[str] = """You are the creative director for a print-on-demand t-shirt store.
+_SYSTEM_PROMPT: Final[
+    str
+] = """Every review object MUST begin with a numeric "confidence" field between 0 and 1. A review without it is invalid.
+
+You are the creative director for a print-on-demand t-shirt store.
 You review the copy of a design before any image is generated. Your job is to
 decide whether each line makes the shirt more wearable, or whether it should be
 dropped or rewritten.

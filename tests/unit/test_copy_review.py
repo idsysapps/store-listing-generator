@@ -139,6 +139,11 @@ class TestBuildCopyReviewPrompt:
         assert "every review object must include a numeric" in system
         assert "never omit it" in system
 
+    def test_puts_the_confidence_requirement_first(self) -> None:
+        system = build_copy_review_prompt([_brief()])[0]["content"].lower()
+
+        assert system.startswith("every review object must begin with a numeric")
+
 
 class TestParseCopyReviewResponse:
     def test_reads_decisions(self) -> None:

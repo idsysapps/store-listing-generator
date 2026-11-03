@@ -258,6 +258,8 @@ spec:
               value: {{ .Values.config.typographicHeroCandidates | default "2" | quote }}
             - name: TYPOGRAPHIC_HERO_DESCRIPTOR
               value: {{ .Values.config.typographicHeroDescriptor | default "1" | quote }}
+            - name: MODEL_TEXT_ENABLED
+              value: {{ .Values.config.modelTextEnabled | default "0" | quote }}
             - name: VISION_LLM_BASE_URL
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL
@@ -493,6 +495,8 @@ spec:
               value: {{ .Values.config.typographicHeroCandidates | default "2" | quote }}
             - name: TYPOGRAPHIC_HERO_DESCRIPTOR
               value: {{ .Values.config.typographicHeroDescriptor | default "1" | quote }}
+            - name: MODEL_TEXT_ENABLED
+              value: {{ .Values.config.modelTextEnabled | default "0" | quote }}
             - name: VISION_LLM_BASE_URL
               value: {{ .Values.config.visionLlmBaseUrl | default "" | quote }}
             - name: VISION_LLM_MODEL
