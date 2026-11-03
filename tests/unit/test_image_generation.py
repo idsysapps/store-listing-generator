@@ -15,6 +15,7 @@ from store_listing.orchestration.design_templates import (
     TEMPLATES,
 )
 from store_listing.orchestration.image_generation import (
+    LIGHT_INK,
     PromptBuildError,
     build_flux_prompt,
     build_negative_prompt,
@@ -48,6 +49,32 @@ def _client(image_bytes: bytes | None = b"\x89PNG\r\n\x1a\n", **kwargs: Any) -> 
     for key, value in kwargs.items():
         setattr(client, key, value)
     return client
+
+
+class TestTheGarmentMaterial:
+    def test_a_dark_font_on_a_dark_garment_falls_back_to_light(self) -> None:
+        brief = _make_brief(
+            font_color="#111111",
+            recommended_materials=[{"external_id": "shirt-jet-black-m", "color": "Jet Black"}],
+        )
+
+        assert font_colour(brief) == LIGHT_INK
+
+    def test_a_light_font_on_a_dark_garment_is_kept(self) -> None:
+        brief = _make_brief(
+            font_color="#F2C14E",
+            recommended_materials=[{"external_id": "shirt-jet-black-m", "color": "Jet Black"}],
+        )
+
+        assert font_colour(brief) == "#F2C14E"
+
+    def test_a_dark_font_on_a_light_garment_is_kept(self) -> None:
+        brief = _make_brief(
+            font_color="#111111",
+            recommended_materials=[{"external_id": "shirt-white-m", "color": "White"}],
+        )
+
+        assert font_colour(brief) == "#111111"
 
 
 class TestBuildFluxPrompt:
@@ -115,6 +142,38 @@ class TestBuildFluxPrompt:
         brief = _make_brief(style_preset="kawaii_flat")
 
         assert "no hot pink" not in build_negative_prompt(brief)
+
+    def test_a_dark_garment_prompt_asks_for_light_highlights(self) -> None:
+        brief = _make_brief(
+            recommended_materials=[
+                {
+                    "external_id": "shirt-jet-black-m",
+                    "name": "Core Adult",
+                    "color": "Jet Black",
+                }
+            ]
+        )
+
+        prompt = build_flux_prompt(brief)
+
+        assert "black areas are the shirt" in prompt
+        assert "light cream/white highlights" in prompt
+
+    def test_a_light_garment_does_not_get_the_dark_rule(self) -> None:
+        brief = _make_brief(
+            recommended_materials=[
+                {"external_id": "shirt-white-m", "name": "Core Adult", "color": "White"}
+            ]
+        )
+
+        assert "black areas are the shirt" not in build_flux_prompt(brief)
+
+    def test_a_dark_garment_negative_forbids_a_black_fill(self) -> None:
+        brief = _make_brief(
+            recommended_materials=[{"external_id": "shirt-jet-black-m", "color": "Jet Black"}]
+        )
+
+        assert "no large black fill" in build_negative_prompt(brief)
 
     def test_a_no_text_brief_says_the_illustration_carries_the_idea(self) -> None:
         brief = _make_brief(

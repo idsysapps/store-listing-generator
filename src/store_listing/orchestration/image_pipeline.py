@@ -14,6 +14,7 @@ text, and left pending when it has none (issue #196).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -27,7 +28,11 @@ from store_listing.orchestration.artwork_validation import (
     ArtworkTextValidator,
     ArtworkValidator,
 )
-from store_listing.orchestration.chroma_key import opaque_fraction, trim_sticker_border
+from store_listing.orchestration.chroma_key import (
+    opaque_fraction,
+    remove_dark_ink,
+    trim_sticker_border,
+)
 from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.copy_modes import (
     CAPTION,
@@ -48,6 +53,7 @@ from store_listing.orchestration.image_generation import (
     ImageResult,
     font_colour,
     generate_image,
+    is_dark_garment,
 )
 from store_listing.orchestration.image_storage import ImageStorageClient
 from store_listing.orchestration.model_text import (
@@ -114,6 +120,16 @@ def _max_lettering_retries() -> int:
         return DEFAULT_MAX_LETTERING_RETRIES
 
 
+def _recommended_materials(brief_row: dict[str, Any]) -> list[dict[str, Any]] | None:
+    value = brief_row.get("recommended_materials")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, list) else None
+
+
 def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
     # The scene is stripped of the words it asks the image model to spell: a
     # scene that is only words leaves nothing to draw, and the design falls
@@ -163,6 +179,7 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         voice=voice,
         font_family=font_family,
         style_preset=brief_row.get("style_preset"),
+        recommended_materials=_recommended_materials(brief_row),
         text_plan=text_plan_from_value(brief_row.get("text_plan"))
         if copy_mode != NO_TEXT
         else None,
@@ -381,6 +398,8 @@ def _generate_typographic_hero_brief(
             transparent_bytes = _hero_with_descriptor(
                 keyed_bytes, copy.descriptor, transparent=True
             )
+    if transparent_bytes is not None and is_dark_garment(brief.garment_color):
+        transparent_bytes = remove_dark_ink(transparent_bytes)
     _log_dtf_coverage(brief_id, transparent_bytes)
 
     keys = storage.upload_design(
@@ -498,6 +517,8 @@ def _generate_model_text_brief(
                 )
                 last_error = "the keyed artwork lost the text"
                 continue
+        if transparent_bytes is not None and is_dark_garment(brief.garment_color):
+            transparent_bytes = remove_dark_ink(transparent_bytes)
         _log_dtf_coverage(brief_id, transparent_bytes)
 
         keys = storage.upload_design(
@@ -784,6 +805,8 @@ def _generate_single_brief(
             if needs_text_check
             else keyed_artwork
         )
+    if transparent_bytes is not None and is_dark_garment(brief.garment_color):
+        transparent_bytes = remove_dark_ink(transparent_bytes)
     _log_dtf_coverage(brief_id, transparent_bytes)
 
     keys = storage.upload_design(

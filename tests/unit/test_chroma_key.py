@@ -15,6 +15,7 @@ from store_listing.orchestration.chroma_key import (
     key_out_background,
     opaque_fraction,
     punch_out_key_colour,
+    remove_dark_ink,
     trim_sticker_border,
 )
 
@@ -339,6 +340,23 @@ class TestBleedTransparentPixels:
         with Image.open(io.BytesIO(result)) as output:
             assert _alpha_at(output, 0, 0) == 0
             assert _alpha_at(output, 8, 8) == 255
+
+
+class TestRemoveDarkInk:
+    def test_black_becomes_transparent_but_cream_stays(self) -> None:
+        image = Image.new("RGBA", (8, 8), (20, 20, 20, 255))
+        image.putpixel((4, 4), (242, 232, 213, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = remove_dark_ink(buffer.getvalue())
+
+        with Image.open(io.BytesIO(result)) as output:
+            assert _alpha_at(output, 0, 0) == 0
+            assert _alpha_at(output, 4, 4) == 255
+
+    def test_an_unreadable_image_is_left_alone(self) -> None:
+        assert remove_dark_ink(b"not an image") == b"not an image"
 
 
 class TestTrimStickerBorder:

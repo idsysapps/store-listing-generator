@@ -46,6 +46,22 @@ needs.
   solid area. This is a warning, not a rejection; a large subject can be
   intentional.
 
+## Garment material and colour
+
+The brief recommends materials from the published catalogue. Those rows come
+from the cost-book material stream and are validated against what cost-book
+actually offers; never invent a garment colour.
+
+- The **first recommended material is the garment**. Its `color` is the shirt
+  colour, and the mockup/listing uses that colour.
+- **Black or dark garment** (Jet Black, Dark Heather): the black areas of the
+  design are the shirt, not ink. Draw light highlights and lines, drop
+  near-black pixels from the print file, and use a light ink for the text.
+- **Light or white garment**: the design is printed in ink. Keep the black
+  areas and use a dark ink for the text.
+- A design built for a dark garment is not offered on a light one unless the
+  black is printed; the recommended material decides.
+
 ## Checks
 
 - Review the design on a dark and a light shirt mockup, not only on white.

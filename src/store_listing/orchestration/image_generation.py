@@ -109,6 +109,34 @@ NO_LETTERING_RETRY_HINT = "No lettering, no text, no words and no numbers in the
 WHITE_BACKGROUND_PRODUCTS = frozenset({"sublimation", "sticker_vinyl"})
 
 DEFAULT_FONT_COLOR = "#000000"
+LIGHT_INK = "#F2E8D5"
+_DARK_GARMENT_WORDS = (
+    "black",
+    "jet black",
+    "dark heather",
+    "dark",
+    "charcoal",
+    "navy",
+    "graphite",
+    "midnight",
+)
+
+
+def is_dark_garment(colour: str | None) -> bool:
+    """Whether the published garment is dark enough to supply the black areas."""
+    value = (colour or "").strip().lower()
+    return any(word in value for word in _DARK_GARMENT_WORDS)
+
+
+def _is_dark_colour(colour: str) -> bool:
+    digits = colour.lstrip("#")
+    if len(digits) != 6:
+        return False
+    try:
+        red, green, blue = (int(digits[index : index + 2], 16) for index in (0, 2, 4))
+    except ValueError:
+        return False
+    return 0.299 * red + 0.587 * green + 0.114 * blue < 110
 
 
 @dataclass
@@ -166,6 +194,13 @@ def font_colour(brief: DesignBrief) -> str:
     Briefs written before the backgrounds changed can still carry one.
     """
     colour = brief.font_color or DEFAULT_FONT_COLOR
+    if is_dark_garment(brief.garment_color) and _is_dark_colour(colour):
+        logger.warning(
+            "Brief %r has a dark font colour on the dark garment %s",
+            brief.concept,
+            brief.garment_color,
+        )
+        return LIGHT_INK
     if brief.product_type in WHITE_BACKGROUND_PRODUCTS and _is_near_white(colour):
         logger.warning("Brief %r has a near-white font colour on a white background", brief.concept)
         return DEFAULT_FONT_COLOR
@@ -229,6 +264,12 @@ def build_flux_prompt(brief: DesignBrief) -> str:
             "behind the subject; the garment colour is the background."
         )
         parts.append("The magenta is only the empty key backdrop, never a colour in the artwork.")
+        if is_dark_garment(brief.garment_color):
+            parts.append(
+                f"The garment is {brief.garment_color}. The black areas are the shirt, "
+                "not ink: draw the design in light cream/white highlights and lines; "
+                "do not fill large areas with black."
+            )
 
     if template_id == "full_bleed":
         parts.append("Do not include any text or lettering: no text, no lettering, no words.")
@@ -306,6 +347,8 @@ def build_negative_prompt(brief: DesignBrief) -> str:
         )
         if not palette_allows_magenta(preset):
             negative += ", no hot pink, no magenta in the artwork"
+        if is_dark_garment(brief.garment_color):
+            negative += ", no large black fill, no black background"
     return negative
 
 

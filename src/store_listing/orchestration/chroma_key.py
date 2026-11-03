@@ -319,6 +319,30 @@ def bleed_transparent_pixels(rgba_bytes: bytes, *, rounds: int = 8) -> bytes:
     return buffer.getvalue()
 
 
+def remove_dark_ink(rgba_bytes: bytes, *, threshold: int = 70) -> bytes:
+    """Clear near-black ink so a black/dark garment supplies the black.
+
+    The first recommended material is the garment. When it is Jet Black or
+    Dark Heather, the dark areas of the design are the shirt, not ink; the
+    print file must leave them transparent.
+    """
+    try:
+        with Image.open(io.BytesIO(rgba_bytes)) as opened:
+            result = opened.convert("RGBA")
+    except OSError:
+        return rgba_bytes
+
+    values = np.asarray(result).astype(np.uint8)
+    rgb = values[..., :3].astype(np.int16)
+    alpha = values[..., 3].astype(np.int16)
+    dark = (rgb.max(axis=2) < threshold) & (alpha > 0)
+    values[..., 3][dark] = 0
+    output = Image.fromarray(values, "RGBA")
+    buffer = io.BytesIO()
+    output.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def _dilate(mask: np.ndarray) -> np.ndarray:
     output = mask.copy()
     output[1:, :] |= mask[:-1, :]
@@ -332,8 +356,10 @@ def trim_sticker_border(rgba_bytes: bytes) -> bytes:
     """Remove a near-white die-cut border that touches the transparent edge.
 
     Qwen sometimes wraps a DTF design in a white sticker border even when the
-    prompt forbids it. The border is a near-white ring just inside the edge;
-    clear that band and leave the interior white highlights alone.
+    prompt forbids it. The border is a near-white band just inside the edge;
+    clear that band and leave the interior white highlights alone. A cream
+    border is out of scope: lowering the threshold to catch it also eats cream
+    lettering, so the hero path needs a better prompt/removal separately.
     """
     try:
         with Image.open(io.BytesIO(rgba_bytes)) as opened:

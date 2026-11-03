@@ -211,3 +211,9 @@ class TestTheDtfRules:
 
         assert "garment colour is the background" in rules
         assert "do not fill the print area" in rules
+
+    def test_the_first_material_is_the_garment(self) -> None:
+        prompt = system_prompt(["dtf_apparel"]).lower()
+
+        assert "the first one is the garment" in prompt
+        assert "font_color must contrast" in prompt

@@ -161,11 +161,16 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         f"{art_direction_rules()}\n"
         f"{idea_device_rules()}\n"
         f"{DESIGN_ONLY_RULES}\n"
-        "MATERIALS — picking the right substrate:\n"
-        "- recommended_materials: array of objects from the available_materials list, each with "
-        "{external_id, name, color, substrate_type, unit_cost}. Pick 1-3 materials that best "
-        "match this design's aesthetic and target audience. Consider color contrast with the "
-        "design, substrate suitability, and unit cost for margin.\n"
+        "MATERIALS — picking the garment and the substrate:\n"
+        "- recommended_materials: array of 1-3 objects from available_materials, each with "
+        "{external_id, name, color, substrate_type, unit_cost}. The FIRST one is the garment the "
+        "design is printed on; its color is the garment colour. Pick materials that suit the "
+        "design, the product and the margin.\n"
+        "- If the first material's color is black or dark, the black areas of the design are "
+        "the shirt, not ink: design light highlights and lines. If it is light or white, the "
+        "design is printed in ink.\n"
+        "- font_color must contrast with the first material's color: a light ink on a "
+        "black/dark garment, a dark ink on a white/light garment.\n"
         "- Only recommend a material whose product_type matches the brief.\n"
         "- If no materials are available for the product_type, omit recommended_materials.\n\n"
         "IMPORTANT: Do not suggest designs requiring licensed IP (movie characters, "
@@ -268,6 +273,21 @@ class DesignBrief:
     # stone, printed on a label. Written by the text-plan pass; None keeps the
     # design on the flat compositor treatment it had before (issue #246).
     text_plan: TextPlan | None = None
+
+    @property
+    def garment_material(self) -> dict[str, Any] | None:
+        """The first recommended material is the garment the design is printed on."""
+        for material in self.recommended_materials or []:
+            if isinstance(material, dict) and material.get("external_id"):
+                return material
+        return None
+
+    @property
+    def garment_color(self) -> str | None:
+        """The colour of the published garment, or None for a legacy/custom brief."""
+        material = self.garment_material
+        colour = material.get("color") if material else None
+        return colour.strip() if isinstance(colour, str) and colour.strip() else None
 
 
 class DesignBriefDBClient(Protocol):
