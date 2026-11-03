@@ -23,6 +23,7 @@ import httpx
 from PIL import Image, ImageFilter
 
 from store_listing.orchestration.chroma_key import (
+    bleed_transparent_pixels,
     correct_key_mix,
     despill_key_spill,
     key_out_background,
@@ -347,6 +348,8 @@ class ComfyUIClient:
         # The model's alpha is too high on the pixels that still hold the key
         # colour, which is what leaves a tint of it behind.
         result.image_bytes = correct_key_mix(result.image_bytes, image_bytes)
+        # A viewer that ignores the alpha must not see the key under it.
+        result.image_bytes = bleed_transparent_pixels(result.image_bytes)
         return result
 
     def health(self) -> bool:
