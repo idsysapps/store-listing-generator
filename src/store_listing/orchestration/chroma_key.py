@@ -319,12 +319,18 @@ def bleed_transparent_pixels(rgba_bytes: bytes, *, rounds: int = 8) -> bytes:
     return buffer.getvalue()
 
 
-def remove_dark_ink(rgba_bytes: bytes, *, threshold: int = 70) -> bytes:
-    """Clear near-black ink so a black/dark garment supplies the black.
+def remove_dark_ink(
+    rgba_bytes: bytes,
+    *,
+    threshold: int = 70,
+    min_area_fraction: float = 0.01,
+) -> bytes:
+    """Clear large near-black fills so a black/dark garment supplies the black.
 
     The first recommended material is the garment. When it is Jet Black or
-    Dark Heather, the dark areas of the design are the shirt, not ink; the
-    print file must leave them transparent.
+    Dark Heather, the big dark fills are the shirt, not ink. Thin black
+    outlines are kept: they are the linework that stops the coffee mug and the
+    hero from looking cut open.
     """
     try:
         with Image.open(io.BytesIO(rgba_bytes)) as opened:
@@ -336,7 +342,30 @@ def remove_dark_ink(rgba_bytes: bytes, *, threshold: int = 70) -> bytes:
     rgb = values[..., :3].astype(np.int16)
     alpha = values[..., 3].astype(np.int16)
     dark = (rgb.max(axis=2) < threshold) & (alpha > 0)
-    values[..., 3][dark] = 0
+    if not dark.any():
+        return rgba_bytes
+
+    visited = np.zeros(dark.shape, dtype=bool)
+    height, width = dark.shape
+    min_area = max(1, int(min_area_fraction * dark.size))
+    for start_y, start_x in np.argwhere(dark):
+        y, x = int(start_y), int(start_x)
+        if visited[y, x]:
+            continue
+        component: list[tuple[int, int]] = []
+        stack = [(y, x)]
+        visited[y, x] = True
+        while stack:
+            cy, cx = stack.pop()
+            component.append((cy, cx))
+            for ny, nx in ((cy - 1, cx), (cy + 1, cx), (cy, cx - 1), (cy, cx + 1)):
+                if 0 <= ny < height and 0 <= nx < width and dark[ny, nx] and not visited[ny, nx]:
+                    visited[ny, nx] = True
+                    stack.append((ny, nx))
+        if len(component) >= min_area:
+            for cy, cx in component:
+                values[cy, cx, 3] = 0
+
     output = Image.fromarray(values, "RGBA")
     buffer = io.BytesIO()
     output.save(buffer, format="PNG")

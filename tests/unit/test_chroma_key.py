@@ -355,6 +355,23 @@ class TestRemoveDarkInk:
             assert _alpha_at(output, 0, 0) == 0
             assert _alpha_at(output, 4, 4) == 255
 
+    def test_a_thin_dark_outline_is_kept(self) -> None:
+        image = Image.new("RGBA", (100, 100), (255, 0, 255, 0))
+        for x in range(20, 80):
+            for y in range(20, 80):
+                image.putpixel((x, y), (20, 20, 20, 255))
+        image.putpixel((10, 10), (20, 20, 20, 255))
+        image.putpixel((11, 10), (20, 20, 20, 255))
+        image.putpixel((10, 11), (20, 20, 20, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = remove_dark_ink(buffer.getvalue())
+
+        with Image.open(io.BytesIO(result)) as output:
+            assert _alpha_at(output, 50, 50) == 0
+            assert _alpha_at(output, 10, 10) == 255
+
     def test_an_unreadable_image_is_left_alone(self) -> None:
         assert remove_dark_ink(b"not an image") == b"not an image"
 
