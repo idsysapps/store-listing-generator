@@ -1688,6 +1688,122 @@ class TestGenerateDesignBriefs:
         assert pricing["quotes"][0]["recommended_price"] == 19.99
         assert llm.with_raw_response.create.call_count == 1
 
+    def test_a_listing_description_is_stored_without_the_llm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setenv("LLM_LISTING_COPY", "false")
+        monkeypatch.setenv("LLM_COPY_REVIEW", "false")
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        material = {
+            "external_id": "bc3001-white",
+            "name": "Bella Canvas 3001",
+            "substrate_type": "t-shirt",
+            "color": "White",
+            "sizes": ["S", "M", "L"],
+            "product_type": ["dtf_apparel"],
+            "unit_cost": 4.50,
+        }
+        db = self._mock_db([_briefable(1, "coffee shirt")])
+        db.list_active_materials.return_value = [material]
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Powered by Coffee",
+                        "product_type": "dtf_apparel",
+                        "specific_products": ["t-shirt"],
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                        "copy_mode": "no_text",
+                        "layout_type": "full_bleed",
+                        "scene_description": "a steaming mug beside a notebook",
+                        "recommended_materials": [
+                            {
+                                "external_id": "bc3001-white",
+                                "name": "Bella Canvas 3001",
+                                "color": "White",
+                                "substrate_type": "t-shirt",
+                                "unit_cost": 4.50,
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        description = db.insert_design_brief.call_args.kwargs["listing_description"]
+        assert description
+        assert "steaming mug" not in description.lower()
+        assert "t-shirt" in description.lower()
+
+    def test_the_listing_copy_pass_uses_the_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setenv("LLM_LISTING_COPY", "true")
+        monkeypatch.setenv("LLM_COPY_REVIEW", "false")
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        material = {
+            "external_id": "bc3001-white",
+            "name": "Bella Canvas 3001",
+            "substrate_type": "t-shirt",
+            "color": "White",
+            "sizes": ["S", "M", "L"],
+            "product_type": ["dtf_apparel"],
+            "unit_cost": 4.50,
+        }
+        db = self._mock_db([_briefable(1, "coffee shirt")])
+        db.list_active_materials.return_value = [material]
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Powered by Coffee",
+                            "product_type": "dtf_apparel",
+                            "specific_products": ["t-shirt"],
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                            "copy_mode": "no_text",
+                            "layout_type": "full_bleed",
+                            "scene_description": "a steaming mug beside a notebook",
+                            "recommended_materials": [
+                                {
+                                    "external_id": "bc3001-white",
+                                    "name": "Bella Canvas 3001",
+                                    "color": "White",
+                                    "substrate_type": "t-shirt",
+                                    "unit_cost": 4.50,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ),
+            self._raw(
+                {
+                    "listings": [
+                        {
+                            "index": 1,
+                            "description": "A white t-shirt for coffee lovers, featuring "
+                            "a warm coffee-inspired design for slow mornings. Wear it on "
+                            "the weekend or give it to the friend who runs on espresso.",
+                        }
+                    ]
+                }
+            ),
+        ]
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        description = db.insert_design_brief.call_args.kwargs["listing_description"]
+        assert description.startswith("A white t-shirt")
+        assert llm.with_raw_response.create.call_count == 2
+
 
 class TestBuildBriefPromptWithMaterials:
     def _sample_materials(self) -> list[dict[str, Any]]:

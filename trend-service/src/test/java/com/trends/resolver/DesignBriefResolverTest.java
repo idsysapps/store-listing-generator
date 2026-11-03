@@ -144,6 +144,22 @@ class DesignBriefResolverTest {
     }
 
     @Test
+    void testGetDesignBriefs_ReturnsTheListingDescription() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Coffee Shirt", "dtf_apparel");
+        brief.listingDescription = "A white t-shirt for coffee lovers, featuring a warm "
+                + "coffee-inspired design for slow mornings.";
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = queryBriefs(null, null, 10);
+
+        assertEquals("A white t-shirt for coffee lovers, featuring a warm "
+                + "coffee-inspired design for slow mornings.",
+                result.getItems().get(0).getListingDescription());
+    }
+
+    @Test
     void testGetDesignBriefs_WithoutRecommendedMaterialsReturnsAnEmptyList()
             throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");

@@ -394,6 +394,7 @@ query {
     items {
       concept
       productType
+      listingDescription
       recommendedMaterials {
         external_id
         name
@@ -464,8 +465,8 @@ referral fee, the target margin and the positioning floor. A tier that would
 break the substrate's price ceiling is downgraded; the snapshot records both
 the requested and the effective positioning.
 
-The `printSize` is the physical print area fitted to the design canvas aspect
-ratio. `requiredPixels` is what the operator needs after upscaling at 300 DPI;
+The `print_size` is the physical print area fitted to the design canvas aspect
+ratio. `required_pixels` is what the operator needs after upscaling at 300 DPI;
 the rendering pipeline does not resize the image itself.
 
 | Variable | Default | Description |
@@ -483,6 +484,21 @@ the rendering pipeline does not resize the image itself.
 | `PRICING_3XL_UPCHARGE` | `3.00` | Added to the 3XL size price |
 | `PRICING_TARGET_DPI` | `300` | DPI the operator upscales to |
 | `PRICING_CURRENCY` | `USD` | Currency of the snapshot |
+
+### Product description
+
+`scene_description` is the image-generation prompt. It describes the picture
+and is never the copy a buyer reads on the product page.
+
+`listingDescription` is the marketplace copy. It is written after the design,
+headline and material are final, so it cannot quote copy the copy editor
+removed. The optional local-LLM pass writes 2-4 plain-text sentences for an
+Amazon product description; when it is disabled or fails, a deterministic
+fallback keeps the field populated.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_LISTING_COPY` | `false` (chart: `true`) | Ask the model to write the product-page description |
 
 ### Seed pool and brief mix
 | Variable | Default | Description |

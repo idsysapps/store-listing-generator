@@ -103,6 +103,15 @@ class TestPricingMigration:
         assert "ADD COLUMN IF NOT EXISTS pricing JSONB" in _migration_sql()
 
 
+class TestListingDescriptionMigration:
+    def test_the_fresh_schema_carries_the_listing_description(self) -> None:
+        assert "listing_description TEXT" in FRESH_SCHEMA.read_text()
+
+    def test_the_configured_schema_carries_the_listing_description(self) -> None:
+        assert "listing_description TEXT" in _schema_sql()
+        assert "ADD COLUMN IF NOT EXISTS listing_description TEXT" in _migration_sql()
+
+
 class TestAppWaitsForTheSchema:
     def test_the_app_waits_for_the_schema_before_it_starts(self) -> None:
         deployment = APP_DEPLOYMENT.read_text()

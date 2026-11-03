@@ -183,11 +183,14 @@ CREATE TABLE design_briefs (
     -- How the words live in the design: method, carrier, surface, ink.
     text_plan JSONB,
     -- The recommended price and DTF print size snapshot.
-    pricing JSONB
+    pricing JSONB,
+    -- The copy a buyer reads on the product page.
+    listing_description TEXT
 );
 
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS text_plan JSONB;
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS pricing JSONB;
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS listing_description TEXT;
 -- Add the mode without a default so the rows written before it existed stay
 -- NULL and can be derived from their copy; the default applies to new rows.
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS copy_mode VARCHAR(20);

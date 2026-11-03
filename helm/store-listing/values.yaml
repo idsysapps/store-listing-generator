@@ -44,6 +44,9 @@ config:
   pricing3xlUpcharge: "3.00"
   pricingTargetDpi: "300"
   pricingCurrency: "USD"
+  # The listing-copy pass writes the Amazon product description; the scene
+  # description stays the image prompt.
+  llmListingCopy: "true"
   # How long a concept stays in the store before the model may write it again.
   llmBriefConceptCooldownDays: "30"
   llmMaxActiveSeeds: "200"

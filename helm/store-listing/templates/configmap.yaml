@@ -211,6 +211,8 @@ data:
         text_plan JSONB,
         -- The recommended price and DTF print size snapshot.
         pricing JSONB,
+        -- The copy a buyer reads on the product page.
+        listing_description TEXT,
         -- How the design carries its words: 'type_hero', 'caption' or 'no_text'.
         copy_mode VARCHAR(20) DEFAULT 'caption',
         -- A short line above a typographic hero word.
@@ -508,6 +510,8 @@ data:
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS text_plan JSONB;
     -- The recommended price and DTF print size snapshot.
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS pricing JSONB;
+    -- The copy a buyer reads on the product page.
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS listing_description TEXT;
     -- How the design carries its words: 'type_hero', 'caption' or 'no_text'.
     -- Added without a default so existing rows stay NULL and the copy mode is
     -- derived from their copy; the default is for new rows.

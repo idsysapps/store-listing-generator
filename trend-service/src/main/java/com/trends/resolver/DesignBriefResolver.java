@@ -206,6 +206,7 @@ public class DesignBriefResolver {
         summary.setTaglineText(brief.taglineText);
         summary.setFontColor(brief.fontColor);
         summary.setSceneDescription(brief.sceneDescription);
+        summary.setListingDescription(brief.listingDescription);
         summary.setVoice(brief.voice);
         summary.setStylePreset(brief.stylePreset);
         summary.setFontFamily(brief.fontFamily);
