@@ -230,9 +230,16 @@ def despill_key_spill(
             out[target_base + 1] = rgb_values[source_base + 1]
             out[target_base + 2] = rgb_values[source_base + 2]
             continue
-        share = (1 - value / 255) * strength
+        alpha = value / 255
+        if alpha < 0.1:
+            # Nearly transparent: dividing by this alpha would amplify noise.
+            out[target_base] = rgb_values[source_base]
+            out[target_base + 1] = rgb_values[source_base + 1]
+            out[target_base + 2] = rgb_values[source_base + 2]
+            continue
+        share = (1 - alpha) * strength
         for channel in range(3):
-            corrected = rgb_values[source_base + channel] - share * key[channel]
+            corrected = (rgb_values[source_base + channel] - share * key[channel]) / alpha
             out[target_base + channel] = max(0, min(255, int(corrected)))
     despilled = Image.frombytes("RGBA", (width, height), bytes(out))
     buffer = io.BytesIO()

@@ -246,7 +246,7 @@ class TestDespillKeySpill:
         image.save(buffer, format="PNG")
         return buffer.getvalue()
 
-    def test_removes_the_key_share_from_a_partial_pixel(self) -> None:
+    def test_recovers_the_foreground_from_a_partial_pixel(self) -> None:
         source = self._source()
         rgba = self._rgba(128, (200, 120, 120))
 
@@ -254,11 +254,28 @@ class TestDespillKeySpill:
 
         with Image.open(io.BytesIO(result)) as image:
             red, green, blue = _rgb_at(image, 2, 2)
-        # Half of the key's contribution is removed from each channel it has:
-        # the key is (247, 0, 102), so red and blue drop and green does not.
-        assert abs(red - (200 - 247 // 2)) <= 2
-        assert abs(green - 120) <= 1
-        assert abs(blue - (120 - 102 // 2)) <= 2
+        # O = a*F + (1-a)*K, so F = (O - (1-a)*K) / a. The alpha is 0.502,
+        # the key is (247, 0, 102).
+        assert abs(red - 153) <= 2
+        assert abs(green - 239) <= 2
+        assert abs(blue - 138) <= 2
+
+    def test_a_white_edge_does_not_turn_green(self) -> None:
+        key = (255, 0, 255)
+        source = Image.new("RGB", (8, 8), key)
+        buffer = io.BytesIO()
+        source.save(buffer, format="PNG")
+        rgba = self._rgba(128, (255, 255, 255))
+
+        result = despill_key_spill(rgba, buffer.getvalue(), key_colour=key)
+
+        with Image.open(io.BytesIO(result)) as image:
+            red, green, blue = _rgb_at(image, 2, 2)
+        # The old subtractive pass produced (127, 255, 127), a green fringe
+        # on every white edge.
+        assert red > 245
+        assert green > 245
+        assert blue > 245
 
     def test_leaves_the_opaque_pixels_alone(self) -> None:
         source = self._source()
