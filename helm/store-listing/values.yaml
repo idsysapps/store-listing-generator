@@ -29,6 +29,21 @@ config:
   # The copy editor is a separate local-LLM pass that keeps, drops or
   # rewrites design text before an image is generated.
   llmCopyReview: "true"
+  # The pricing pass chooses budget/standard/premium from the design's
+  # confidence and the material/print cost. The code computes the price.
+  llmPricingReview: "true"
+  dtfPrintCostPerSqIn: "0.005"
+  amazonReferralFeeRate: "0.15"
+  pricingBudgetMargin: "0.30"
+  pricingStandardMargin: "0.40"
+  pricingPremiumMargin: "0.50"
+  pricingBudgetFloor: "14.99"
+  pricingStandardFloor: "19.99"
+  pricingPremiumFloor: "24.99"
+  pricing2xlUpcharge: "2.00"
+  pricing3xlUpcharge: "3.00"
+  pricingTargetDpi: "300"
+  pricingCurrency: "USD"
   # How long a concept stays in the store before the model may write it again.
   llmBriefConceptCooldownDays: "30"
   llmMaxActiveSeeds: "200"

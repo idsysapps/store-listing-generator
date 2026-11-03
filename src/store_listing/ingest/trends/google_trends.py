@@ -560,11 +560,13 @@ class DatabaseClient:
         font_family: str | None = None,
         style_preset: str | None = None,
         text_plan: dict[str, Any] | None = None,
+        pricing: dict[str, Any] | None = None,
     ) -> int:
         import json as _json
 
         materials_json = _json.dumps(recommended_materials) if recommended_materials else None
         text_plan_json = _json.dumps(text_plan) if text_plan else None
+        pricing_json = _json.dumps(pricing) if pricing else None
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -573,8 +575,8 @@ class DatabaseClient:
                      visual_style, confidence, reasoning, llm_model, batch_id,
                      layout_type, headline_text, tagline_text, copy_mode, kicker_text,
                      font_color, scene_description, personal_use, recommended_materials, voice,
-                     font_family, style_preset, text_plan)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     font_family, style_preset, text_plan, pricing)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -600,6 +602,7 @@ class DatabaseClient:
                     font_family,
                     style_preset,
                     text_plan_json,
+                    pricing_json,
                 ),
             )
             result = cur.fetchone()
@@ -809,7 +812,8 @@ class DatabaseClient:
                 cur.execute(
                     """
                     SELECT external_id, name, brand, substrate_type, color,
-                           sizes, material_composition, product_type, sku, unit_cost
+                           sizes, material_composition, product_type, sku, unit_cost,
+                           attributes
                     FROM fabrication_materials
                     WHERE active = TRUE AND %s = ANY(product_type)
                     ORDER BY name, color
@@ -820,7 +824,8 @@ class DatabaseClient:
                 cur.execute(
                     """
                     SELECT external_id, name, brand, substrate_type, color,
-                           sizes, material_composition, product_type, sku, unit_cost
+                           sizes, material_composition, product_type, sku, unit_cost,
+                           attributes
                     FROM fabrication_materials
                     WHERE active = TRUE
                     ORDER BY product_type, name, color
@@ -838,6 +843,7 @@ class DatabaseClient:
                     "product_type": row[7],
                     "sku": row[8],
                     "unit_cost": float(row[9]) if row[9] is not None else None,
+                    "attributes": row[10],
                 }
                 for row in cur.fetchall()
             ]

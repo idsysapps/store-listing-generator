@@ -81,6 +81,71 @@ type DesignBriefSummary {
   voice: String
   stylePreset: String
   fontFamily: String
+  recommendedMaterials: [MaterialRecommendation!]!
+  pricing: BriefPricing
+}
+
+type MaterialRecommendation {
+  external_id: String
+  name: String
+  color: String
+  substrate_type: String
+  unit_cost: Float
+}
+
+type BriefPricing {
+  requested_positioning: String
+  effective_positioning: String
+  positioning_reason: String
+  confidence: Int
+  target_margin: Float
+  status: String
+  currency: String
+  policy_version: Int
+  print_rate_per_sq_in: Float
+  quotes: [MaterialQuote!]!
+}
+
+type MaterialQuote {
+  external_id: String
+  requested_positioning: String
+  positioning: String
+  status: String
+  recommended_price: Float
+  currency: String
+  size_prices: [SizePrice!]!
+  print_size: PrintSize
+  price_breakdown: PriceBreakdown
+}
+
+type SizePrice {
+  size: String
+  price: Float
+}
+
+type PrintSize {
+  width_in: Float
+  height_in: Float
+  placement: String
+  target_dpi: Int
+  required_pixels: PixelSize
+  source_pixels: PixelSize
+  upscale_factor: Float
+  estimated: Boolean
+}
+
+type PixelSize {
+  width: Int
+  height: Int
+}
+
+type PriceBreakdown {
+  material_cost: Float
+  print_cost: Float
+  print_rate_per_sq_in: Float
+  marketplace_fee: Float
+  target_margin: Float
+  actual_margin: Float
 }
 
 type Query {

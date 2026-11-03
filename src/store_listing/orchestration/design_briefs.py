@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import statistics
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -55,6 +56,7 @@ from store_listing.orchestration.design_templates import (
     LEGACY_LAYOUTS,
     TEMPLATE_IDS,
     assign_templates,
+    canvas_size,
     resolve_template,
 )
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE, normalise_voice, screen_text
@@ -72,6 +74,13 @@ from store_listing.orchestration.llm_client import (
     create_answer,
     is_model_missing_error,
     model_error_message,
+)
+from store_listing.orchestration.pricing import (
+    PricingPolicy,
+    build_pricing,
+    estimated_prices,
+    fallback_positioning,
+    policy_from_env,
 )
 from store_listing.orchestration.promotion import ORIGIN_TREND
 from store_listing.orchestration.scene_text import strip_lettering
@@ -165,7 +174,12 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         "- recommended_materials: array of 1-3 objects from available_materials, each with "
         "{external_id, name, color, substrate_type, unit_cost}. The FIRST one is the garment the "
         "design is printed on; its color is the garment colour. Pick materials that suit the "
-        "design, the product and the margin.\n"
+        "design, the product and the margin. Each material also carries cost_tier and "
+        "estimated_retail for budget/standard/premium: pick a blank whose likely retail fits "
+        "the product's price band. DTF bands are t-shirt $19.99-$29.99, hoodie/sweatshirt "
+        "$34.99-$49.99, onesie $14.99-$19.99, hat/cap $19.99-$24.99 and tote $24.99-$34.99. "
+        "A high-confidence design may use a premium blank; a weaker one should use a budget "
+        "or standard blank.\n"
         "- If the first material's color is black or dark, the black areas of the design are "
         "the shirt, not ink: design light highlights and lines. If it is light or white, the "
         "design is printed in ink.\n"
@@ -273,6 +287,10 @@ class DesignBrief:
     # stone, printed on a label. Written by the text-plan pass; None keeps the
     # design on the flat compositor treatment it had before (issue #246).
     text_plan: TextPlan | None = None
+    # The recommended price and DTF print size for this brief, stored as a
+    # snapshot so a later cost-book change cannot move an existing listing
+    # (issue #295).
+    pricing: dict[str, Any] | None = None
 
     @property
     def garment_material(self) -> dict[str, Any] | None:
@@ -326,6 +344,7 @@ class DesignBriefDBClient(Protocol):
         font_family: str | None = None,
         style_preset: str | None = None,
         text_plan: dict[str, Any] | None = None,
+        pricing: dict[str, Any] | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -369,6 +388,55 @@ def _drop_repeated_concepts(
         seen.add(key)
         kept.append(brief)
     return kept
+
+
+def _material_cost_tier(cost: float | None, median: float) -> str:
+    if cost is None or median <= 0:
+        return "standard"
+    if cost <= median * 0.8:
+        return "budget"
+    if cost >= median * 1.2:
+        return "premium"
+    return "standard"
+
+
+def _enrich_materials_for_prompt(
+    materials: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Add the cost tier and estimated retail the model needs to pick a blank.
+
+    The model is good at choosing a substrate that suits the design; it is bad
+    at arithmetic. The tier and the three retail estimates ground its choice
+    in the cost book instead of the abstract instruction to "suit the margin"
+    (issue #295).
+    """
+    costs = [
+        float(material["unit_cost"])
+        for material in materials
+        if isinstance(material, dict)
+        and isinstance(material.get("unit_cost"), (int, float))
+        and not isinstance(material.get("unit_cost"), bool)
+    ]
+    median = statistics.median(costs) if costs else 0.0
+    enriched: list[dict[str, Any]] = []
+    for material in materials:
+        if not isinstance(material, dict):
+            continue
+        copy = dict(material)
+        raw_cost = copy.get("unit_cost")
+        cost = float(raw_cost) if isinstance(raw_cost, (int, float)) else None
+        copy["cost_tier"] = _material_cost_tier(cost, median)
+        product_types = copy.get("product_type")
+        if isinstance(product_types, str):
+            product_types = [product_types]
+        if not product_types or "dtf_apparel" in product_types:
+            estimates = estimated_prices(copy, "dtf_apparel", [], (1024, 1024))
+            if estimates:
+                copy["estimated_retail"] = estimates
+        # The raw attributes are for the print-size resolver, not the prompt.
+        copy.pop("attributes", None)
+        enriched.append(copy)
+    return enriched
 
 
 def build_brief_prompt(
@@ -424,7 +492,7 @@ def build_brief_prompt(
         payload["concepts_to_avoid"] = list(recent_concepts)
 
     if materials:
-        payload["available_materials"] = materials
+        payload["available_materials"] = _enrich_materials_for_prompt(materials)
 
     user_content = json.dumps(payload, indent=2)
 
@@ -661,6 +729,8 @@ def _usable_materials(
             )
             continue
         types = material.get("product_type") or []
+        if isinstance(types, str):
+            types = [types]
         if types and product_type not in types:
             logger.warning(
                 "Dropping the recommended material %s: it does not serve %s",
@@ -668,7 +738,10 @@ def _usable_materials(
                 product_type,
             )
             continue
-        usable.append(entry)
+        # Keep the offered material, not the model's echo: its unit_cost,
+        # sizes and substrate are the cost book's, and the pricing and print
+        # size depend on them (issue #295).
+        usable.append(dict(material))
     return usable
 
 
@@ -932,6 +1005,29 @@ def generate_design_briefs(
     mix = classify_brief_mix(kept, seed_themes)
     logger.info("Design brief mix: %s", mix.summary())
 
+    # The design is written; now put a price on it. The pricing model sees the
+    # actual template, the calculated print size/cost and the material cost,
+    # and chooses only a positioning. The code computes the price and the
+    # guardrails downgrade a tier that does not fit (issue #295).
+    from store_listing.orchestration.pricing_review import choose_batch_positionings
+
+    pricing_policy = policy_from_env()
+    pricing_choices, pricing_issues = choose_batch_positionings(
+        llm_completions,
+        model,
+        kept,
+        policy=pricing_policy,
+    )
+    if pricing_issues:
+        logger.warning("Pricing pass fell back: %s", "; ".join(pricing_issues))
+    kept = [
+        replace(
+            brief,
+            pricing=_pricing_for_brief(brief, pricing_choices.get(index), pricing_policy),
+        )
+        for index, brief in enumerate(kept, start=1)
+    ]
+
     created = 0
     for brief in kept:
         brief_id = db_client.insert_design_brief(
@@ -956,6 +1052,7 @@ def generate_design_briefs(
             font_family=brief.font_family,
             style_preset=brief.style_preset,
             text_plan=brief.text_plan.to_dict() if brief.text_plan else None,
+            pricing=brief.pricing,
         )
         linked = 0
         for seed_id in brief.source_seed_ids:
@@ -1006,6 +1103,29 @@ def assign_batch_devices(briefs: Sequence[DesignBrief], batch_id: str) -> list[D
         replace(brief, idea_device=device)
         for brief, device in zip(briefs, plan_device_slots(len(briefs), batch_id), strict=True)
     ]
+
+
+def _pricing_for_brief(
+    brief: DesignBrief,
+    choice: Any,
+    policy: PricingPolicy,
+) -> dict[str, Any] | None:
+    """The brief's pricing snapshot, or None when it cannot be priced."""
+    if not brief.recommended_materials:
+        return None
+    requested = choice.positioning if choice is not None else fallback_positioning(brief.confidence)
+    reason = choice.reason if choice is not None else "deterministic fallback"
+    snapshot = build_pricing(
+        brief.recommended_materials,
+        brief.product_type,
+        brief.specific_products,
+        canvas_size(brief.layout_type),
+        brief.confidence,
+        requested,
+        reason,
+        policy,
+    )
+    return snapshot.to_dict() if snapshot is not None else None
 
 
 def _plan_entry_indexes(briefs: Sequence[DesignBrief]) -> list[int]:

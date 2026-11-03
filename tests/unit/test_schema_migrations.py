@@ -94,6 +94,15 @@ class TestCopyModeMigration:
         assert "ALTER COLUMN copy_mode SET DEFAULT 'caption'" in sql
 
 
+class TestPricingMigration:
+    def test_the_fresh_schema_carries_the_pricing_snapshot(self) -> None:
+        assert "pricing JSONB" in FRESH_SCHEMA.read_text()
+
+    def test_the_configured_schema_carries_the_pricing_snapshot(self) -> None:
+        assert "pricing JSONB" in _schema_sql()
+        assert "ADD COLUMN IF NOT EXISTS pricing JSONB" in _migration_sql()
+
+
 class TestAppWaitsForTheSchema:
     def test_the_app_waits_for_the_schema_before_it_starts(self) -> None:
         deployment = APP_DEPLOYMENT.read_text()

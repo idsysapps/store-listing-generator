@@ -1563,6 +1563,131 @@ class TestGenerateDesignBriefs:
         call_kwargs = db.insert_design_brief.call_args.kwargs
         assert call_kwargs["recommended_materials"] is not None
 
+    def test_the_pricing_pass_stores_a_quote(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setenv("LLM_PRICING_REVIEW", "true")
+        monkeypatch.setenv("LLM_COPY_REVIEW", "false")
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        material = {
+            "external_id": "bc3001-white",
+            "name": "Bella Canvas 3001",
+            "brand": "Bella Canvas",
+            "substrate_type": "t-shirt",
+            "color": "White",
+            "sizes": ["S", "M", "L", "XL", "2XL", "3XL"],
+            "material_composition": "100% cotton",
+            "product_type": ["dtf_apparel"],
+            "sku": "BC3001-WHT",
+            "unit_cost": 4.50,
+        }
+        db = self._mock_db([_briefable(1, "coffee shirt")])
+        db.list_active_materials.return_value = [material]
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = [
+            self._raw(
+                {
+                    "briefs": [
+                        {
+                            "concept": "Powered by Coffee",
+                            "product_type": "dtf_apparel",
+                            "specific_products": ["t-shirt"],
+                            "confidence": 80,
+                            "source_seed_ids": [1],
+                            "copy_mode": "no_text",
+                            "layout_type": "full_bleed",
+                            "scene_description": "a steaming coffee mug",
+                            "recommended_materials": [
+                                {
+                                    "external_id": "bc3001-white",
+                                    "name": "Bella Canvas 3001",
+                                    "color": "White",
+                                    "substrate_type": "t-shirt",
+                                    "unit_cost": 4.50,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ),
+            self._raw(
+                {
+                    "positionings": [
+                        {
+                            "index": 1,
+                            "positioning": "premium",
+                            "reason": "A broad evergreen design.",
+                        }
+                    ]
+                }
+            ),
+        ]
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        pricing = db.insert_design_brief.call_args.kwargs["pricing"]
+        assert pricing["requested_positioning"] == "premium"
+        assert pricing["effective_positioning"] == "premium"
+        assert pricing["status"] == "ok"
+        assert pricing["quotes"][0]["recommended_price"] == 24.99
+        assert pricing["quotes"][0]["print_size"]["required_pixels"] == {
+            "width": 3600,
+            "height": 3600,
+        }
+        assert llm.with_raw_response.create.call_count == 2
+
+    def test_pricing_is_computed_without_the_llm_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import store_listing.orchestration.design_briefs as mod
+
+        monkeypatch.setenv("LLM_PRICING_REVIEW", "false")
+        monkeypatch.setenv("LLM_COPY_REVIEW", "false")
+        monkeypatch.setattr(mod, "MIN_EVERGREEN_BRIEFS", 0)
+        material = {
+            "external_id": "bc3001-white",
+            "name": "Bella Canvas 3001",
+            "substrate_type": "t-shirt",
+            "color": "White",
+            "sizes": ["S", "M", "L"],
+            "product_type": ["dtf_apparel"],
+            "unit_cost": 4.50,
+        }
+        db = self._mock_db([_briefable(1, "coffee shirt")])
+        db.list_active_materials.return_value = [material]
+        llm = self._mock_llm(
+            {
+                "briefs": [
+                    {
+                        "concept": "Powered by Coffee",
+                        "product_type": "dtf_apparel",
+                        "specific_products": ["t-shirt"],
+                        "confidence": 80,
+                        "source_seed_ids": [1],
+                        "copy_mode": "no_text",
+                        "layout_type": "full_bleed",
+                        "scene_description": "a steaming coffee mug",
+                        "recommended_materials": [
+                            {
+                                "external_id": "bc3001-white",
+                                "name": "Bella Canvas 3001",
+                                "color": "White",
+                                "substrate_type": "t-shirt",
+                                "unit_cost": 4.50,
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+        generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
+
+        pricing = db.insert_design_brief.call_args.kwargs["pricing"]
+        assert pricing["requested_positioning"] == "standard"
+        assert pricing["quotes"][0]["recommended_price"] == 19.99
+        assert llm.with_raw_response.create.call_count == 1
+
 
 class TestBuildBriefPromptWithMaterials:
     def _sample_materials(self) -> list[dict[str, Any]]:
@@ -1601,6 +1726,22 @@ class TestBuildBriefPromptWithMaterials:
         assert "available_materials" in user_data
         assert len(user_data["available_materials"]) == 2
         assert user_data["available_materials"][0]["external_id"] == "bc3001-white"
+
+    def test_materials_carry_a_cost_tier_and_estimated_retail(self) -> None:
+        messages = build_brief_prompt(
+            candidates=[_briefable(1, "dad jokes shirt")],
+            context=[],
+            today=date(2026, 10, 21),
+            materials=self._sample_materials(),
+        )
+
+        materials = json.loads(messages[1]["content"])["available_materials"]
+        tee = materials[0]
+
+        assert tee["cost_tier"] in ("budget", "standard", "premium")
+        assert tee["estimated_retail"]["standard"] == 19.99
+        assert tee["estimated_retail"]["budget"] == 14.99
+        assert tee["estimated_retail"]["premium"] == 24.99
 
     def test_omits_available_materials_when_none(self) -> None:
         messages = build_brief_prompt(
