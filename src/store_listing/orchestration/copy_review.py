@@ -80,9 +80,15 @@ DESIGN PRINCIPLES
 - A kicker sets up the hero; it must not repeat it.
 - A tagline is optional. When the design already stands alone, DROP is the
   best answer. Only keep or rewrite a tagline when it adds a second joke,
-  identity, occasion or brand-like line.
+  identity, attitude or brand-like line. A tagline that only names the occasion
+  or the setting is describing the brief, not the design: DROP it.
 - A tagline is a line, not a list of words.
 - A tagline never names a brand, a franchise or a trademark.
+- Do not keep a tagline just because it names the occasion. An occasion in
+  the brief (a holiday, a memorial day, a setting) is context for the
+  artwork, not a tagline. BAD: "All Souls Day" on a pet memorial — the art
+  already carries the memorial and the headline carries the feeling. GOOD:
+  a second joke or identity the picture cannot show.
 - A rewrite is not a way to keep text for its own sake. If the design does not
   need a second line, drop it.
 - Some scenes carry the words in the picture: a blank sign, banner, headstone,

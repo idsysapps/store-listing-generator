@@ -17,7 +17,10 @@ from __future__ import annotations
 import logging
 import os
 import random
+from io import BytesIO
 from typing import Any
+
+from PIL import Image
 
 from store_listing.orchestration.art_direction import family_for, preset_for, tagline_family_for
 from store_listing.orchestration.artwork_validation import (
@@ -385,6 +388,19 @@ def _generate_typographic_hero_brief(
     return True, None
 
 
+def _flatten_for_ocr(image_bytes: bytes) -> bytes:
+    """Composite a transparent render onto white so the OCR gate can see it."""
+    try:
+        image = Image.open(BytesIO(image_bytes)).convert("RGBA")
+    except OSError:
+        return image_bytes
+    background = Image.new("RGB", image.size, (255, 255, 255))
+    background.paste(image, mask=image.split()[-1])
+    buffer = BytesIO()
+    background.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def _generate_model_text_brief(
     brief_row: dict[str, Any],
     brief: DesignBrief,
@@ -399,6 +415,10 @@ def _generate_model_text_brief(
     The headline is part of the image: there is no compositor pass for it.
     The tagline is still composited afterwards, the same way the hero path
     treats its descriptor, because Qwen garbles a third text block.
+
+    The keyed DTF file is checked again: BiRefNet can decide the line is
+    background and cut it off, which leaves a clean sticker with no words.
+    A render that loses the text is retried with a new seed.
     """
     brief_id = brief_row["id"]
     is_dtf = brief_row["product_type"] == "dtf_apparel"
@@ -413,40 +433,58 @@ def _generate_model_text_brief(
         validator=validator,
         candidates=hero_candidate_count(),
     )
-    result = generator.generate(copy, seed=random.randint(0, 2**31 - 1))
-    if result.image_bytes is None:
-        logger.warning(
-            "Model-drawn text generation failed for brief %d: %s", brief_id, result.error
-        )
-        return False, result.error or "model-drawn text generation failed"
+    last_error = "model-drawn text generation failed"
 
-    raw_bytes = _hero_with_descriptor(result.image_bytes, copy.descriptor)
-    transparent_bytes: bytes | None = None
-    if is_dtf:
-        keyed = comfyui_client.remove_background(result.image_bytes)
-        if keyed.image_bytes is None:
+    for _attempt in range(2):
+        result = generator.generate(copy, seed=random.randint(0, 2**31 - 1))
+        if result.image_bytes is None:
             logger.warning(
-                "Background removal failed for model-text brief %d: %s",
-                brief_id,
-                keyed.error,
+                "Model-drawn text generation failed for brief %d: %s", brief_id, result.error
             )
-        else:
+            return False, result.error or last_error
+
+        raw_bytes = _hero_with_descriptor(result.image_bytes, copy.descriptor)
+        transparent_bytes: bytes | None = None
+        if is_dtf:
+            keyed = comfyui_client.remove_background(result.image_bytes)
+            if keyed.image_bytes is None:
+                logger.warning(
+                    "Background removal failed for model-text brief %d: %s",
+                    brief_id,
+                    keyed.error,
+                )
+                last_error = keyed.error or "background removal failed"
+                continue
             transparent_bytes = _hero_with_descriptor(
                 keyed.image_bytes, copy.descriptor, transparent=True
             )
+            keyed_check = validator.validate(
+                _flatten_for_ocr(transparent_bytes),
+                expected=list(copy.text_blocks),
+            )
+            if not keyed_check.matched:
+                logger.warning(
+                    "Model-text brief %d: the keyed artwork lost the text (missing=%s), retrying",
+                    brief_id,
+                    keyed_check.missing,
+                )
+                last_error = "the keyed artwork lost the text"
+                continue
 
-    keys = storage.upload_design(
-        raw_bytes=raw_bytes,
-        transparent_bytes=transparent_bytes,
-        brief_id=brief_id,
-        product_type=brief_row["product_type"],
-    )
-    db_client.update_brief_image_keys(
-        brief_id=brief_id,
-        image_key_raw=keys["raw"],
-        image_key_transparent=keys.get("transparent"),
-    )
-    return True, None
+        keys = storage.upload_design(
+            raw_bytes=raw_bytes,
+            transparent_bytes=transparent_bytes,
+            brief_id=brief_id,
+            product_type=brief_row["product_type"],
+        )
+        db_client.update_brief_image_keys(
+            brief_id=brief_id,
+            image_key_raw=keys["raw"],
+            image_key_transparent=keys.get("transparent"),
+        )
+        return True, None
+
+    return False, last_error
 
 
 def _generate_single_brief(

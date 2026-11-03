@@ -1689,6 +1689,53 @@ class TestModelTextPath:
         s3.put_object.assert_not_called()
         db.update_brief_image_keys.assert_not_called()
 
+    def test_a_keyed_render_that_lost_the_text_is_retried(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        db = _mock_db_client(briefs=[self._painted_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=_real_png())
+        comfy.remove_background.return_value = ComfyUIResult(image_bytes=_real_png())
+        validator = MagicMock()
+        validator.validate.side_effect = [
+            StrictTextResult(
+                matched=True,
+                expected=["Forever In My Heart"],
+                observed="Forever In My Heart",
+                score=1.0,
+            ),
+            StrictTextResult(
+                matched=False,
+                expected=["Forever In My Heart"],
+                observed="",
+                score=0.0,
+            ),
+            StrictTextResult(
+                matched=True,
+                expected=["Forever In My Heart"],
+                observed="Forever In My Heart",
+                score=1.0,
+            ),
+            StrictTextResult(
+                matched=True,
+                expected=["Forever In My Heart"],
+                observed="Forever In My Heart",
+                score=1.0,
+            ),
+        ]
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            hero_validator=validator,
+        )
+
+        assert result["images_generated"] == 1
+        assert comfy.generate_qwen_image.call_count == 2
+        db.update_brief_image_keys.assert_called_once()
+
     def test_the_tagline_is_composited_after_the_gate(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
