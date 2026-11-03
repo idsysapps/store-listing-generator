@@ -1564,3 +1564,156 @@ class TestTypographicHeroPath:
         composed.assert_not_called()
         bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
         assert bodies == [b"hero"]
+
+
+class TestModelTextPath:
+    def _painted_brief(self, **overrides: Any) -> dict[str, Any]:
+        row = _brief(
+            id=195,
+            product_type="dtf_apparel",
+            copy_mode="caption",
+            layout_type="mid_ribbon",
+            headline_text="Forever In My Heart",
+            tagline_text="All Souls Day",
+            scene_description=("a black labrador silhouette dissolving into soft, glowing smoke"),
+            voice="cozy",
+            visual_style="vintage screenprint",
+        )
+        row["text_plan"] = {
+            "method": "painted",
+            "carrier": "none",
+            "region": "center",
+            "surface": "none",
+            "ink": "light",
+            "reason": "painted into the soft, glowing smoke",
+        }
+        row.update(overrides)
+        return row
+
+    def _text_validator(self, *, matched: bool = True) -> MagicMock:
+        validator = MagicMock()
+        validator.validate.return_value = StrictTextResult(
+            matched=matched,
+            expected=["Forever In My Heart"],
+            observed="Forever In My Heart" if matched else "Forevr In My Hart",
+            score=1.0 if matched else 0.0,
+        )
+        return validator
+
+    def test_a_painted_brief_is_drawn_by_qwen_and_uploaded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        db = _mock_db_client(briefs=[self._painted_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"painted")
+        comfy.remove_background.return_value = ComfyUIResult(image_bytes=b"keyed")
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            hero_validator=self._text_validator(),
+        )
+
+        assert result == {"status": "success", "images_generated": 1, "errors": 0}
+        comfy.generate_qwen_image.assert_called_once()
+        comfy.generate_image.assert_not_called()
+        prompt = comfy.generate_qwen_image.call_args.kwargs["prompt"]
+        assert "Forever In My Heart" in prompt
+        assert "All Souls Day" not in prompt
+        assert "painted into the soft, glowing smoke" in prompt
+        assert "solid pure magenta background" in prompt
+        db.update_brief_image_keys.assert_called_once()
+        keys = db.update_brief_image_keys.call_args.kwargs
+        assert keys["image_key_raw"].endswith("_raw.png")
+        assert keys["image_key_transparent"].endswith("_transparent.png")
+
+    def test_the_path_is_off_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MODEL_TEXT_ENABLED", raising=False)
+        db = _mock_db_client(briefs=[self._painted_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_image.return_value = ComfyUIResult(image_bytes=_real_png())
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+            hero_validator=self._text_validator(),
+        )
+
+        comfy.generate_image.assert_called_once()
+        comfy.generate_qwen_image.assert_not_called()
+
+    def test_a_carrier_keeps_the_compositor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        brief = self._painted_brief()
+        brief["text_plan"] = {
+            **brief["text_plan"],
+            "carrier": "headstone",
+            "carrier_description": "a blank granite headstone",
+        }
+        db = _mock_db_client(briefs=[brief])
+        comfy = _comfyui_client()
+        comfy.generate_image.return_value = ComfyUIResult(image_bytes=_real_png())
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+            hero_validator=self._text_validator(),
+        )
+
+        comfy.generate_image.assert_called_once()
+        comfy.generate_qwen_image.assert_not_called()
+
+    def test_a_failed_text_gate_does_not_upload(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_CANDIDATES", "1")
+        db = _mock_db_client(briefs=[self._painted_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"painted")
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            hero_validator=self._text_validator(matched=False),
+        )
+
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        s3.put_object.assert_not_called()
+        db.update_brief_image_keys.assert_not_called()
+
+    def test_the_tagline_is_composited_after_the_gate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_DESCRIPTOR", "1")
+        composed = MagicMock(return_value=b"composed")
+        monkeypatch.setattr(
+            "store_listing.orchestration.image_pipeline.compose_hero_descriptor", composed
+        )
+        db = _mock_db_client(briefs=[self._painted_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"painted")
+        comfy.remove_background.return_value = ComfyUIResult(image_bytes=b"keyed")
+        s3 = MagicMock()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            hero_validator=self._text_validator(),
+        )
+
+        assert composed.call_args_list == [
+            call(b"painted", "All Souls Day", transparent=False),
+            call(b"keyed", "All Souls Day", transparent=True),
+        ]
+        bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
+        assert b"composed" in bodies

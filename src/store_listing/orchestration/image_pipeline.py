@@ -46,6 +46,12 @@ from store_listing.orchestration.image_generation import (
     generate_image,
 )
 from store_listing.orchestration.image_storage import ImageStorageClient
+from store_listing.orchestration.model_text import (
+    ModelTextGenerator,
+    is_model_text_brief,
+    model_text_copy_from_brief,
+    model_text_enabled,
+)
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.text_compositor import (
     DTF_KEY_COLOUR,
@@ -379,6 +385,70 @@ def _generate_typographic_hero_brief(
     return True, None
 
 
+def _generate_model_text_brief(
+    brief_row: dict[str, Any],
+    brief: DesignBrief,
+    *,
+    storage: ImageStorageClient,
+    comfyui_client: ComfyUIClient,
+    validator: StrictTextValidator,
+    db_client: Any,
+) -> tuple[bool, str | None]:
+    """Render a painted line into the artwork with Qwen-Image and upload it.
+
+    The headline is part of the image: there is no compositor pass for it.
+    The tagline is still composited afterwards, the same way the hero path
+    treats its descriptor, because Qwen garbles a third text block.
+    """
+    brief_id = brief_row["id"]
+    is_dtf = brief_row["product_type"] == "dtf_apparel"
+
+    try:
+        copy = model_text_copy_from_brief(brief)
+    except ValueError as error:
+        return False, str(error)
+
+    generator = ModelTextGenerator(
+        comfyui_client=comfyui_client,
+        validator=validator,
+        candidates=hero_candidate_count(),
+    )
+    result = generator.generate(copy, seed=random.randint(0, 2**31 - 1))
+    if result.image_bytes is None:
+        logger.warning(
+            "Model-drawn text generation failed for brief %d: %s", brief_id, result.error
+        )
+        return False, result.error or "model-drawn text generation failed"
+
+    raw_bytes = _hero_with_descriptor(result.image_bytes, copy.descriptor)
+    transparent_bytes: bytes | None = None
+    if is_dtf:
+        keyed = comfyui_client.remove_background(result.image_bytes)
+        if keyed.image_bytes is None:
+            logger.warning(
+                "Background removal failed for model-text brief %d: %s",
+                brief_id,
+                keyed.error,
+            )
+        else:
+            transparent_bytes = _hero_with_descriptor(
+                keyed.image_bytes, copy.descriptor, transparent=True
+            )
+
+    keys = storage.upload_design(
+        raw_bytes=raw_bytes,
+        transparent_bytes=transparent_bytes,
+        brief_id=brief_id,
+        product_type=brief_row["product_type"],
+    )
+    db_client.update_brief_image_keys(
+        brief_id=brief_id,
+        image_key_raw=keys["raw"],
+        image_key_transparent=keys.get("transparent"),
+    )
+    return True, None
+
+
 def _generate_single_brief(
     brief_row: dict[str, Any],
     *,
@@ -406,6 +476,24 @@ def _generate_single_brief(
         and is_typographic_hero_brief(brief_row, brief)
     ):
         return _generate_typographic_hero_brief(
+            brief_row,
+            brief,
+            storage=storage,
+            comfyui_client=comfyui_client,
+            validator=hero_validator,
+            db_client=db_client,
+        )
+
+    # A painted line is part of the art, not a layer on top of it. The
+    # compositor can fill a sign or a label, but it cannot paint into smoke,
+    # so these briefs go to the image model too (issue #133).
+    if (
+        copy_mode != NO_TEXT
+        and model_text_enabled()
+        and hero_validator is not None
+        and is_model_text_brief(brief)
+    ):
+        return _generate_model_text_brief(
             brief_row,
             brief,
             storage=storage,
