@@ -19,9 +19,11 @@ from store_listing.orchestration.text_compositor import (
     TEXT_ONLY_HEADLINE_HEIGHT,
     TEXT_ONLY_HEADLINE_TOP,
     LayoutSpec,
+    _bar_colour,
     blank_canvas,
     composite_text,
 )
+from store_listing.orchestration.text_integration import TextPlan
 from store_listing.orchestration.typography import TextTreatment
 
 
@@ -814,3 +816,32 @@ class TestTheTransparentRender:
         result = composite_text(_canvas(), self._spec("#FFFFFF"))
 
         assert _distinct_colours(_image(result)) == {(255, 255, 255)}
+
+
+class TestTheTextBar:
+    def _spec(self, plan: TextPlan | None) -> LayoutSpec:
+        return LayoutSpec(
+            layout_type="mid_ribbon",
+            headline_text="SPOOKY",
+            font_color="#FF0000",
+            text_plan=plan,
+        )
+
+    def test_a_typographic_plan_without_a_carrier_gets_no_bar(self) -> None:
+        bar = _bar_colour(
+            self._spec(TextPlan(method="typographic", carrier="none")),
+            TEMPLATES["mid_ribbon"],
+        )
+
+        assert bar is None
+
+    def test_a_carrier_still_gets_the_bar(self) -> None:
+        bar = _bar_colour(
+            self._spec(TextPlan(method="painted", carrier="label")),
+            TEMPLATES["mid_ribbon"],
+        )
+
+        assert bar is not None
+
+    def test_a_legacy_brief_keeps_the_bar(self) -> None:
+        assert _bar_colour(self._spec(None), TEMPLATES["mid_ribbon"]) is not None

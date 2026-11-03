@@ -14,6 +14,7 @@ text, and left pending when it has none (issue #196).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -26,6 +27,11 @@ from store_listing.orchestration.art_direction import family_for, preset_for, ta
 from store_listing.orchestration.artwork_validation import (
     ArtworkTextValidator,
     ArtworkValidator,
+)
+from store_listing.orchestration.chroma_key import (
+    opaque_fraction,
+    remove_dark_ink,
+    trim_sticker_border,
 )
 from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.copy_modes import (
@@ -47,6 +53,7 @@ from store_listing.orchestration.image_generation import (
     ImageResult,
     font_colour,
     generate_image,
+    is_dark_garment,
 )
 from store_listing.orchestration.image_storage import ImageStorageClient
 from store_listing.orchestration.model_text import (
@@ -78,6 +85,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_TEXT_RETRIES = 2
 DEFAULT_MAX_ARTWORK_RETRIES = 1
 DEFAULT_MAX_LETTERING_RETRIES = 1
+# A DTF design that covers most of its placement prints as a solid sheet and
+# feels like plastic. This is a warning, not a rejection (issue #288).
+DTF_COVERAGE_WARN = 0.65
 
 
 def _max_text_retries() -> int:
@@ -108,6 +118,16 @@ def _max_lettering_retries() -> int:
     except ValueError:
         logger.warning("Invalid MAX_LETTERING_REGENERATION_ATTEMPTS=%r, using the default", raw)
         return DEFAULT_MAX_LETTERING_RETRIES
+
+
+def _recommended_materials(brief_row: dict[str, Any]) -> list[dict[str, Any]] | None:
+    value = brief_row.get("recommended_materials")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, list) else None
 
 
 def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
@@ -159,6 +179,7 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         voice=voice,
         font_family=font_family,
         style_preset=brief_row.get("style_preset"),
+        recommended_materials=_recommended_materials(brief_row),
         text_plan=text_plan_from_value(brief_row.get("text_plan"))
         if copy_mode != NO_TEXT
         else None,
@@ -282,6 +303,7 @@ def _upload_text_only(
         transparent_bytes = composite_text(
             blank_canvas(product_type, transparent=True), layout, transparent=True
         )
+    _log_dtf_coverage(brief_id, transparent_bytes)
 
     if text_validator is not None:
         verdict = text_validator.validate(
@@ -370,9 +392,15 @@ def _generate_typographic_hero_brief(
         if keyed.image_bytes is None:
             logger.warning("Background removal failed for hero brief %d: %s", brief_id, keyed.error)
         else:
+            keyed_bytes = keyed.image_bytes
+            if not copy.sticker:
+                keyed_bytes = trim_sticker_border(keyed_bytes)
             transparent_bytes = _hero_with_descriptor(
-                keyed.image_bytes, copy.descriptor, transparent=True
+                keyed_bytes, copy.descriptor, transparent=True
             )
+    if transparent_bytes is not None and is_dark_garment(brief.garment_color):
+        transparent_bytes = remove_dark_ink(transparent_bytes)
+    _log_dtf_coverage(brief_id, transparent_bytes)
 
     keys = storage.upload_design(
         raw_bytes=raw_bytes,
@@ -386,6 +414,22 @@ def _generate_typographic_hero_brief(
         image_key_transparent=keys.get("transparent"),
     )
     return True, None
+
+
+def _log_dtf_coverage(brief_id: int, image_bytes: bytes | None) -> None:
+    """Log how much of the DTF print area is ink, and warn when it is large."""
+    if image_bytes is None:
+        return
+    coverage = opaque_fraction(image_bytes)
+    logger.info("Brief %d: DTF opaque coverage %.1f%%", brief_id, coverage * 100)
+    if coverage > DTF_COVERAGE_WARN:
+        logger.warning(
+            "Brief %d: DTF coverage %.1f%% is above %.0f%%; the design may "
+            "print as a large solid area and feel like plastic",
+            brief_id,
+            coverage * 100,
+            DTF_COVERAGE_WARN * 100,
+        )
 
 
 def _flatten_for_ocr(image_bytes: bytes) -> bytes:
@@ -455,8 +499,11 @@ def _generate_model_text_brief(
                 )
                 last_error = keyed.error or "background removal failed"
                 continue
+            keyed_bytes = keyed.image_bytes
+            if not copy.sticker:
+                keyed_bytes = trim_sticker_border(keyed_bytes)
             transparent_bytes = _hero_with_descriptor(
-                keyed.image_bytes, copy.descriptor, transparent=True
+                keyed_bytes, copy.descriptor, transparent=True
             )
             keyed_check = validator.validate(
                 _flatten_for_ocr(transparent_bytes),
@@ -470,6 +517,9 @@ def _generate_model_text_brief(
                 )
                 last_error = "the keyed artwork lost the text"
                 continue
+        if transparent_bytes is not None and is_dark_garment(brief.garment_color):
+            transparent_bytes = remove_dark_ink(transparent_bytes)
+        _log_dtf_coverage(brief_id, transparent_bytes)
 
         keys = storage.upload_design(
             raw_bytes=raw_bytes,
@@ -755,6 +805,9 @@ def _generate_single_brief(
             if needs_text_check
             else keyed_artwork
         )
+    if transparent_bytes is not None and is_dark_garment(brief.garment_color):
+        transparent_bytes = remove_dark_ink(transparent_bytes)
+    _log_dtf_coverage(brief_id, transparent_bytes)
 
     keys = storage.upload_design(
         raw_bytes=raw_bytes,

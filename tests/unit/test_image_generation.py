@@ -15,6 +15,7 @@ from store_listing.orchestration.design_templates import (
     TEMPLATES,
 )
 from store_listing.orchestration.image_generation import (
+    LIGHT_INK,
     PromptBuildError,
     build_flux_prompt,
     build_negative_prompt,
@@ -50,6 +51,32 @@ def _client(image_bytes: bytes | None = b"\x89PNG\r\n\x1a\n", **kwargs: Any) -> 
     return client
 
 
+class TestTheGarmentMaterial:
+    def test_a_dark_font_on_a_dark_garment_falls_back_to_light(self) -> None:
+        brief = _make_brief(
+            font_color="#111111",
+            recommended_materials=[{"external_id": "shirt-jet-black-m", "color": "Jet Black"}],
+        )
+
+        assert font_colour(brief) == LIGHT_INK
+
+    def test_a_light_font_on_a_dark_garment_is_kept(self) -> None:
+        brief = _make_brief(
+            font_color="#F2C14E",
+            recommended_materials=[{"external_id": "shirt-jet-black-m", "color": "Jet Black"}],
+        )
+
+        assert font_colour(brief) == "#F2C14E"
+
+    def test_a_dark_font_on_a_light_garment_is_kept(self) -> None:
+        brief = _make_brief(
+            font_color="#111111",
+            recommended_materials=[{"external_id": "shirt-white-m", "color": "White"}],
+        )
+
+        assert font_colour(brief) == "#111111"
+
+
 class TestBuildFluxPrompt:
     def test_full_bleed_includes_the_scene_style_and_product_context(self) -> None:
         brief = _make_brief(
@@ -69,6 +96,84 @@ class TestBuildFluxPrompt:
         prompt = build_flux_prompt(brief)
 
         assert "do not include any text or lettering" in prompt.lower()
+
+    def test_a_dtf_prompt_keeps_the_garment_as_the_background(self) -> None:
+        prompt = build_flux_prompt(_make_brief())
+
+        assert "no printed background" in prompt
+        assert "garment colour is the background" in prompt
+
+    def test_a_dtf_prompt_does_not_ask_for_a_sticker_or_a_full_bleed_plate(self) -> None:
+        prompt = build_flux_prompt(
+            _make_brief(layout_type="mid_ribbon", headline_text="POWERED BY COFFEE")
+        )
+
+        assert "sticker illustration" not in prompt
+        assert "the subject is isolated on the garment" in prompt
+        assert "fills the whole canvas edge to edge" not in prompt
+
+    def test_a_dtf_negative_keeps_the_background_and_sticker_border_out(self) -> None:
+        negative = build_negative_prompt(_make_brief())
+
+        assert "no background" in negative
+        assert "no sticker border" in negative
+
+    def test_the_preset_palette_reaches_the_prompt(self) -> None:
+        brief = _make_brief(
+            style_preset="hand_inked_woodcut",
+            visual_style="dark green and amber",
+        )
+
+        prompt = build_flux_prompt(brief)
+
+        assert "forest green" in prompt
+
+    def test_a_dtf_prompt_says_the_magenta_is_only_the_backdrop(self) -> None:
+        prompt = build_flux_prompt(_make_brief())
+
+        assert "magenta is only the empty key backdrop" in prompt
+
+    def test_a_dtf_negative_forbids_magenta_when_the_palette_has_none(self) -> None:
+        brief = _make_brief(style_preset="hand_inked_woodcut")
+
+        assert "no hot pink" in build_negative_prompt(brief)
+
+    def test_a_pink_palette_keeps_its_pink(self) -> None:
+        brief = _make_brief(style_preset="kawaii_flat")
+
+        assert "no hot pink" not in build_negative_prompt(brief)
+
+    def test_a_dark_garment_prompt_asks_for_light_highlights(self) -> None:
+        brief = _make_brief(
+            recommended_materials=[
+                {
+                    "external_id": "shirt-jet-black-m",
+                    "name": "Core Adult",
+                    "color": "Jet Black",
+                }
+            ]
+        )
+
+        prompt = build_flux_prompt(brief)
+
+        assert "black areas are the shirt" in prompt
+        assert "light cream/white highlights" in prompt
+
+    def test_a_light_garment_does_not_get_the_dark_rule(self) -> None:
+        brief = _make_brief(
+            recommended_materials=[
+                {"external_id": "shirt-white-m", "name": "Core Adult", "color": "White"}
+            ]
+        )
+
+        assert "black areas are the shirt" not in build_flux_prompt(brief)
+
+    def test_a_dark_garment_negative_forbids_a_black_fill(self) -> None:
+        brief = _make_brief(
+            recommended_materials=[{"external_id": "shirt-jet-black-m", "color": "Jet Black"}]
+        )
+
+        assert "no large black fill" in build_negative_prompt(brief)
 
     def test_a_no_text_brief_says_the_illustration_carries_the_idea(self) -> None:
         brief = _make_brief(
@@ -475,7 +580,10 @@ class TestTheTemplates:
 
     def test_the_composition_of_the_template_is_in_the_prompt(self) -> None:
         for template_id in ART_TEMPLATE_IDS:
+            # DTF replaces the edge-to-edge composition with an isolated
+            # subject, so this test uses a print-through product.
             brief = _make_brief(
+                product_type="sublimation",
                 layout_type=template_id,
                 headline_text="GOBBLE",
                 tagline_text="TILL THE BELL",

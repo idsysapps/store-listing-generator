@@ -30,7 +30,11 @@ from typing import Any, cast
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
-from store_listing.orchestration.design_templates import resolve_template, template_for
+from store_listing.orchestration.design_templates import (
+    DesignTemplate,
+    resolve_template,
+    template_for,
+)
 from store_listing.orchestration.text_integration import TextPlan
 from store_listing.orchestration.typography import (
     DEFAULT_FONT,
@@ -617,6 +621,20 @@ def _draw_arc_text(
         position -= arc * ((character_width + tracking) / total)
 
 
+def _bar_colour(layout: LayoutSpec, template: DesignTemplate) -> str | None:
+    """The band behind the text, only when the design asks for a carrier.
+
+    A bar is printed ink. A typographic plan that needs no carrier puts the
+    words straight on the garment, so it gets no plate (issue #288).
+    """
+    if not template.bar:
+        return None
+    plan = layout.text_plan
+    if plan is not None and not plan.needs_carrier:
+        return None
+    return accent_for(layout.font_color)
+
+
 def composite_text(image_bytes: bytes, layout: LayoutSpec, *, transparent: bool = False) -> bytes:
     """Draw the brief's headline and tagline onto the artwork.
 
@@ -660,7 +678,7 @@ def composite_text(image_bytes: bytes, layout: LayoutSpec, *, transparent: bool 
         return _composite(image, overlay)
 
     template = template_for(layout.layout_type)
-    bar = accent_for(layout.font_color) if template.bar else None
+    bar = _bar_colour(layout, template)
 
     if layout.headline_text and template.headline:
         box = _box(template.headline, width, height)

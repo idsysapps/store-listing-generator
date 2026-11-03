@@ -13,7 +13,10 @@ from store_listing.orchestration.chroma_key import (
     despill_key_spill,
     estimate_key_colour,
     key_out_background,
+    opaque_fraction,
     punch_out_key_colour,
+    remove_dark_ink,
+    trim_sticker_border,
 )
 
 KEY = (247, 0, 102)
@@ -337,6 +340,72 @@ class TestBleedTransparentPixels:
         with Image.open(io.BytesIO(result)) as output:
             assert _alpha_at(output, 0, 0) == 0
             assert _alpha_at(output, 8, 8) == 255
+
+
+class TestRemoveDarkInk:
+    def test_black_becomes_transparent_but_cream_stays(self) -> None:
+        image = Image.new("RGBA", (8, 8), (20, 20, 20, 255))
+        image.putpixel((4, 4), (242, 232, 213, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = remove_dark_ink(buffer.getvalue())
+
+        with Image.open(io.BytesIO(result)) as output:
+            assert _alpha_at(output, 0, 0) == 0
+            assert _alpha_at(output, 4, 4) == 255
+
+    def test_a_thin_dark_outline_is_kept(self) -> None:
+        image = Image.new("RGBA", (100, 100), (255, 0, 255, 0))
+        for x in range(20, 80):
+            for y in range(20, 80):
+                image.putpixel((x, y), (20, 20, 20, 255))
+        image.putpixel((10, 10), (20, 20, 20, 255))
+        image.putpixel((11, 10), (20, 20, 20, 255))
+        image.putpixel((10, 11), (20, 20, 20, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = remove_dark_ink(buffer.getvalue())
+
+        with Image.open(io.BytesIO(result)) as output:
+            assert _alpha_at(output, 50, 50) == 0
+            assert _alpha_at(output, 10, 10) == 255
+
+    def test_an_unreadable_image_is_left_alone(self) -> None:
+        assert remove_dark_ink(b"not an image") == b"not an image"
+
+
+class TestTrimStickerBorder:
+    def test_removes_the_border_but_keeps_an_interior_highlight(self) -> None:
+        image = Image.new("RGBA", (20, 20), (255, 0, 255, 0))
+        for x in range(4, 16):
+            for y in range(4, 16):
+                image.putpixel((x, y), (255, 255, 255, 255))
+        for x in range(6, 14):
+            for y in range(6, 14):
+                image.putpixel((x, y), (200, 20, 20, 255))
+        image.putpixel((10, 10), (255, 255, 255, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        result = trim_sticker_border(buffer.getvalue())
+
+        with Image.open(io.BytesIO(result)) as output:
+            assert _alpha_at(output, 4, 4) == 0
+            assert _alpha_at(output, 10, 10) == 255
+
+
+class TestOpaqueFraction:
+    def test_reports_the_printed_area(self) -> None:
+        image = Image.new("RGBA", (10, 10), (255, 0, 255, 0))
+        for x in range(5):
+            for y in range(5):
+                image.putpixel((x, y), (255, 255, 255, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        assert opaque_fraction(buffer.getvalue()) == 0.25
 
 
 class TestBackgroundFraction:

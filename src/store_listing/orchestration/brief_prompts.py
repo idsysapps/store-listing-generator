@@ -27,6 +27,7 @@ __all__ = [
     "COPY_MODE_RULES",
     "DESIGN_ONLY_RULES",
     "DIVERSITY_RULES",
+    "DTF_RULES",
     "LAYOUT_RULES",
     "PRODUCT_CATALOG",
     "PRODUCT_CATALOG_BY_TYPE",
@@ -36,6 +37,7 @@ __all__ = [
     "art_direction_rules",
     "concept_freshness_rules",
     "copy_mode_rules",
+    "dtf_rules",
     "layout_rules",
     "product_belongs_to",
     "product_catalog",
@@ -119,7 +121,9 @@ def layout_rules(enabled: Sequence[str] | None = None) -> str:
     if "dtf_apparel" in types:
         background_rules.append(
             "For 'dtf_apparel' the design is rendered on a magenta background that is "
-            "removed before printing, so white text is fine."
+            "removed before printing. The garment colour is the background of the "
+            "design: do not fill the print area with a background, a rectangle or a "
+            "solid plate. White text is fine because the magenta is removed."
         )
     if any(t in types for t in ("sublimation", "sticker_vinyl")):
         background_rules.append(
@@ -206,6 +210,25 @@ SELLABILITY_RULES: Final[str] = (
 def sellability_rules() -> str:
     """The design principles that make a line worth wearing."""
     return SELLABILITY_RULES
+
+
+DTF_RULES: Final[str] = (
+    "DTF PRINTING - the garment is the background:\n"
+    "- The design is ink on the shirt; every transparent area is the shirt "
+    "showing through.\n"
+    "- Do not design a printed backdrop, a rectangular background or a "
+    "full-bleed scene. The scene is the subject, not a background.\n"
+    "- Keep the ink to the subject, the words and any carrier the design "
+    "needs (a sign, a label, a headstone).\n"
+    "- Large solid fields make the shirt feel stiff and plastic; use negative "
+    "space and let the garment colour be part of the design.\n"
+)
+
+
+def dtf_rules(enabled: Sequence[str] | None = None) -> str:
+    """The garment-as-background rules, for batches that print DTF."""
+    types = list(enabled) if enabled else list(PRODUCT_CATALOG_BY_TYPE)
+    return DTF_RULES if "dtf_apparel" in types else ""
 
 
 CONCEPT_FRESHNESS_RULES: Final[str] = (

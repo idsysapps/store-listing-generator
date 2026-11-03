@@ -2195,3 +2195,36 @@ class TestTheIdeaDevices:
         assert assign_batch_devices(briefs, "2026-10-22") == assign_batch_devices(
             briefs, "2026-10-22"
         )
+
+
+class TestTheGarmentMaterial:
+    def _brief(self, **overrides: Any) -> DesignBrief:
+        defaults: dict[str, Any] = {
+            "concept": "A Design",
+            "product_type": "dtf_apparel",
+            "specific_products": ["t-shirt"],
+            "audience": "everyone",
+            "visual_style": "bold",
+            "confidence": 50,
+            "reasoning": "trending",
+            "source_seed_ids": [1],
+            "layout_type": "auto",
+            "headline_text": "GOOD LINE",
+        }
+        defaults.update(overrides)
+        return DesignBrief(**defaults)
+
+    def test_the_first_recommended_material_is_the_garment(self) -> None:
+        brief = self._brief(
+            recommended_materials=[
+                {"external_id": "shirt-jet-black-m", "color": "Jet Black"},
+                {"external_id": "shirt-white-m", "color": "White"},
+            ]
+        )
+
+        assert brief.garment_material is not None
+        assert brief.garment_material["external_id"] == "shirt-jet-black-m"
+        assert brief.garment_color == "Jet Black"
+
+    def test_a_brief_without_materials_has_no_garment_color(self) -> None:
+        assert self._brief().garment_color is None

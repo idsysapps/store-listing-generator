@@ -30,6 +30,9 @@ __all__ = [
     "Preset",
     "family_for",
     "negative_for",
+    "palette_allows_magenta",
+    "palette_names",
+    "palette_phrase",
     "preset_for",
     "prompt_for",
     "tagline_family_for",
@@ -183,6 +186,69 @@ def preset_for(name: str | None) -> Preset | None:
 def prompt_for(preset: Preset | None) -> str:
     """What the image model is told about the look of the design."""
     return preset.prompt if preset else ""
+
+
+PALETTE_NAMES: Final[dict[str, str]] = {
+    "#F2E8D5": "cream",
+    "#C1502E": "rust",
+    "#1F3050": "navy",
+    "#E0A526": "gold",
+    "#E2703A": "orange",
+    "#F2B233": "gold",
+    "#7A8B4A": "olive",
+    "#4A2C1A": "brown",
+    "#111111": "black",
+    "#FDF6E3": "cream",
+    "#D6342C": "red",
+    "#FFC72C": "yellow",
+    "#FF48B0": "pink",
+    "#0078BF": "blue",
+    "#FFF8E7": "cream",
+    "#1A1A1A": "black",
+    "#EFE6D5": "cream",
+    "#2F4F3E": "forest green",
+    "#FF9EC4": "pink",
+    "#7FD8BE": "mint",
+    "#FFE29A": "butter",
+    "#2B2B2B": "charcoal",
+    "#9CAF88": "sage",
+    "#6B2737": "burgundy",
+    "#C9A227": "gold",
+    "#F5EFE0": "cream",
+    "#2A2A2A": "charcoal",
+    "#E8E1D5": "bone",
+    "#8C1C13": "oxblood",
+}
+
+
+def palette_names(preset: Preset | None) -> tuple[str, ...]:
+    """The colours of the look, as words the image model can follow."""
+    if preset is None or not preset.palette:
+        return ()
+    names = [PALETTE_NAMES.get(colour.upper(), colour) for colour in preset.palette]
+    return tuple(dict.fromkeys(names))
+
+
+def palette_phrase(preset: Preset | None) -> str:
+    """The colours of the look as a prompt phrase."""
+    names = palette_names(preset)
+    return "palette: " + ", ".join(names) if names else ""
+
+
+def palette_allows_magenta(preset: Preset | None) -> bool:
+    """Whether the look deliberately contains a pink/magenta colour."""
+    if preset is None:
+        return False
+    for colour in preset.palette:
+        value = colour.lstrip("#")
+        if len(value) != 6:
+            continue
+        red = int(value[0:2], 16)
+        green = int(value[2:4], 16)
+        blue = int(value[4:6], 16)
+        if red > 200 and blue > 120 and green < 180 and (red - green) > 40 and (blue - green) > 10:
+            return True
+    return False
 
 
 def negative_for(preset: Preset | None, *, allow_surface: bool = False) -> str:

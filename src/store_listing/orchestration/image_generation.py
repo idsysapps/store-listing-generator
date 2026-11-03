@@ -9,7 +9,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from store_listing.orchestration.art_direction import negative_for, preset_for, prompt_for
+from store_listing.orchestration.art_direction import (
+    negative_for,
+    palette_allows_magenta,
+    palette_phrase,
+    preset_for,
+    prompt_for,
+)
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
 from store_listing.orchestration.copy_modes import NO_TEXT
 from store_listing.orchestration.design_briefs import DesignBrief
@@ -31,7 +37,10 @@ PRODUCT_TYPE_CONTEXT: dict[str, str] = {
     #
     # The composition is not described here: it belongs to the template, so
     # the prompt does not ask for a centred object every time (issue #238).
-    "dtf_apparel": ("sticker illustration, bold outlines, flat colors, DTF transfer print"),
+    "dtf_apparel": (
+        "screen-printed apparel graphic, bold outlines, flat colors, DTF transfer "
+        "print, no sticker border, no printed background"
+    ),
     # These are printed full-bleed, so their background is kept and has to be
     # white - it becomes the paper.
     "sublimation": "full-color sublimation print, seamless edges, vibrant colors",
@@ -100,6 +109,34 @@ NO_LETTERING_RETRY_HINT = "No lettering, no text, no words and no numbers in the
 WHITE_BACKGROUND_PRODUCTS = frozenset({"sublimation", "sticker_vinyl"})
 
 DEFAULT_FONT_COLOR = "#000000"
+LIGHT_INK = "#F2E8D5"
+_DARK_GARMENT_WORDS = (
+    "black",
+    "jet black",
+    "dark heather",
+    "dark",
+    "charcoal",
+    "navy",
+    "graphite",
+    "midnight",
+)
+
+
+def is_dark_garment(colour: str | None) -> bool:
+    """Whether the published garment is dark enough to supply the black areas."""
+    value = (colour or "").strip().lower()
+    return any(word in value for word in _DARK_GARMENT_WORDS)
+
+
+def _is_dark_colour(colour: str) -> bool:
+    digits = colour.lstrip("#")
+    if len(digits) != 6:
+        return False
+    try:
+        red, green, blue = (int(digits[index : index + 2], 16) for index in (0, 2, 4))
+    except ValueError:
+        return False
+    return 0.299 * red + 0.587 * green + 0.114 * blue < 110
 
 
 @dataclass
@@ -157,6 +194,13 @@ def font_colour(brief: DesignBrief) -> str:
     Briefs written before the backgrounds changed can still carry one.
     """
     colour = brief.font_color or DEFAULT_FONT_COLOR
+    if is_dark_garment(brief.garment_color) and _is_dark_colour(colour):
+        logger.warning(
+            "Brief %r has a dark font colour on the dark garment %s",
+            brief.concept,
+            brief.garment_color,
+        )
+        return LIGHT_INK
     if brief.product_type in WHITE_BACKGROUND_PRODUCTS and _is_near_white(colour):
         logger.warning("Brief %r has a near-white font colour on a white background", brief.concept)
         return DEFAULT_FONT_COLOR
@@ -201,8 +245,31 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     # text made every design come out as the same flat vector clip-art
     # (issue #227). A brief that was written before the presets existed keeps
     # its own style.
-    look = prompt_for(preset_for(brief.style_preset)) or brief.visual_style
-    parts.append(f"{look}, {product_context}, {NO_MOCKUP}.")
+    preset = preset_for(brief.style_preset)
+    look_parts = [text for text in (prompt_for(preset), palette_phrase(preset)) if text]
+    if preset is None and brief.visual_style:
+        # The free style is only for briefs written before the presets. A
+        # preset decides the look; letting the free text through made every
+        # design the same flat clip-art (issue #227).
+        look_parts.append(brief.visual_style)
+    look = ", ".join(look_parts)
+    parts.append(
+        f"{look}, {product_context}, {NO_MOCKUP}." if look else f"{product_context}, {NO_MOCKUP}."
+    )
+    if brief.product_type == "dtf_apparel":
+        # The magenta backdrop is a key, not printed. The design itself must
+        # not paint a backdrop behind the subject (issue #288).
+        parts.append(
+            "Isolated on the garment: no printed background, no backdrop, no scene "
+            "behind the subject; the garment colour is the background."
+        )
+        parts.append("The magenta is only the empty key backdrop, never a colour in the artwork.")
+        if is_dark_garment(brief.garment_color):
+            parts.append(
+                f"The garment is {brief.garment_color}. The black areas are the shirt, "
+                "not ink: draw the design in light cream/white highlights and lines; "
+                "do not fill large areas with black."
+            )
 
     if template_id == "full_bleed":
         parts.append("Do not include any text or lettering: no text, no lettering, no words.")
@@ -217,6 +284,17 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     # replaced the fixed "compact centered composition" that made every design
     # an object in the middle (issue #238).
     composition = composition_for(template_id, brief.concept)
+    if brief.product_type == "dtf_apparel":
+        # The template's "edge to edge" is a printed background on a DTF
+        # shirt. Keep the subject and the text zone, not the plate (issue
+        # #288).
+        composition = composition.replace(
+            "the artwork fills the whole canvas edge to edge",
+            "the subject is isolated on the garment, with the garment colour around it",
+        ).replace(
+            "covers the whole canvas edge to edge",
+            "is isolated on the garment, with the garment colour around it",
+        )
     carrier = brief.text_plan is not None and brief.text_plan.needs_carrier
     if carrier:
         # The clear band the template reserved for type now holds the carrier
@@ -259,7 +337,19 @@ def build_negative_prompt(brief: DesignBrief) -> str:
     (issue #246).
     """
     allow_surface = brief.text_plan is not None and brief.text_plan.needs_carrier
-    return negative_for(preset_for(brief.style_preset), allow_surface=allow_surface)
+    preset = preset_for(brief.style_preset)
+    negative = negative_for(preset, allow_surface=allow_surface)
+    if brief.product_type == "dtf_apparel":
+        negative += (
+            ", no background, no backdrop, no printed background, no solid "
+            "background, no sticker border, no white outline, no rectangular "
+            "background"
+        )
+        if not palette_allows_magenta(preset):
+            negative += ", no hot pink, no magenta in the artwork"
+        if is_dark_garment(brief.garment_color):
+            negative += ", no large black fill, no black background"
+    return negative
 
 
 def generate_image(

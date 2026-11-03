@@ -17,6 +17,7 @@ from store_listing.orchestration.artwork_validation import (
 )
 from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.image_pipeline import (
+    _brief_from_row,
     generate_image_for_brief,
     generate_images_for_briefs,
 )
@@ -1564,6 +1565,22 @@ class TestTypographicHeroPath:
         composed.assert_not_called()
         bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
         assert bodies == [b"hero"]
+
+
+class TestTheGarmentMaterial:
+    def test_the_row_material_becomes_the_garment_color(self) -> None:
+        row = _brief(
+            recommended_materials=[{"external_id": "shirt-jet-black-m", "color": "Jet Black"}]
+        )
+
+        assert _brief_from_row(row).garment_color == "Jet Black"
+
+    def test_a_json_string_material_is_parsed(self) -> None:
+        row = _brief(
+            recommended_materials='[{"external_id": "shirt-dark-heather-m", "color": "Dark Heather"}]'
+        )
+
+        assert _brief_from_row(row).garment_color == "Dark Heather"
 
 
 class TestModelTextPath:
