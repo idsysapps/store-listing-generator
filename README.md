@@ -395,6 +395,8 @@ query {
       concept
       productType
       listingDescription
+      imageStatus
+      imageError
       recommendedMaterials {
         external_id
         name
@@ -499,6 +501,20 @@ fallback keeps the field populated.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_LISTING_COPY` | `false` (chart: `true`) | Ask the model to write the product-page description |
+
+### Image attention
+
+The scene is screened before rendering for explicit product or mockup
+language. A scene that names a product is rejected with the batch rejection
+reasons, so the existing brief retry asks the model for a new scene
+automatically.
+
+If the artwork or lettering gate still rejects a render after its retries, the
+brief is marked `imageStatus: needs_attention` with a human-readable
+`imageError`. The pipeline does **not** silently upload a typography-only
+design in its place. The automatic image sweep skips needs-attention briefs so
+they do not loop; `requestRegeneration` clears the status and dispatches a new
+render.
 
 ### Seed pool and brief mix
 | Variable | Default | Description |

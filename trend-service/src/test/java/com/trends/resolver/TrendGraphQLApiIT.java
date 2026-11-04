@@ -100,7 +100,7 @@ class TrendGraphQLApiIT {
         given()
                 .contentType(ContentType.JSON)
                 .body("""
-                        {"query":"query { designBriefs(productType: \\"dtf_apparel\\", limit: 1) { items { id listingDescription } } }"}
+                        {"query":"query { designBriefs(productType: \\"dtf_apparel\\", limit: 1) { items { id listingDescription imageStatus imageError } } }"}
                         """)
                 .when()
                 .post("/graphql")

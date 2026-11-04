@@ -84,6 +84,8 @@ type DesignBriefSummary {
   fontFamily: String
   recommendedMaterials: [MaterialRecommendation!]!
   pricing: BriefPricing
+  imageStatus: String
+  imageError: String
 }
 
 type MaterialRecommendation {

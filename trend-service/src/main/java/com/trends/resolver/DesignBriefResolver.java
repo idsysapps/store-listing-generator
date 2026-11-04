@@ -151,6 +151,8 @@ public class DesignBriefResolver {
         brief.imageKeyRaw = null;
         brief.imageKeyTransparent = null;
         brief.regenerationFeedback = feedback;
+        brief.imageStatus = "pending";
+        brief.imageError = null;
 
         // The same design in another look is a render away, so the curation
         // can compare them side by side (issue #228).
@@ -207,6 +209,8 @@ public class DesignBriefResolver {
         summary.setFontColor(brief.fontColor);
         summary.setSceneDescription(brief.sceneDescription);
         summary.setListingDescription(brief.listingDescription);
+        summary.setImageStatus(brief.imageStatus);
+        summary.setImageError(brief.imageError);
         summary.setVoice(brief.voice);
         summary.setStylePreset(brief.stylePreset);
         summary.setFontFamily(brief.fontFamily);

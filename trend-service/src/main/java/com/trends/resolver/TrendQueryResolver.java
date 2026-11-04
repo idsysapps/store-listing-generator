@@ -189,6 +189,8 @@ public class TrendQueryResolver {
         summary.setImageUrl(imageStorageConfig.buildUrl(brief.imageKeyRaw));
         summary.setImageTransparentUrl(imageStorageConfig.buildUrl(brief.imageKeyTransparent));
         summary.setListingDescription(brief.listingDescription);
+        summary.setImageStatus(brief.imageStatus);
+        summary.setImageError(brief.imageError);
         summary.setRecommendedMaterials(
                 materialRecommendationReader.read(brief.recommendedMaterials));
         summary.setPricing(pricingReader.read(brief.pricing));

@@ -73,6 +73,12 @@ public class DesignBrief extends PanacheEntityBase {
     @Column(name = "listing_description", columnDefinition = "TEXT")
     public String listingDescription;
 
+    @Column(name = "image_status", length = 30)
+    public String imageStatus;
+
+    @Column(name = "image_error", columnDefinition = "TEXT")
+    public String imageError;
+
     // The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
     @Column(name = "voice", length = 20)
     public String voice;

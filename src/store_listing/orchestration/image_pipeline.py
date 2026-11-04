@@ -537,6 +537,24 @@ def _generate_model_text_brief(
     return False, last_error
 
 
+def _needs_attention(
+    db_client: Any,
+    brief_id: int,
+    message: str,
+) -> tuple[bool, str]:
+    """Stop silently substituting text-only when an illustration is rejected.
+
+    The operator has to see that the render was rejected and why. Marking the
+    brief keeps it out of the automatic sweep until it is explicitly
+    regenerated (issue #299).
+    """
+    logger.warning("Brief %d needs attention: %s", brief_id, message)
+    update = getattr(db_client, "update_brief_image_status", None)
+    if callable(update):
+        update(brief_id=brief_id, status="needs_attention", error=message)
+    return False, message
+
+
 def _generate_single_brief(
     brief_row: dict[str, Any],
     *,
@@ -670,20 +688,13 @@ def _generate_single_brief(
                     )
                     retry_hint = ARTWORK_RETRY_HINT
                     continue
-                if needs_text_check:
-                    logger.warning(
-                        "Brief %d: the artwork is a product, falling back to the "
-                        "typography-only design",
-                        brief_id,
-                    )
-                    return _upload_text_only(
-                        brief_row,
-                        layout,
-                        storage=storage,
-                        db_client=db_client,
-                        text_validator=text_validator,
-                    )
-                return False, "the artwork came back as a product and cannot be printed"
+                return _needs_attention(
+                    db_client,
+                    brief_id,
+                    "The illustration came back as a product or mockup. Update the "
+                    "scene to a flat graphic with no product, mockup or product photo, "
+                    "then regenerate.",
+                )
             if artwork.verdict == "unknown":
                 logger.warning(
                     "Brief %d: the artwork could not be judged (%s), keeping the image",
@@ -714,8 +725,12 @@ def _generate_single_brief(
                             "at all: no letters, no numbers, no signage and no labels."
                         )
                         continue
-                    return False, (
-                        "the no-text design came back with lettering in it and cannot be printed"
+                    return _needs_attention(
+                        db_client,
+                        brief_id,
+                        "The no-text illustration came back with lettering. Rewrite the "
+                        "scene without signs, labels, badges or other readable objects, "
+                        "then regenerate.",
                     )
             else:
                 lettering = artwork_text_validator.validate(result.raw_bytes or result.image_bytes)
@@ -733,20 +748,13 @@ def _generate_single_brief(
                                 "billboard or label may have writing."
                             )
                         continue
-                    if needs_text_check:
-                        logger.warning(
-                            "Brief %d: the artwork carries lettering, falling back to the "
-                            "typography-only design",
-                            brief_id,
-                        )
-                        return _upload_text_only(
-                            brief_row,
-                            layout,
-                            storage=storage,
-                            db_client=db_client,
-                            text_validator=text_validator,
-                        )
-                    return False, "the artwork came back with lettering in it and cannot be printed"
+                    return _needs_attention(
+                        db_client,
+                        brief_id,
+                        "The illustration came back with lettering. Rewrite the scene "
+                        "without signs, labels, badges or other readable objects, then "
+                        "regenerate.",
+                    )
                 if lettering.verdict == "unknown":
                     logger.warning(
                         "Brief %d: the lettering could not be judged (%s), keeping the image",

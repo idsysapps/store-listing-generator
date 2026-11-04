@@ -160,6 +160,22 @@ class DesignBriefResolverTest {
     }
 
     @Test
+    void testGetDesignBriefs_ReturnsTheImageAttentionState() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Coffee Shirt", "dtf_apparel");
+        brief.imageStatus = "needs_attention";
+        brief.imageError = "The illustration came back as a product.";
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = queryBriefs(null, null, 10);
+
+        assertEquals("needs_attention", result.getItems().get(0).getImageStatus());
+        assertEquals("The illustration came back as a product.",
+                result.getItems().get(0).getImageError());
+    }
+
+    @Test
     void testGetDesignBriefs_WithoutRecommendedMaterialsReturnsAnEmptyList()
             throws GraphQLException {
         DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
@@ -356,6 +372,8 @@ class DesignBriefResolverTest {
         DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
         brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
         brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
+        brief.imageStatus = "needs_attention";
+        brief.imageError = "The illustration came back as a product.";
 
         when(designBriefRepository.findById(1L)).thenReturn(brief);
 
@@ -365,6 +383,8 @@ class DesignBriefResolverTest {
         assertNotNull(result);
         assertNull(brief.imageKeyRaw);
         assertNull(brief.imageKeyTransparent);
+        assertEquals("pending", brief.imageStatus);
+        assertNull(brief.imageError);
         assertEquals("Make the skeleton more cartoonish, use brighter colors",
                 brief.regenerationFeedback);
         verify(designBriefRepository).persist(brief);

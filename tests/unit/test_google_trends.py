@@ -271,6 +271,49 @@ class TestDatabaseClient:
         assert materials[0]["product_type"] == ["substrate", "dtf_apparel"]
         assert materials[0]["attributes"] == {"print_width_in": 12.0, "print_height_in": 16.0}
 
+    def test_list_briefs_without_images_skips_needs_attention(self) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            DatabaseClient().list_briefs_without_images(product_types=["dtf_apparel"])
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "needs_attention" in sql
+
+    def test_update_brief_image_keys_marks_the_image_complete(self) -> None:
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            DatabaseClient().update_brief_image_keys(42, "raw.png", "transparent.png")
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "image_status = 'complete'" in sql
+        assert "image_error = NULL" in sql
+
+    def test_update_brief_image_status_stores_the_reason(self) -> None:
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            DatabaseClient().update_brief_image_status(
+                42, "needs_attention", "The illustration came back as a product."
+            )
+
+        assert mock_cursor.execute.call_args[0][1] == (
+            "needs_attention",
+            "The illustration came back as a product.",
+            42,
+        )
+
     def test_get_app_setting_returns_the_stored_value(self) -> None:
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = ("dtf_apparel",)

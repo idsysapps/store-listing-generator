@@ -26,6 +26,8 @@ public class DesignBriefSummary {
     private String fontColor;
     private String sceneDescription;
     private String listingDescription;
+    private String imageStatus;
+    private String imageError;
     private String voice;
     private String stylePreset;
     private String fontFamily;
@@ -123,6 +125,12 @@ public class DesignBriefSummary {
     public void setListingDescription(String listingDescription) {
         this.listingDescription = listingDescription;
     }
+
+    public String getImageStatus() { return imageStatus; }
+    public void setImageStatus(String imageStatus) { this.imageStatus = imageStatus; }
+
+    public String getImageError() { return imageError; }
+    public void setImageError(String imageError) { this.imageError = imageError; }
 
     public String getVoice() { return voice; }
     public void setVoice(String voice) { this.voice = voice; }
