@@ -20,6 +20,7 @@ from store_listing.orchestration.design_briefs import (
     generate_design_briefs,
     parse_brief_response,
     read_brief_response,
+    screen_scene,
 )
 from store_listing.orchestration.idea_devices import DEVICE_IDS
 from store_listing.orchestration.typography import family_for_voice
@@ -1596,7 +1597,7 @@ class TestGenerateDesignBriefs:
                             "source_seed_ids": [1],
                             "copy_mode": "no_text",
                             "layout_type": "full_bleed",
-                            "scene_description": "a steaming coffee mug",
+                            "scene_description": "a steaming coffee cup",
                             "recommended_materials": [
                                 {
                                     "external_id": "bc3001-white",
@@ -1666,7 +1667,7 @@ class TestGenerateDesignBriefs:
                         "source_seed_ids": [1],
                         "copy_mode": "no_text",
                         "layout_type": "full_bleed",
-                        "scene_description": "a steaming coffee mug",
+                        "scene_description": "a steaming coffee cup",
                         "recommended_materials": [
                             {
                                 "external_id": "bc3001-white",
@@ -1718,7 +1719,7 @@ class TestGenerateDesignBriefs:
                         "source_seed_ids": [1],
                         "copy_mode": "no_text",
                         "layout_type": "full_bleed",
-                        "scene_description": "a steaming mug beside a notebook",
+                        "scene_description": "a steaming cup beside a notebook",
                         "recommended_materials": [
                             {
                                 "external_id": "bc3001-white",
@@ -1770,7 +1771,7 @@ class TestGenerateDesignBriefs:
                             "source_seed_ids": [1],
                             "copy_mode": "no_text",
                             "layout_type": "full_bleed",
-                            "scene_description": "a steaming mug beside a notebook",
+                            "scene_description": "a steaming cup beside a notebook",
                             "recommended_materials": [
                                 {
                                     "external_id": "bc3001-white",
@@ -1803,6 +1804,58 @@ class TestGenerateDesignBriefs:
         description = db.insert_design_brief.call_args.kwargs["listing_description"]
         assert description.startswith("A white t-shirt")
         assert llm.with_raw_response.create.call_count == 2
+
+
+class TestSceneGuard:
+    def test_a_product_scene_is_rejected(self) -> None:
+        reason = screen_scene("a tote bag full of coffee beans")
+
+        assert reason is not None
+        assert "tote" in reason or "product" in reason
+
+    def test_a_flat_graphic_is_allowed(self) -> None:
+        assert screen_scene("scattered roasted coffee beans in a flat graphic") is None
+
+    def test_a_negated_product_is_allowed(self) -> None:
+        assert screen_scene("steam curling into a cross, no cup, no product, no words") is None
+
+    def test_a_product_scene_drops_the_brief(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Coffee Tote",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [],
+                        "scene_description": "a tote bag full of coffee beans",
+                    }
+                ]
+            }
+        )
+
+        briefs, _ = read_brief_response(response)
+
+        assert briefs == []
+
+    def test_a_flat_graphic_scene_keeps_the_brief(self) -> None:
+        response = json.dumps(
+            {
+                "briefs": [
+                    {
+                        "concept": "Coffee Beans",
+                        "product_type": "dtf_apparel",
+                        "confidence": 80,
+                        "source_seed_ids": [],
+                        "scene_description": "scattered roasted coffee beans in a flat graphic",
+                    }
+                ]
+            }
+        )
+
+        briefs, _ = read_brief_response(response)
+
+        assert len(briefs) == 1
 
 
 class TestBuildBriefPromptWithMaterials:

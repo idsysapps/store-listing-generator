@@ -15,7 +15,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from store_listing.orchestration.art_direction import family_for, preset_for
 from store_listing.orchestration.brief_mix import (
@@ -367,6 +367,80 @@ def _concept_key(concept: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", concept.lower()).split())
 
 
+# A scene that names the product is a product mockup, not print artwork. The
+# brief prompt already forbids these; the model occasionally ignores it, and a
+# render of a mug is then rejected by the artwork gate (issue #299).
+_PRODUCT_CONTEXT_PHRASES: Final[tuple[str, ...]] = (
+    "mockup",
+    "mock-up",
+    "product photo",
+    "product shot",
+    "product image",
+    "product mockup",
+    "on a t-shirt",
+    "on a shirt",
+    "on a hoodie",
+    "on a sweatshirt",
+    "on a tote",
+    "on a mug",
+    "on a tumbler",
+    "on a phone case",
+    "on a pillow",
+    "on a blanket",
+    "on a sticker sheet",
+    "person wearing",
+    "model wearing",
+    "wearing a",
+    "on a hanger",
+    "flat lay",
+)
+_PRODUCT_NOUNS: Final[tuple[str, ...]] = (
+    "mug",
+    "t-shirt",
+    "shirt",
+    "tee",
+    "hoodie",
+    "sweatshirt",
+    "tank top",
+    "tote",
+    "tote bag",
+    "onesie",
+    "tumbler",
+    "phone case",
+    "pillow",
+    "blanket",
+    "sticker sheet",
+)
+_NEGATION = re.compile(r"\b(?:no|without|not)\s+$", re.IGNORECASE)
+
+
+def _positive_mention(text: str, phrase: str) -> bool:
+    """Whether the phrase occurs somewhere that is not negated.
+
+    A scene says "no mug" in a repair instruction; that is not a product scene.
+    """
+    for match in re.finditer(rf"\b{re.escape(phrase)}\b", text):
+        prefix = text[max(0, match.start() - 16) : match.start()]
+        if _NEGATION.search(prefix):
+            continue
+        return True
+    return False
+
+
+def screen_scene(scene: str | None) -> str | None:
+    """Why a scene looks like a product mockup, or None when it is artwork."""
+    if not scene:
+        return None
+    text = scene.lower()
+    for phrase in _PRODUCT_CONTEXT_PHRASES:
+        if _positive_mention(text, phrase):
+            return f"the scene describes a product context: '{phrase}'"
+    for noun in _PRODUCT_NOUNS:
+        if _positive_mention(text, noun):
+            return f"the scene names the product '{noun}'"
+    return None
+
+
 def _drop_repeated_concepts(
     briefs: Sequence[DesignBrief],
     recent_concepts: Sequence[str],
@@ -625,6 +699,12 @@ def _brief_from(
         scene_description = strip_lettering(scene_description) or None
         if scene_description is None:
             logger.warning("Skipping brief %r: the scene description is only words", concept)
+            return None
+        scene_reason = screen_scene(scene_description)
+        if scene_reason is not None:
+            logger.warning("Skipping brief %r: %s", concept, scene_reason)
+            if rejections is not None:
+                rejections.append(f"{scene_reason} (scene: {scene_description!r})")
             return None
 
     if layout_type == "text_only":

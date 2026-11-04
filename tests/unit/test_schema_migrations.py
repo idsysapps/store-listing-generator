@@ -112,6 +112,17 @@ class TestListingDescriptionMigration:
         assert "ADD COLUMN IF NOT EXISTS listing_description TEXT" in _migration_sql()
 
 
+class TestImageAttentionMigration:
+    def test_the_fresh_schema_carries_the_image_status(self) -> None:
+        schema = FRESH_SCHEMA.read_text()
+        assert "image_status VARCHAR(30)" in schema
+        assert "image_error TEXT" in schema
+
+    def test_the_configured_schema_carries_the_image_status(self) -> None:
+        assert "image_status VARCHAR(30)" in _schema_sql()
+        assert "ADD COLUMN IF NOT EXISTS image_status VARCHAR(30)" in _migration_sql()
+
+
 class TestAppWaitsForTheSchema:
     def test_the_app_waits_for_the_schema_before_it_starts(self) -> None:
         deployment = APP_DEPLOYMENT.read_text()

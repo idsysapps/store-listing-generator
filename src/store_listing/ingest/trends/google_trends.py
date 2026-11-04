@@ -645,6 +645,7 @@ class DatabaseClient:
                            copy_mode, kicker_text
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
+                      AND (image_status IS NULL OR image_status <> 'needs_attention')
                       AND product_type = ANY(%s)
                     ORDER BY created_at DESC
                     LIMIT %s
@@ -661,6 +662,7 @@ class DatabaseClient:
                            copy_mode, kicker_text
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
+                      AND (image_status IS NULL OR image_status <> 'needs_attention')
                     ORDER BY created_at DESC
                     LIMIT %s
                     """,
@@ -942,10 +944,29 @@ class DatabaseClient:
             cur.execute(
                 """
                 UPDATE design_briefs
-                SET image_key_raw = %s, image_key_transparent = %s
+                SET image_key_raw = %s,
+                    image_key_transparent = %s,
+                    image_status = 'complete',
+                    image_error = NULL
                 WHERE id = %s
                 """,
                 (image_key_raw, image_key_transparent, brief_id),
+            )
+
+    def update_brief_image_status(
+        self,
+        brief_id: int,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE design_briefs
+                SET image_status = %s, image_error = %s
+                WHERE id = %s
+                """,
+                (status, error, brief_id),
             )
 
 

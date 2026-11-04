@@ -50,9 +50,13 @@ NO_LETTERING = "nolettering"
 
 ARTWORK_CLASSIFICATION_PROMPT = (
     "Look at this image. Is it a flat print graphic - a design that could be printed "
-    "on a product - or is it a product itself (a bag, a tote bag, a pouch, a shirt, a "
-    "hoodie, a mug, a tumbler, a phone case, a pillow, a blanket, a sticker sheet, or a "
-    "photo of a printed item)? Answer with exactly one word: ARTWORK or PRODUCT."
+    "on a product - or is it a product itself or a photo/mockup of a product (a bag, "
+    "a tote bag, a pouch, a shirt, a hoodie, a mug, a tumbler, a phone case, a pillow, "
+    "a blanket, a sticker sheet, or a photo of a printed item)? A flat print "
+    "illustration that depicts an object, such as a coffee cup, is still ARTWORK. "
+    "It is PRODUCT only when the image is a product photo or mockup with the object "
+    "as the product, or a photo of a printed item. Answer with exactly one word: "
+    "ARTWORK or PRODUCT."
 )
 
 ARTWORK_TEXT_PROMPT = (

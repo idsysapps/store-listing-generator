@@ -747,7 +747,7 @@ class TestArtworkLetteringGate:
         second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"]
         assert "no lettering" in second_prompt.lower()
 
-    def test_artwork_with_lettering_falls_back_to_the_typography_only_design(self) -> None:
+    def test_rejected_lettering_marks_the_brief_for_attention(self) -> None:
         db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
         s3 = MagicMock()
 
@@ -759,8 +759,13 @@ class TestArtworkLetteringGate:
             artwork_text_validator=_artwork_text_validator(True, True, True),
         )
 
-        assert result["images_generated"] == 1
-        s3.put_object.assert_called()
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        s3.put_object.assert_not_called()
+        db.update_brief_image_status.assert_called_once()
+        call = db.update_brief_image_status.call_args.kwargs
+        assert call["status"] == "needs_attention"
+        assert "lettering" in (call["error"] or "").lower()
 
     def test_the_gate_is_not_run_for_a_typography_only_design(self) -> None:
         db = _mock_db_client(
@@ -932,6 +937,8 @@ class TestNoTextDesigns:
         comfy.generate_image.assert_called()
         text_validator.validate.assert_not_called()
         s3.put_object.assert_not_called()
+        db.update_brief_image_status.assert_called_once()
+        assert db.update_brief_image_status.call_args.kwargs["status"] == "needs_attention"
 
     def test_a_dtf_no_text_design_uploads_the_keyed_artwork(self) -> None:
         db = _mock_db_client(briefs=[self._no_text_brief(product_type="dtf_apparel")])
@@ -1037,10 +1044,13 @@ class TestBrief100Regression:
             artwork_text_validator=_artwork_text_validator(True, True, True),
         )
 
-        # The artwork with the misspelled bubble is never uploaded. The design
-        # falls back to the typography-only version, whose text is exact.
-        assert result["images_generated"] == 1
-        s3.put_object.assert_called()
+        # The artwork with the misspelled bubble is never uploaded, and the
+        # brief is marked for attention instead of silently shipping text-only.
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        s3.put_object.assert_not_called()
+        db.update_brief_image_status.assert_called_once()
+        assert db.update_brief_image_status.call_args.kwargs["status"] == "needs_attention"
 
 
 class TestArtworkGate:
@@ -1091,8 +1101,10 @@ class TestArtworkGate:
         assert result["images_generated"] == 0
         assert result["errors"] == 1
         s3.put_object.assert_not_called()
+        db.update_brief_image_status.assert_called_once()
+        assert db.update_brief_image_status.call_args.kwargs["status"] == "needs_attention"
 
-    def test_a_product_artwork_falls_back_to_the_typography_only_design(self) -> None:
+    def test_a_product_artwork_marks_the_brief_for_attention(self) -> None:
         db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
         comfyui = _comfyui_client()
         s3 = MagicMock()
@@ -1105,8 +1117,13 @@ class TestArtworkGate:
             artwork_validator=_artwork_validator("product", "product", "product"),
         )
 
-        assert result["images_generated"] == 1
-        s3.put_object.assert_called()
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        s3.put_object.assert_not_called()
+        db.update_brief_image_status.assert_called_once()
+        call = db.update_brief_image_status.call_args.kwargs
+        assert call["status"] == "needs_attention"
+        assert "product" in (call["error"] or "").lower()
 
     def test_an_unknown_verdict_keeps_the_image(self) -> None:
         db = _mock_db_client(briefs=[_brief()])

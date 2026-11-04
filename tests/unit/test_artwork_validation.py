@@ -128,6 +128,18 @@ class TestArtworkValidator:
         assert "ARTWORK" in text
         assert "PRODUCT" in text
 
+    def test_the_prompt_distinguishes_a_flat_depiction_from_a_product(self) -> None:
+        client = _client("ARTWORK")
+        validator = ArtworkValidator(client=client, model="vl")
+
+        validator.validate(_image_bytes())
+
+        call_kwargs = client.chat.completions.create.call_args.kwargs
+        text = call_kwargs["messages"][0]["content"][0]["text"].lower()
+        assert "flat print illustration" in text
+        assert "coffee cup" in text
+        assert "product photo" in text
+
 
 class TestParseTextVerdict:
     def test_text_is_recognised(self) -> None:
