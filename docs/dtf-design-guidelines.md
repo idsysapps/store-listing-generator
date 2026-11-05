@@ -45,6 +45,11 @@ needs.
   canvas). Coverage above 65% logs a warning: the design may print as a large
   solid area. This is a warning, not a rejection; a large subject can be
   intentional.
+- `TEXT_EMBED_PROFILE` turns on DTF-safe text embedding for planned carriers:
+  `off` is the default, `v11`/`v12` are the standard wear levels, and `v13`
+  is the heavy distressed level. The font still owns spelling. Glyph pixels
+  stay at 100% opacity; texture is applied to the shading layer, and distress
+  is a binary knockout, never a semi-transparent letter.
 
 ## Garment material and colour
 

@@ -110,6 +110,7 @@ CARRIER_SURFACES: Final[dict[str, str]] = {
     "none": "paper",
 }
 SURFACE_WORDS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
+    ("red", ("red", "crimson", "maroon", "ruby")),
     ("kraft", ("kraft",)),
     ("chalkboard", ("chalkboard", "chalk board")),
     ("metal", ("metal", "tin", "steel", "aluminium", "aluminum")),
@@ -160,6 +161,7 @@ SURFACES: Final[tuple[str, ...]] = (
     "stone",
     "fabric",
     "glass",
+    "red",
     "none",
 )
 

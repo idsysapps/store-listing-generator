@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import random
+from dataclasses import replace
 from io import BytesIO
 from typing import Any
 
@@ -69,6 +70,7 @@ from store_listing.orchestration.text_compositor import (
     blank_canvas,
     composite_text,
 )
+from store_listing.orchestration.text_embed import profile_for
 from store_listing.orchestration.text_integration import text_plan_from_value
 from store_listing.orchestration.text_validation import StrictTextValidator, TextValidator
 from store_listing.orchestration.textures import apply_texture, despeckle_image
@@ -118,6 +120,12 @@ def _max_lettering_retries() -> int:
     except ValueError:
         logger.warning("Invalid MAX_LETTERING_REGENERATION_ATTEMPTS=%r, using the default", raw)
         return DEFAULT_MAX_LETTERING_RETRIES
+
+
+def _text_embed_profile() -> str | None:
+    """The DTF text embedding profile, or None when the feature is off."""
+    profile = profile_for(os.environ.get("TEXT_EMBED_PROFILE"))
+    return profile.name if profile is not None else None
 
 
 def _recommended_materials(brief_row: dict[str, Any]) -> list[dict[str, Any]] | None:
@@ -620,6 +628,7 @@ def _generate_single_brief(
         tagline_font_family=tagline_family_for(preset, brief.voice) if preset else None,
         voice=brief.voice,
         text_plan=brief.text_plan,
+        text_embed_profile=_text_embed_profile(),
     )
     needs_text_check = layout.needs_text
     max_retries = _max_text_retries()
@@ -767,12 +776,21 @@ def _generate_single_brief(
         # no-text design has no compositor pass at all.
         artwork = _textured(result, brief, is_dtf)
         raw_bytes = composite_text(artwork, layout) if needs_text_check else artwork
+        # The distressed embed is intentionally hard for OCR to read. Validate
+        # the same lockup without the wear, while keeping the embedded render
+        # for the uploaded asset. The font, not the model, still owns spelling.
+        validation_bytes = raw_bytes
+        if needs_text_check and layout.text_embed_profile:
+            validation_bytes = composite_text(
+                artwork,
+                replace(layout, text_embed_profile=None),
+            )
 
         if text_validator is None or not needs_text_check:
             break
 
         verdict = text_validator.validate(
-            raw_bytes,
+            validation_bytes,
             headline=layout.headline_text,
             tagline=layout.tagline_text,
         )

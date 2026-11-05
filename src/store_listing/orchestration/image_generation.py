@@ -88,6 +88,7 @@ SURFACE_PROMPTS: dict[str, str] = {
     "stone": "a large flat pale grey stone surface",
     "fabric": "a large flat cream fabric surface",
     "glass": "a large flat pale blue glass surface",
+    "red": "a large flat deep red printed surface",
     "none": "",
 }
 
