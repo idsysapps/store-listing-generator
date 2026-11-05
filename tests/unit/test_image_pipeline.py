@@ -1933,6 +1933,23 @@ class TestCandidateSelection:
         assert blue > red
         assert blue > green
 
+    def test_candidate_selection_is_dtf_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("IMAGE_CANDIDATE_COUNT", "2")
+        row = self._row()
+        row["product_type"] = "sublimation"
+        db = _mock_db_client(briefs=[row])
+        comfy = _comfyui_client()
+        comfy.generate_image.return_value = ComfyUIResult(image_bytes=_real_png())
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+        )
+
+        comfy.generate_image.assert_called_once()
+
     def test_candidate_selection_is_skipped_without_a_scene(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

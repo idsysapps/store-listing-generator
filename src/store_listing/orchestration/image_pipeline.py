@@ -997,7 +997,7 @@ def _generate_best_candidate(
     template = resolve_template(
         brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
     )
-    count = _image_candidate_count()
+    count = _image_candidate_count() if brief_row.get("product_type") == "dtf_apparel" else 1
     model_text_path = (
         brief.copy_mode != NO_TEXT
         and model_text_enabled()
