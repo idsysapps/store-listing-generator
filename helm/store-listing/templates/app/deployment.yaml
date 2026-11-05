@@ -311,6 +311,8 @@ spec:
               value: {{ .Values.config.artworkTextValidationEnabled | default "true" | quote }}
             - name: MAX_LETTERING_REGENERATION_ATTEMPTS
               value: {{ .Values.config.maxLetteringRegenerationAttempts | default "1" | quote }}
+            - name: TEXT_EMBED_PROFILE
+              value: {{ .Values.config.textEmbedProfile | default "off" | quote }}
             - name: REQUIRE_TAGLINE_TEXT
               value: {{ .Values.config.requireTaglineText | default "false" | quote }}
             - name: DESIGN_S3_BUCKET
@@ -576,6 +578,8 @@ spec:
               value: {{ .Values.config.artworkTextValidationEnabled | default "true" | quote }}
             - name: MAX_LETTERING_REGENERATION_ATTEMPTS
               value: {{ .Values.config.maxLetteringRegenerationAttempts | default "1" | quote }}
+            - name: TEXT_EMBED_PROFILE
+              value: {{ .Values.config.textEmbedProfile | default "off" | quote }}
             - name: REQUIRE_TAGLINE_TEXT
               value: {{ .Values.config.requireTaglineText | default "false" | quote }}
             - name: DESIGN_S3_BUCKET

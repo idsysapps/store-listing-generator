@@ -21,6 +21,9 @@ config:
   typographicHeroBriefIds: ""
   typographicHeroCandidates: "2"
   typographicHeroDescriptor: "1"
+  # Production keeps the deterministic compositor until the embedded result is
+  # approved; local values enable v11 for evaluation.
+  textEmbedProfile: "off"
 
 secrets:
   databaseUser: store_listing
