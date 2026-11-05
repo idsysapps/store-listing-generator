@@ -1,6 +1,7 @@
 """Unit tests for the TikTok micro-trend harvester (Apify + free web fallback)."""
 
 import os
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from store_listing.ingest.trends.schemas import TrendHarvestRequest, TrendResult
@@ -210,6 +211,8 @@ def test_apify_gateway_maps_actor_output() -> None:
     apify_client_cls.assert_called_once_with("tok123")
     call_kwargs = apify_client_cls.return_value.actor.return_value.call.call_args.kwargs
     assert call_kwargs["run_input"]["hashtags"] == ["pickleball"]
+    assert call_kwargs["max_items"] == 100
+    assert call_kwargs["max_total_charge_usd"] == Decimal("0.50")
     actor_id = apify_client_cls.return_value.actor.call_args.args[0]
     assert actor_id == "clockworks~tiktok-hashtag-scraper"
 
@@ -225,7 +228,7 @@ def test_apify_gateway_caps_results_per_page_by_default(monkeypatch) -> None:
     gateway.scrape_hashtag("#pickleball")
 
     call_kwargs = apify_client_cls.return_value.actor.return_value.call.call_args.kwargs
-    assert call_kwargs["run_input"]["resultsPerPage"] == 20
+    assert call_kwargs["run_input"]["resultsPerPage"] == 100
 
 
 def test_apify_gateway_results_per_page_env_override(monkeypatch) -> None:

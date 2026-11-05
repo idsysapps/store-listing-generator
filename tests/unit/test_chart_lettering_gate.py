@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 HELM_DIR = REPO_ROOT / "helm" / "store-listing"
 VALUES_YAML = HELM_DIR / "values.yaml"
 DEPLOYMENT_YAML = HELM_DIR / "templates" / "app" / "deployment.yaml"
+BEAT_DEPLOYMENT_YAML = HELM_DIR / "templates" / "app" / "beat-deployment.yaml"
 
 # env key -> (values.yaml key, code default)
 KNOBS = {
@@ -50,6 +51,9 @@ def test_the_chart_default_matches_the_code_default() -> None:
 
 
 def test_both_containers_get_the_lettering_knobs() -> None:
-    deployment = DEPLOYMENT_YAML.read_text()
+    """The worker and the beat each get the knobs. Beat is its own deployment."""
+    worker = DEPLOYMENT_YAML.read_text()
+    beat = BEAT_DEPLOYMENT_YAML.read_text()
     for env_key in KNOBS:
-        assert deployment.count(f"- name: {env_key}") == 2
+        assert worker.count(f"- name: {env_key}") == 1
+        assert beat.count(f"- name: {env_key}") == 1

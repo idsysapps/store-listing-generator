@@ -1,6 +1,7 @@
 """Unit tests for the X (Twitter) micro-trend harvester (Apify + free web fallback)."""
 
 import os
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from store_listing.ingest.trends.schemas import TrendHarvestRequest, TrendResult
@@ -76,7 +77,9 @@ def test_apify_gateway_maps_actor_output() -> None:
     apify_client_cls.assert_called_once_with("tok123")
     call_kwargs = apify_client_cls.return_value.actor.return_value.call.call_args.kwargs
     assert call_kwargs["run_input"]["searchTerms"] == ["mom humor"]
-    assert call_kwargs["run_input"]["maxItems"] == 30
+    assert call_kwargs["run_input"]["maxItems"] == 100
+    assert call_kwargs["max_items"] == 100
+    assert call_kwargs["max_total_charge_usd"] == Decimal("0.50")
     actor_id = apify_client_cls.return_value.actor.call_args.args[0]
     assert actor_id == "xquik~x-tweet-scraper"
 

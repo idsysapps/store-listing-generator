@@ -63,6 +63,7 @@ redis:
 
 app:
   replicas: 2
+  beatReplicas: 1
   resources:
     limits:
       cpu: 500m
