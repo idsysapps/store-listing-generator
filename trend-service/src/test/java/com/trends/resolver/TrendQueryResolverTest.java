@@ -1,11 +1,13 @@
 package com.trends.resolver;
 
+import com.trends.config.GarmentPreviewColor;
 import com.trends.config.ImageStorageConfig;
 import com.trends.config.MaterialRecommendationReader;
 import com.trends.config.PricingReader;
 import com.trends.domain.DesignBrief;
 import com.trends.domain.TrendQuery;
 import com.trends.domain.TrendScore;
+import com.trends.dto.MaterialRecommendation;
 import com.trends.dto.TrendSummary;
 import com.trends.repository.DesignBriefRepository;
 import com.trends.repository.TrendQueryRepository;
@@ -40,6 +42,9 @@ class TrendQueryResolverTest {
     MaterialRecommendationReader materialRecommendationReader;
 
     @Mock
+    GarmentPreviewColor garmentPreviewColor;
+
+    @Mock
     PricingReader pricingReader;
 
     @Mock
@@ -54,6 +59,7 @@ class TrendQueryResolverTest {
         when(designBriefRepository.findBySeedKeyword(anyString())).thenReturn(List.of());
         when(securityIdentity.isAnonymous()).thenReturn(false);
         when(materialRecommendationReader.read(any())).thenReturn(List.of());
+        when(garmentPreviewColor.forMaterials(any())).thenReturn(null);
     }
 
     @Test
@@ -161,6 +167,33 @@ class TrendQueryResolverTest {
 
         assertEquals("hoodie", result.getSeedKeyword());
         assertNotNull(result.getDesignBriefs());
+    }
+
+    @Test
+    void testGetTrendSummary_ReturnsTheBriefPreviewBackgroundColour() throws GraphQLException {
+        TrendQuery trendQuery = new TrendQuery("hoodie", "funny hoodie");
+        trendQuery.id = 1;
+
+        TrendScore score = new TrendScore(trendQuery, 75L, 10L, "US", "youtube");
+        DesignBrief brief = new DesignBrief();
+        brief.id = 1;
+        brief.concept = "Cool Hoodie Design";
+        brief.productType = "dtf_apparel";
+        brief.confidence = 80;
+        brief.recommendedMaterials = "[{\"external_id\":\"shirt-dark-heather-m\",\"color\":\"Dark Heather\"}]";
+        MaterialRecommendation recommendation =
+                new MaterialRecommendation("shirt-dark-heather-m", "Core Adult", "Dark Heather", "t-shirt", 2.39);
+
+        when(trendQueryRepository.findByQuery("funny hoodie")).thenReturn(trendQuery);
+        when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(score));
+        when(designBriefRepository.findBySeedKeyword("hoodie")).thenReturn(List.of(brief));
+        when(materialRecommendationReader.read(brief.recommendedMaterials))
+                .thenReturn(List.of(recommendation));
+        when(garmentPreviewColor.forMaterials(List.of(recommendation))).thenReturn("#3A3A3A");
+
+        TrendSummary result = trendQueryResolver.getTrendSummary("funny hoodie");
+
+        assertEquals("#3A3A3A", result.getDesignBriefs().get(0).getPreviewBackgroundColor());
     }
 
     @Test

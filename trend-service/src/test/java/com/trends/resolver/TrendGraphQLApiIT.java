@@ -112,6 +112,22 @@ class TrendGraphQLApiIT {
 
     @Test
     @TestSecurity(user = "admin", roles = "admin")
+    void shouldExposeTheGarmentPreviewBackgroundColour() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"query":"query { designBriefs(productType: \\"dtf_apparel\\", limit: 1) { items { id recommendedMaterials { color } previewBackgroundColor } } }"}
+                        """)
+                .when()
+                .post("/graphql")
+                .then()
+                .statusCode(200)
+                .body("data.designBriefs.items", notNullValue())
+                .body("errors", nullValue());
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = "admin")
     void shouldExposeTheMaterialCatalogue() {
         given()
                 .contentType(ContentType.JSON)

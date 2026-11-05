@@ -1,5 +1,6 @@
 package com.trends.resolver;
 
+import com.trends.config.GarmentPreviewColor;
 import com.trends.config.ImageStorageConfig;
 import com.trends.config.MaterialRecommendationReader;
 import com.trends.config.PricingReader;
@@ -40,6 +41,9 @@ class DesignBriefResolverTest {
     MaterialRecommendationReader materialRecommendationReader;
 
     @Mock
+    GarmentPreviewColor garmentPreviewColor;
+
+    @Mock
     PricingReader pricingReader;
 
     @Mock
@@ -59,6 +63,8 @@ class DesignBriefResolverTest {
         when(securityIdentity.isAnonymous()).thenReturn(false);
         when(materialRecommendationReader.read(any()))
                 .thenReturn(List.of());
+        when(garmentPreviewColor.forMaterials(any()))
+                .thenReturn(null);
     }
 
     private DesignBrief makeBrief(int id, String concept, String productType) {
@@ -122,6 +128,26 @@ class DesignBriefResolverTest {
         assertEquals(1, materials.size());
         assertEquals("bc3001-white", materials.get(0).getExternalId());
         assertEquals("Bella Canvas 3001", materials.get(0).getName());
+    }
+
+    @Test
+    void testGetDesignBriefs_ReturnsTheGarmentPreviewBackgroundColour() throws GraphQLException {
+        // The client renders the transparent artwork on the shirt colour, so the
+        // brief has to say what that colour is (issue #303).
+        DesignBrief brief = makeBrief(1, "Dad Jokes Shirt", "dtf_apparel");
+        brief.recommendedMaterials = "[{\"external_id\":\"shirt-jet-black-m\",\"color\":\"Jet Black\"}]";
+        MaterialRecommendation recommendation =
+                new MaterialRecommendation("shirt-jet-black-m", "Core Adult", "Jet Black", "t-shirt", 2.39);
+        when(materialRecommendationReader.read(brief.recommendedMaterials))
+                .thenReturn(List.of(recommendation));
+        when(garmentPreviewColor.forMaterials(List.of(recommendation))).thenReturn("#0B0B0B");
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countAll()).thenReturn(1L);
+
+        DesignBriefConnection result = queryBriefs(null, null, 10);
+
+        assertEquals("#0B0B0B", result.getItems().get(0).getPreviewBackgroundColor());
     }
 
     @Test

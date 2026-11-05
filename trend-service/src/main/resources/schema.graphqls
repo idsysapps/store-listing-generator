@@ -83,6 +83,7 @@ type DesignBriefSummary {
   stylePreset: String
   fontFamily: String
   recommendedMaterials: [MaterialRecommendation!]!
+  previewBackgroundColor: String
   pricing: BriefPricing
   imageStatus: String
   imageError: String
