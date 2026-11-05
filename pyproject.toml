@@ -39,6 +39,7 @@ target-version = "py313"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.pyright]
 pythonVersion = "3.13"
