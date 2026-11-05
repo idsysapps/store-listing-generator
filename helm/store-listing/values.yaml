@@ -72,6 +72,9 @@ config:
   # A "painted" text plan goes to Qwen-Image so the words live in the art
   # instead of being overlaid by the compositor (issue #133).
   modelTextEnabled: "0"
+  # DTF-safe embedded type on planned carriers. Off by default; v11/v12 are
+  # standard wear and v13 is heavy distress.
+  textEmbedProfile: "off"
   visionLlmBaseUrl: ""
   visionLlmModel: "qwen_vl_ocr"
   artworkVisionModel: ""

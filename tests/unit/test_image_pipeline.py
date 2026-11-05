@@ -18,6 +18,7 @@ from store_listing.orchestration.artwork_validation import (
 from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.image_pipeline import (
     _brief_from_row,
+    _text_embed_profile,
     generate_image_for_brief,
     generate_images_for_briefs,
 )
@@ -29,6 +30,20 @@ def _real_png(width: int = 64, height: int = 64, color: str = "white") -> bytes:
     buf = BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+class TestTextEmbedProfileFlag:
+    def test_the_profile_comes_from_the_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TEXT_EMBED_PROFILE", "v13")
+        assert _text_embed_profile() == "v13"
+
+    def test_off_is_the_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("TEXT_EMBED_PROFILE", raising=False)
+        assert _text_embed_profile() is None
+
+    def test_an_unknown_profile_fails_safe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TEXT_EMBED_PROFILE", "typo")
+        assert _text_embed_profile() is None
 
 
 def _mock_db_client(briefs: list[dict[str, Any]] | None = None) -> MagicMock:

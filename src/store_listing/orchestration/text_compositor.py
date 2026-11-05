@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
@@ -34,6 +34,11 @@ from store_listing.orchestration.design_templates import (
     DesignTemplate,
     resolve_template,
     template_for,
+)
+from store_listing.orchestration.text_embed import (
+    TextEmbedProfile,
+    embed_layer,
+    profile_for,
 )
 from store_listing.orchestration.text_integration import TextPlan
 from store_listing.orchestration.typography import (
@@ -114,6 +119,9 @@ class LayoutSpec:
     # How the words live in the design. Without a plan the design keeps the
     # flat compositor treatment it had before (issue #246).
     text_plan: TextPlan | None = None
+    # Feature-flagged DTF safe embedding for a planned carrier. The text is
+    # still drawn from the font; this only textures the ink.
+    text_embed_profile: str | None = None
 
     def __post_init__(self) -> None:
         self.layout_type = resolve_template(self.layout_type, self.headline_text, self.tagline_text)
@@ -320,6 +328,7 @@ def _fit(
     max_height: int,
     family: str,
     treatment: TextTreatment,
+    max_size: int | None = None,
 ) -> tuple[ImageFont.FreeTypeFont, list[str]]:
     """Find the biggest font size at which the text fits the zone.
 
@@ -328,7 +337,7 @@ def _fit(
     typo to the buyer and to the text gate.
     """
     words = text.split()
-    size = max(MIN_FONT_SIZE, max_height)
+    size = max(MIN_FONT_SIZE, max_height if max_size is None else min(max_height, max_size))
     while size >= MIN_FONT_SIZE:
         font = _font(size, family)
         tracking = treatment.tracking * size
@@ -450,6 +459,8 @@ def _draw_text(
     bar: str | None = None,
     align: str = "center",
     force_outline: bool = False,
+    zone_padding: float = ZONE_PADDING,
+    max_font_size: int | None = None,
 ) -> None:
     """Draw the text centred (or left-aligned) in the given box.
 
@@ -474,7 +485,16 @@ def _draw_text(
     # The text on a band keeps a margin inside it, so it does not touch the
     # edge of the band.
     fit_width = int(width * (1 - BAND_INSET)) if bar is not None else width
-    font, lines = _fit(draw, text, fit_width, int(height * (1 - ZONE_PADDING)), family, treatment)
+    fit_height = int(height * (1 - zone_padding))
+    font, lines = _fit(
+        draw,
+        text,
+        fit_width,
+        fit_height,
+        family,
+        treatment,
+        max_size=max_font_size,
+    )
 
     if bar is not None:
         color = _contrast_colour(bar)
@@ -754,6 +774,7 @@ SURFACE_COLOURS: dict[str, tuple[tuple[int, int, int], ...]] = {
     "stone": ((140, 140, 135), (110, 110, 105), (170, 170, 165), (90, 90, 85)),
     "fabric": ((201, 181, 155), (150, 130, 110), (220, 205, 185), (245, 240, 230)),
     "glass": ((190, 214, 220), (150, 180, 190), (220, 235, 240)),
+    "red": ((196, 18, 48), (211, 23, 69), (139, 0, 36), (180, 30, 50)),
     "none": ((246, 241, 232),),
 }
 
@@ -814,6 +835,7 @@ def _composite_planned(
             tagline_box = _box(template.tagline, width, height)
 
     surface_colour: tuple[int, int, int] | None = None
+    detected: tuple[int, int, int, int] | None = None
     method = plan.method
     if plan.needs_carrier:
         # The planner named the region; that is where the carrier is. The
@@ -836,18 +858,35 @@ def _composite_planned(
             method = plan.non_carrier_method or plan.method
         surface_colour = _mean_colour(image, carrier) or _surface_colour(plan.surface)
         if layout.headline_text and layout.tagline_text:
-            headline_box = (
-                carrier[0],
-                carrier[1] + int(carrier[3] * 0.06),
-                carrier[2],
-                int(carrier[3] * 0.58),
-            )
-            tagline_box = (
-                carrier[0],
-                carrier[1] + int(carrier[3] * 0.68),
-                carrier[2],
-                int(carrier[3] * 0.24),
-            )
+            if layout.text_embed_profile:
+                # The embedded band reads better with a larger headline and a
+                # compact tagline; the normal carrier split leaves too much
+                # empty ribbon around a single-line lockup.
+                headline_box = (
+                    carrier[0],
+                    carrier[1] + int(carrier[3] * 0.04),
+                    carrier[2],
+                    int(carrier[3] * 0.68),
+                )
+                tagline_box = (
+                    carrier[0],
+                    carrier[1] + int(carrier[3] * 0.75),
+                    carrier[2],
+                    int(carrier[3] * 0.21),
+                )
+            else:
+                headline_box = (
+                    carrier[0],
+                    carrier[1] + int(carrier[3] * 0.06),
+                    carrier[2],
+                    int(carrier[3] * 0.58),
+                )
+                tagline_box = (
+                    carrier[0],
+                    carrier[1] + int(carrier[3] * 0.68),
+                    carrier[2],
+                    int(carrier[3] * 0.24),
+                )
         elif layout.headline_text:
             headline_box = carrier
         elif layout.tagline_text:
@@ -858,6 +897,26 @@ def _composite_planned(
             surface_colour = _mean_colour(image, sample)
 
     ink = _resolve_ink(plan, layout.font_color, surface_colour)
+
+    # DTF safe embedding is only valid when the carrier was actually found.
+    # If it was not, the existing clean fallback keeps the words.
+    embed_profile = profile_for(layout.text_embed_profile)
+    if embed_profile is not None and plan.needs_carrier and detected is not None:
+        embedded = _composite_embedded(
+            image,
+            headline_text=layout.headline_text,
+            tagline_text=layout.tagline_text,
+            headline_box=headline_box,
+            tagline_box=tagline_box,
+            ink=ink,
+            headline_family=layout.family,
+            tagline_family=layout.tagline_family,
+            treatment=layout.treatment,
+            profile=embed_profile,
+        )
+        if embedded is not None:
+            return embedded
+
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
@@ -898,6 +957,165 @@ def _composite_planned(
 
     overlay = apply_material(overlay, method, ink, surface_colour)
     return _composite(image, overlay)
+
+
+def _composite_embedded(
+    image: Image.Image,
+    *,
+    headline_text: str | None,
+    tagline_text: str | None,
+    headline_box: tuple[int, int, int, int] | None,
+    tagline_box: tuple[int, int, int, int] | None,
+    ink: str,
+    headline_family: str,
+    tagline_family: str,
+    treatment: TextTreatment,
+    profile: TextEmbedProfile,
+) -> bytes | None:
+    """Draw the lockup, texture it, and paste only the inked pixels back.
+
+    The crop is supersampled so the grain and the displacement have room to
+    work. Only the processed text alpha is used for the paste, which keeps the
+    carrier edge, the artwork and every non-text pixel untouched.
+    """
+    boxes = [box for box in (headline_box, tagline_box) if box is not None]
+    if not boxes:
+        return None
+
+    left = min(box[0] for box in boxes)
+    top = min(box[1] for box in boxes)
+    right = max(box[0] + box[2] for box in boxes)
+    bottom = max(box[1] + box[3] for box in boxes)
+    carrier_width = right - left
+    carrier_height = bottom - top
+    # The normal carrier split is tuned for two-line lockups. The embedded
+    # pass wants one large headline and a small tagline; otherwise the fit
+    # leaves most of the ribbon empty.
+    if tagline_text and tagline_box is not None:
+        headline_target = (
+            left,
+            top + int(carrier_height * 0.02),
+            carrier_width,
+            int(carrier_height * 0.76),
+        )
+        tagline_target = (
+            left,
+            top + int(carrier_height * 0.77),
+            carrier_width,
+            int(carrier_height * 0.22),
+        )
+    else:
+        headline_target = (left, top, carrier_width, carrier_height)
+        tagline_target = None
+    pad = max(4, int(max(right - left, bottom - top) * 0.12))
+    crop_box = _clamp_box(
+        (left - pad, top - pad, right - left + pad * 2, bottom - top + pad * 2),
+        image.width,
+        image.height,
+    )
+    crop = _crop(image, crop_box)
+    scale = max(1, profile.scale)
+    work_size = (crop.width * scale, crop.height * scale)
+    work = crop.resize(work_size, Image.Resampling.LANCZOS)
+
+    flat = TextTreatment(
+        uppercase=treatment.uppercase,
+        tracking=treatment.tracking,
+        style="flat",
+        accent_word=treatment.accent_word,
+        accent_color=treatment.accent_color,
+    )
+    layers: list[Image.Image] = []
+    if headline_text and headline_target is not None:
+        headline_layer = Image.new("RGBA", work_size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(headline_layer)
+        _draw_text(
+            draw,
+            headline_text,
+            color=ink,
+            box=_local_box(headline_target, crop_box, scale),
+            family=headline_family,
+            treatment=flat,
+            align="center",
+            force_outline=False,
+            zone_padding=0.04,
+            max_font_size=max(8, int(carrier_height * 0.50)) * scale,
+        )
+        if headline_layer.getchannel("A").getbbox() is not None:
+            layers.append(embed_layer(headline_layer, work, profile))
+    if tagline_text and tagline_target is not None:
+        # The tagline is small. Distress it with texture and lighting, but not
+        # with binary holes: a hole in an 8-14px letter turns a real word into
+        # a different word.
+        tagline_layer = Image.new("RGBA", work_size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(tagline_layer)
+        _draw_text(
+            draw,
+            tagline_text,
+            color=ink,
+            box=_local_box(tagline_target, crop_box, scale),
+            family=tagline_family,
+            treatment=flat,
+            align="center",
+            force_outline=False,
+            zone_padding=0.04,
+            max_font_size=max(10, int(carrier_height * 0.28)) * scale,
+        )
+        if tagline_layer.getchannel("A").getbbox() is not None:
+            tagline_profile = replace(
+                profile,
+                warp=profile.warp * 0.35,
+                arc=profile.arc * 0.35,
+                wear=0.0,
+                alpha_hpass=0.0,
+            )
+            layers.append(embed_layer(tagline_layer, work, tagline_profile))
+
+    if not layers:
+        return None
+    layer = layers[0]
+    for extra in layers[1:]:
+        layer = Image.alpha_composite(layer, extra)
+    result = Image.alpha_composite(work, layer).resize(
+        crop.size,
+        Image.Resampling.LANCZOS,
+    )
+    mask = layer.getchannel("A").resize(crop.size, Image.Resampling.LANCZOS)
+    # Keep the final paste binary as well: a soft mask here would reintroduce
+    # semi-transparent ink at the glyph edges, which is the DTF failure this
+    # stage exists to prevent.
+    mask = mask.point([255 if value >= 128 else 0 for value in range(256)])
+    output = image.copy()
+    output.paste(result, (crop_box[0], crop_box[1]), mask)
+    buffer = BytesIO()
+    output.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _clamp_box(
+    box: tuple[int, int, int, int], width: int, height: int
+) -> tuple[int, int, int, int]:
+    """Clamp a (x, y, width, height) box to the canvas."""
+    x, y, box_width, box_height = box
+    x = max(0, min(x, width - 1))
+    y = max(0, min(y, height - 1))
+    box_width = max(1, min(box_width, width - x))
+    box_height = max(1, min(box_height, height - y))
+    return x, y, box_width, box_height
+
+
+def _local_box(
+    box: tuple[int, int, int, int],
+    crop_box: tuple[int, int, int, int],
+    scale: int,
+) -> tuple[int, int, int, int]:
+    """A canvas box in the coordinates of the supersampled crop."""
+    return (
+        (box[0] - crop_box[0]) * scale,
+        (box[1] - crop_box[1]) * scale,
+        box[2] * scale,
+        box[3] * scale,
+    )
 
 
 def _crop(image: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
