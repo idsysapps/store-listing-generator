@@ -14,18 +14,18 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Final, Protocol, runtime_checkable
 
 from store_listing.orchestration.promotion import compute_promotion_score
 
+from .apify_budget import actor_call_kwargs, bucket_items, per_target_limit, select_paid_seeds
 from .google_trends import DatabaseClient
 from .schemas import TrendHarvestRequest, TrendResult
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_INSTAGRAM_ACTOR: Final[str] = "apify/instagram-hashtag-scraper"
-DEFAULT_INSTAGRAM_RESULTS: Final[int] = 30
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,14 @@ class InstagramPost:
 @runtime_checkable
 class InstagramScraperGateway(Protocol):
     def scrape_hashtag(self, hashtag: str) -> list[InstagramPost]: ...
+
+
+def _hashtag_label(item: dict[str, Any]) -> str | None:
+    for field in ("searchedHashtag", "hashtag"):
+        value = item.get(field)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
 
 
 def _post(item: dict[str, Any]) -> InstagramPost:
@@ -86,29 +94,33 @@ class ApifyInstagramGateway:
     def _api_actor_ref(self) -> str:
         return self.actor_id.replace("/", "~")
 
-    @staticmethod
-    def _results_limit() -> int:
-        return int(os.environ.get("INSTAGRAM_RESULTS_PER_TAG") or DEFAULT_INSTAGRAM_RESULTS)
-
     def scrape_hashtag(self, hashtag: str) -> list[InstagramPost]:
+        return self.scrape_hashtags([hashtag]).get(hashtag, [])
+
+    def scrape_hashtags(self, hashtags: list[str]) -> dict[str, list[InstagramPost]]:
+        """One actor run. resultsLimit is per hashtag, so the share stays inside the cap."""
+        if not hashtags:
+            return {}
+        tags = [hashtag.lstrip("#") for hashtag in hashtags]
         run = (
             self._apify()
             .actor(self._api_actor_ref())
             .call(
-                run_input={
-                    "hashtags": [hashtag.lstrip("#")],
-                    "resultsLimit": self._results_limit(),
-                },
-                run_timeout=timedelta(minutes=4),
+                **actor_call_kwargs(
+                    {
+                        "hashtags": tags,
+                        "resultsLimit": per_target_limit(len(tags), "INSTAGRAM_RESULTS_PER_TAG"),
+                    }
+                )
             )
         )
         if run is None:
-            return []
+            return {hashtag: [] for hashtag in hashtags}
         dataset_id = (
             run.get("defaultDatasetId") if isinstance(run, dict) else run.default_dataset_id
         )
         raw_items = self._apify().dataset(dataset_id).list_items().items
-        return [_post(item) for item in raw_items]
+        return bucket_items(hashtags, raw_items, _post, _hashtag_label)
 
 
 class InstagramClient:
@@ -147,10 +159,14 @@ class InstagramClient:
     def harvest_and_store(
         self, request: TrendHarvestRequest
     ) -> tuple[list[TrendResult], list[str]]:
+        tags = self.target_hashtags(request.seed_keywords)
+        if callable(getattr(type(self.gateway), "scrape_hashtags", None)):
+            return self._harvest_paid(select_paid_seeds(tags))
+
         all_results: list[TrendResult] = []
         failed: list[str] = []
 
-        for tag in self.target_hashtags(request.seed_keywords):
+        for tag in tags:
             try:
                 posts = self.gateway.scrape_hashtag(tag)
                 results = self._derive_results(tag, posts)
@@ -162,6 +178,22 @@ class InstagramClient:
                 failed.append(tag)
 
         return all_results, failed
+
+    def _harvest_paid(self, tags: list[str]) -> tuple[list[TrendResult], list[str]]:
+        if not tags:
+            return [], []
+        try:
+            grouped = self.gateway.scrape_hashtags(tags)  # type: ignore[attr-defined]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to scrape Instagram batch: %s", e)
+            return [], tags
+
+        all_results: list[TrendResult] = []
+        for tag in tags:
+            for result in self._derive_results(tag, grouped.get(tag, [])):
+                self._store(tag, result)
+                all_results.append(result)
+        return all_results, []
 
     @staticmethod
     def _derive_results(seed_tag: str, posts: list[InstagramPost]) -> list[TrendResult]:

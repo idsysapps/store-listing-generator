@@ -15,13 +15,14 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Final, Protocol, runtime_checkable
 
 import httpx
 
 from store_listing.orchestration.promotion import compute_promotion_score
 
+from .apify_budget import actor_call_kwargs, bucket_items, per_target_limit, select_paid_seeds
 from .google_trends import DatabaseClient
 from .schemas import TrendHarvestRequest, TrendResult
 
@@ -63,6 +64,14 @@ def _iter_dicts(value: Any):
     elif isinstance(value, list):
         for child in value:
             yield from _iter_dicts(child)
+
+
+def _search_label(item: dict[str, Any]) -> str | None:
+    for field in ("searchQuery", "query", "keyword"):
+        value = item.get(field)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
 
 
 def _pin(item: dict[str, Any]) -> Pin:
@@ -112,21 +121,31 @@ class ApifyPinterestGateway:
         return self.actor_id.replace("/", "~")
 
     def scrape_search(self, query: str) -> list[Pin]:
+        return self.scrape_searches([query]).get(query, [])
+
+    def scrape_searches(self, queries: list[str]) -> dict[str, list[Pin]]:
+        """One actor run for the whole harvest. maxPins is per query."""
+        if not queries:
+            return {}
         run = (
             self._apify()
             .actor(self._api_actor_ref())
             .call(
-                run_input={"query": query, "maxPins": 25},
-                run_timeout=timedelta(minutes=4),
+                **actor_call_kwargs(
+                    {
+                        "searchQueries": queries,
+                        "maxPins": per_target_limit(len(queries)),
+                    }
+                )
             )
         )
         if run is None:
-            return []
+            return {query: [] for query in queries}
         dataset_id = (
             run.get("defaultDatasetId") if isinstance(run, dict) else run.default_dataset_id
         )
         raw_items = self._apify().dataset(dataset_id).list_items().items
-        return [_pin(item) for item in raw_items]
+        return bucket_items(queries, raw_items, _pin, _search_label)
 
 
 class PinterestWebGateway:
@@ -190,10 +209,14 @@ class PinterestClient:
     def harvest_and_store(
         self, request: TrendHarvestRequest
     ) -> tuple[list[TrendResult], list[str]]:
+        seeds = list(request.seed_keywords)
+        if callable(getattr(type(self.gateway), "scrape_searches", None)):
+            return self._harvest_paid(select_paid_seeds(seeds))
+
         all_results: list[TrendResult] = []
         failed: list[str] = []
 
-        for seed in request.seed_keywords:
+        for seed in seeds:
             try:
                 pins = self.gateway.scrape_search(seed)
                 results = self._derive_results(seed, pins)
@@ -205,6 +228,22 @@ class PinterestClient:
                 failed.append(seed)
 
         return all_results, failed
+
+    def _harvest_paid(self, seeds: list[str]) -> tuple[list[TrendResult], list[str]]:
+        if not seeds:
+            return [], []
+        try:
+            grouped = self.gateway.scrape_searches(seeds)  # type: ignore[attr-defined]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to scrape Pinterest batch: %s", e)
+            return [], seeds
+
+        all_results: list[TrendResult] = []
+        for seed in seeds:
+            for result in self._derive_results(seed, grouped.get(seed, [])):
+                self._store(seed, result)
+                all_results.append(result)
+        return all_results, []
 
     def _store(self, seed: str, result: TrendResult) -> None:
         query_id = self.db_client.insert_trend_query(seed, result.query, source="pinterest")
