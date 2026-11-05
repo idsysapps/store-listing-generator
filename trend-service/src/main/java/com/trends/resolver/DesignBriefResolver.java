@@ -1,5 +1,6 @@
 package com.trends.resolver;
 
+import com.trends.config.GarmentPreviewColor;
 import com.trends.config.ImageStorageConfig;
 import com.trends.config.MaterialRecommendationReader;
 import com.trends.config.PricingReader;
@@ -40,6 +41,9 @@ public class DesignBriefResolver {
 
     @Inject
     MaterialRecommendationReader materialRecommendationReader;
+
+    @Inject
+    GarmentPreviewColor garmentPreviewColor;
 
     @Inject
     PricingReader pricingReader;
@@ -217,6 +221,8 @@ public class DesignBriefResolver {
         summary.setPersonalUse(brief.personalUse);
         summary.setRecommendedMaterials(
                 materialRecommendationReader.read(brief.recommendedMaterials));
+        summary.setPreviewBackgroundColor(
+                garmentPreviewColor.forMaterials(summary.getRecommendedMaterials()));
         summary.setPricing(pricingReader.read(brief.pricing));
         return summary;
     }

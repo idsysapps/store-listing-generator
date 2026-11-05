@@ -33,6 +33,7 @@ public class DesignBriefSummary {
     private String fontFamily;
     private Boolean personalUse;
     private List<MaterialRecommendation> recommendedMaterials;
+    private String previewBackgroundColor;
     private BriefPricing pricing;
 
     public DesignBriefSummary() {}
@@ -147,6 +148,11 @@ public class DesignBriefSummary {
     public List<MaterialRecommendation> getRecommendedMaterials() { return recommendedMaterials; }
     public void setRecommendedMaterials(List<MaterialRecommendation> recommendedMaterials) {
         this.recommendedMaterials = recommendedMaterials;
+    }
+
+    public String getPreviewBackgroundColor() { return previewBackgroundColor; }
+    public void setPreviewBackgroundColor(String previewBackgroundColor) {
+        this.previewBackgroundColor = previewBackgroundColor;
     }
 
     public BriefPricing getPricing() { return pricing; }

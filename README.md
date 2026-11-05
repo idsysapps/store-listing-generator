@@ -404,6 +404,7 @@ query {
         substrate_type
         unit_cost
       }
+      previewBackgroundColor
       pricing {
         requested_positioning
         effective_positioning
@@ -444,6 +445,12 @@ query {
   }
 }
 ```
+
+The first recommended material is the garment the design is printed on.
+`previewBackgroundColor` maps that garment colour to a hex value, so a client
+can render the transparent artwork on the shirt colour instead of a generic
+light background. It is null when the brief has no recommendation or the
+catalogue colour is not in the explicit map; the API does not invent a colour.
 
 The nested material and pricing fields keep the stored snake_case names
 (`external_id`, `recommended_price`, `print_size`); the top-level brief fields
