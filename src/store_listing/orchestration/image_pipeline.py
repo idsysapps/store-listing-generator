@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import random
+from collections.abc import Callable
 from dataclasses import replace
 from io import BytesIO
 from typing import Any
@@ -42,6 +43,15 @@ from store_listing.orchestration.copy_modes import (
     copy_mode_from_row,
 )
 from store_listing.orchestration.design_briefs import DesignBrief
+from store_listing.orchestration.design_quality import (
+    Candidate,
+    choose_best,
+    contrast_ratio,
+    garment_hex,
+    image_metrics,
+    text_overlap,
+    with_contrast,
+)
 from store_listing.orchestration.design_templates import composition_for, resolve_template
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE
 from store_listing.orchestration.hero_descriptor import (
@@ -81,6 +91,7 @@ from store_listing.orchestration.typographic_hero import (
     is_typographic_hero_brief,
     typographic_hero_enabled,
 )
+from store_listing.orchestration.typography import accent_for
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +101,8 @@ DEFAULT_MAX_LETTERING_RETRIES = 1
 # A DTF design that covers most of its placement prints as a solid sheet and
 # feels like plastic. This is a warning, not a rejection (issue #288).
 DTF_COVERAGE_WARN = 0.65
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
 def _max_text_retries() -> int:
@@ -126,6 +139,27 @@ def _text_embed_profile() -> str | None:
     """The DTF text embedding profile, or None when the feature is off."""
     profile = profile_for(os.environ.get("TEXT_EMBED_PROFILE"))
     return profile.name if profile is not None else None
+
+
+def _text_plan_rendering_enabled() -> bool:
+    """Whether the renderer executes the stored text-integration plan.
+
+    The bake-off showed the carrier/region/method layer adds defects faster
+    than it adds design. It is off by default; a brief that needs it for an
+    experiment can turn it back on (issue #307).
+    """
+    value = os.environ.get("TEXT_PLAN_RENDERING_ENABLED", "").strip().lower()
+    return value in _TRUTHY
+
+
+def _model_text_caption_enabled() -> bool:
+    """Whether a caption may send its words to Qwen instead of the compositor.
+
+    Qwen is the type_hero model. The bake-off found it lost the headline on
+    five of nine caption briefs, so caption routing is opt-in (issue #307).
+    """
+    value = os.environ.get("MODEL_TEXT_CAPTION_ENABLED", "").strip().lower()
+    return value in _TRUTHY
 
 
 def _recommended_materials(brief_row: dict[str, Any]) -> list[dict[str, Any]] | None:
@@ -191,6 +225,82 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         text_plan=text_plan_from_value(brief_row.get("text_plan"))
         if copy_mode != NO_TEXT
         else None,
+    )
+
+
+def _brief_for_render(brief_row: dict[str, Any]) -> DesignBrief:
+    """The brief as the renderer should see it.
+
+    The stored text plan is off by default: the bake-off showed the
+    carrier/region/method layer adds defects faster than it adds design. An
+    explicit experiment can turn it back on (issue #307).
+    """
+    brief = _brief_from_row(brief_row)
+    if not _text_plan_rendering_enabled():
+        return replace(brief, text_plan=None)
+    return brief
+
+
+def _image_candidate_count() -> int:
+    """How many renders to compare before uploading one.
+
+    Two is the bake-off setting: it lets the pipeline drop a bad seed (text on
+    the subject, a keyed fringe, a 65%-coverage plate). The default is one so
+    a local run or a test does not silently double its GPU time; production
+    sets IMAGE_CANDIDATE_COUNT=2 (issue #307).
+    """
+    raw = os.environ.get("IMAGE_CANDIDATE_COUNT", "1")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        logger.warning("Invalid IMAGE_CANDIDATE_COUNT=%r, using 1", raw)
+        return 1
+
+
+def _planned_ink(layout: LayoutSpec) -> str:
+    """The ink the plan asks for, for the contrast check."""
+    plan = layout.text_plan
+    if plan is None:
+        return layout.font_color
+    if plan.ink == "light":
+        return "#F7F3E8"
+    if plan.ink == "dark":
+        return "#111111"
+    if plan.ink == "accent":
+        return accent_for(layout.font_color)
+    return plan.ink
+
+
+def _quality_candidate(
+    *,
+    name: str,
+    raw_bytes: bytes,
+    transparent_bytes: bytes | None,
+    layout: LayoutSpec,
+    subject_bytes: bytes | None,
+    garment_color: str | None,
+) -> Candidate:
+    """Score one render with the deterministic DTF gate."""
+    metrics = image_metrics(transparent_bytes or raw_bytes)
+    if layout.needs_text and subject_bytes is not None:
+        with Image.open(BytesIO(subject_bytes)) as opened:
+            size = opened.size
+        overlay = composite_text(
+            blank_canvas("dtf_apparel", transparent=True, size=size),
+            layout,
+            transparent=True,
+        )
+        metrics = replace(metrics, text_overlap=text_overlap(overlay, subject_bytes))
+    metrics = with_contrast(
+        metrics, contrast_ratio(_planned_ink(layout), garment_hex(garment_color))
+    )
+    return Candidate(
+        name=name,
+        raw_bytes=raw_bytes,
+        transparent_bytes=transparent_bytes or raw_bytes,
+        metrics=metrics,
+        layout=layout,
+        subject_bytes=subject_bytes,
     )
 
 
@@ -267,7 +377,7 @@ def generate_images_for_briefs(
     errors = 0
 
     for brief_row in briefs:
-        success, _ = _generate_single_brief(
+        success, _ = _generate_best_candidate(
             brief_row,
             storage=storage,
             comfyui_client=comfyui_client,
@@ -573,8 +683,9 @@ def _generate_single_brief(
     artwork_validator: ArtworkValidator | None = None,
     artwork_text_validator: ArtworkTextValidator | None = None,
     hero_validator: StrictTextValidator | None = None,
+    candidate_sink: Callable[[Candidate], None] | None = None,
 ) -> tuple[bool, str | None]:
-    brief = _brief_from_row(brief_row)
+    brief = _brief_for_render(brief_row)
     brief_id = brief_row["id"]
     is_dtf = brief_row["product_type"] == "dtf_apparel"
     copy_mode = brief.copy_mode
@@ -604,6 +715,7 @@ def _generate_single_brief(
     if (
         copy_mode != NO_TEXT
         and model_text_enabled()
+        and _model_text_caption_enabled()
         and hero_validator is not None
         and is_model_text_brief(brief)
     ):
@@ -627,6 +739,7 @@ def _generate_single_brief(
         font_family=brief.font_family,
         tagline_font_family=tagline_family_for(preset, brief.voice) if preset else None,
         voice=brief.voice,
+        garment_color=brief.garment_color,
         text_plan=brief.text_plan,
         text_embed_profile=_text_embed_profile(),
     )
@@ -824,8 +937,10 @@ def _generate_single_brief(
         retry_hint = _retry_hint(brief)
 
     transparent_bytes: bytes | None = None
+    subject_bytes: bytes | None = None
     if is_dtf and result.background_removed and result.image_bytes:
         keyed_artwork = _textured(result, brief, is_dtf, keyed=True)
+        subject_bytes = keyed_artwork
         transparent_bytes = (
             composite_text(keyed_artwork, layout, transparent=True)
             if needs_text_check
@@ -833,6 +948,18 @@ def _generate_single_brief(
         )
     if transparent_bytes is not None and is_dark_garment(brief.garment_color):
         transparent_bytes = remove_dark_ink(transparent_bytes)
+    if candidate_sink is not None:
+        candidate_sink(
+            _quality_candidate(
+                name=f"seed-{base_seed + attempts - 1}",
+                raw_bytes=raw_bytes,
+                transparent_bytes=transparent_bytes,
+                layout=layout,
+                subject_bytes=subject_bytes,
+                garment_color=brief.garment_color,
+            )
+        )
+        return True, None
     _log_dtf_coverage(brief_id, transparent_bytes)
 
     keys = storage.upload_design(
@@ -842,6 +969,103 @@ def _generate_single_brief(
         product_type=brief_row["product_type"],
     )
 
+    db_client.update_brief_image_keys(
+        brief_id=brief_id,
+        image_key_raw=keys["raw"],
+        image_key_transparent=keys.get("transparent"),
+    )
+    return True, None
+
+
+def _generate_best_candidate(
+    brief_row: dict[str, Any],
+    *,
+    storage: ImageStorageClient,
+    comfyui_client: ComfyUIClient,
+    text_validator: TextValidator | None,
+    db_client: Any,
+    artwork_validator: ArtworkValidator | None = None,
+    artwork_text_validator: ArtworkTextValidator | None = None,
+    hero_validator: StrictTextValidator | None = None,
+) -> tuple[bool, str | None]:
+    """Render N candidates, upload the one the deterministic gate likes best.
+
+    The hero and text-only paths have their own candidate logic, so they keep
+    the single-call behaviour.
+    """
+    brief = _brief_for_render(brief_row)
+    template = resolve_template(
+        brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
+    )
+    count = _image_candidate_count()
+    model_text_path = (
+        brief.copy_mode != NO_TEXT
+        and model_text_enabled()
+        and _model_text_caption_enabled()
+        and hero_validator is not None
+        and is_model_text_brief(brief)
+    )
+    if (
+        count <= 1
+        or brief.copy_mode == TYPE_HERO
+        or template == "text_only"
+        or not (brief.scene_description or "").strip()
+        or model_text_path
+    ):
+        return _generate_single_brief(
+            brief_row,
+            storage=storage,
+            comfyui_client=comfyui_client,
+            text_validator=text_validator,
+            artwork_validator=artwork_validator,
+            artwork_text_validator=artwork_text_validator,
+            hero_validator=hero_validator,
+            db_client=db_client,
+        )
+
+    candidates: list[Candidate] = []
+    for _index in range(count):
+        success, error = _generate_single_brief(
+            brief_row,
+            storage=storage,
+            comfyui_client=comfyui_client,
+            text_validator=text_validator,
+            artwork_validator=artwork_validator,
+            artwork_text_validator=artwork_text_validator,
+            hero_validator=hero_validator,
+            db_client=db_client,
+            candidate_sink=candidates.append,
+        )
+        if not success:
+            return False, error
+
+    if not candidates:
+        return False, "no candidate was rendered"
+
+    best = choose_best(candidates)
+    brief_id = brief_row["id"]
+    logger.info(
+        "Brief %d: chose %s of %d candidates (overlap %.0f%%, magenta %.1f%%, coverage %.0f%%)",
+        brief_id,
+        best.name,
+        len(candidates),
+        best.metrics.text_overlap * 100,
+        best.metrics.magenta_fraction * 100,
+        best.metrics.coverage * 100,
+    )
+    if best.metrics.issues:
+        logger.warning(
+            "Brief %d: best candidate still has QA issues: %s",
+            brief_id,
+            "; ".join(best.metrics.issues),
+        )
+    _log_dtf_coverage(brief_id, best.transparent_bytes)
+    keys = storage.upload_design(
+        raw_bytes=best.raw_bytes,
+        transparent_bytes=best.transparent_bytes,
+        brief_id=brief_id,
+        product_type=brief_row["product_type"],
+    )
     db_client.update_brief_image_keys(
         brief_id=brief_id,
         image_key_raw=keys["raw"],
@@ -868,7 +1092,7 @@ def generate_image_for_brief(
         return {"status": "error", "error": f"Brief {brief_id} not found"}
 
     storage = ImageStorageClient(s3_client=s3_client, bucket=bucket, endpoint_url=endpoint_url)
-    success, error = _generate_single_brief(
+    success, error = _generate_best_candidate(
         brief_row,
         storage=storage,
         comfyui_client=comfyui_client,
