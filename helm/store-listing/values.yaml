@@ -24,6 +24,8 @@ config:
   llmDesignBriefsEnabled: "false"
   llmMaxBriefs: "8"
   llmMaxBriefSeeds: "20"
+  # Production turns the plan off; local experiments can keep it on to inspect
+  # the carrier/region pass.
   llmTextPlan: "true"
   llmTextPlanRegenerate: "true"
   # The copy editor is a separate local-LLM pass that keeps, drops or
