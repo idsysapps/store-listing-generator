@@ -24,6 +24,16 @@ config:
   # Production keeps the deterministic compositor until the embedded result is
   # approved; local values enable v11 for evaluation.
   textEmbedProfile: "off"
+  # The bake-off showed one bad seed can leave the type on the subject or a
+  # 65%-coverage plate. Two candidates plus the QA gate picks the clean one
+  # (issue #307).
+  imageCandidateCount: "2"
+  # The renderer no longer executes the carrier/region/method plan, so
+  # generating it is wasted work and can put a blank carrier in the scene.
+  llmTextPlan: "false"
+  # Captions stay on the deterministic compositor; Qwen is for type_hero.
+  modelTextCaptionEnabled: "0"
+  textPlanRenderingEnabled: "0"
 
 secrets:
   databaseUser: store_listing

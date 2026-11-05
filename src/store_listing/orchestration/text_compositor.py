@@ -30,6 +30,11 @@ from typing import Any, cast
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
+from store_listing.orchestration.design_quality import (
+    MIN_TEXT_CONTRAST,
+    contrast_ratio,
+    garment_hex,
+)
 from store_listing.orchestration.design_templates import (
     DesignTemplate,
     resolve_template,
@@ -114,6 +119,9 @@ class LayoutSpec:
     tagline_font_family: str | None = None
     # The voice of the brief, which decides the treatment of the text.
     voice: str = "deadpan"
+    # The garment the design is printed on. The accent word is only drawn when
+    # it keeps enough contrast against this colour (issue #307, brief 213).
+    garment_color: str | None = None
     # A treatment that replaces the one of the voice.
     treatment_override: TextTreatment | None = None
     # How the words live in the design. Without a plan the design keeps the
@@ -150,9 +158,19 @@ class LayoutSpec:
     @property
     def treatment(self) -> TextTreatment:
         """How the text is drawn: the case, the tracking, the colours."""
-        if self.treatment_override is not None:
-            return self.treatment_override
-        return treatment_for_voice(self.voice)
+        treatment = (
+            self.treatment_override
+            if self.treatment_override is not None
+            else treatment_for_voice(self.voice)
+        )
+        if treatment.accent_word is None or not self.garment_color:
+            return treatment
+        accent = accent_for(self.font_color)
+        if contrast_ratio(accent, garment_hex(self.garment_color)) < MIN_TEXT_CONTRAST:
+            # The accent word is a second ink. If it disappears into the
+            # garment, draw the whole line in the main ink instead.
+            return replace(treatment, accent_word=None)
+        return treatment
 
 
 def blank_canvas(

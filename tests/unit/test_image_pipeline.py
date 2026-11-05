@@ -17,6 +17,7 @@ from store_listing.orchestration.artwork_validation import (
 )
 from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.image_pipeline import (
+    _brief_for_render,
     _brief_from_row,
     _text_embed_profile,
     generate_image_for_brief,
@@ -44,6 +45,37 @@ class TestTextEmbedProfileFlag:
     def test_an_unknown_profile_fails_safe(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TEXT_EMBED_PROFILE", "typo")
         assert _text_embed_profile() is None
+
+
+class TestRenderPolicy:
+    def _row(self) -> dict[str, Any]:
+        return _brief(
+            text_plan={
+                "method": "printed",
+                "carrier": "headstone",
+                "carrier_description": "a blank granite headstone",
+                "region": "bottom_center",
+                "surface": "stone",
+                "ink": "light",
+            }
+        )
+
+    def test_the_stored_text_plan_is_ignored_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("TEXT_PLAN_RENDERING_ENABLED", raising=False)
+
+        assert _brief_for_render(self._row()).text_plan is None
+
+    def test_the_stored_text_plan_can_be_reenabled_for_an_experiment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TEXT_PLAN_RENDERING_ENABLED", "1")
+
+        plan = _brief_for_render(self._row()).text_plan
+
+        assert plan is not None
+        assert plan.carrier == "headstone"
 
 
 def _mock_db_client(briefs: list[dict[str, Any]] | None = None) -> MagicMock:
@@ -1653,6 +1685,8 @@ class TestModelTextPath:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        monkeypatch.setenv("MODEL_TEXT_CAPTION_ENABLED", "1")
+        monkeypatch.setenv("TEXT_PLAN_RENDERING_ENABLED", "1")
         db = _mock_db_client(briefs=[self._painted_brief()])
         comfy = _comfyui_client()
         comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"painted")
@@ -1678,6 +1712,29 @@ class TestModelTextPath:
         assert keys["image_key_raw"].endswith("_raw.png")
         assert keys["image_key_transparent"].endswith("_transparent.png")
 
+    def test_a_caption_does_not_use_qwen_even_when_model_text_is_enabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # MODEL_TEXT_ENABLED used to route painted captions to Qwen. The
+        # bake-off found Qwen lost the headline on five of nine captions, so
+        # caption routing needs its own opt-in (issue #307).
+        monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        monkeypatch.delenv("MODEL_TEXT_CAPTION_ENABLED", raising=False)
+        db = _mock_db_client(briefs=[self._painted_brief()])
+        comfy = _comfyui_client()
+        comfy.generate_image.return_value = ComfyUIResult(image_bytes=_real_png())
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+            hero_validator=self._text_validator(),
+        )
+
+        comfy.generate_image.assert_called_once()
+        comfy.generate_qwen_image.assert_not_called()
+
     def test_the_path_is_off_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MODEL_TEXT_ENABLED", raising=False)
         db = _mock_db_client(briefs=[self._painted_brief()])
@@ -1697,6 +1754,8 @@ class TestModelTextPath:
 
     def test_a_carrier_keeps_the_compositor(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        monkeypatch.setenv("MODEL_TEXT_CAPTION_ENABLED", "1")
+        monkeypatch.setenv("TEXT_PLAN_RENDERING_ENABLED", "1")
         brief = self._painted_brief()
         brief["text_plan"] = {
             **brief["text_plan"],
@@ -1720,6 +1779,8 @@ class TestModelTextPath:
 
     def test_a_failed_text_gate_does_not_upload(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        monkeypatch.setenv("MODEL_TEXT_CAPTION_ENABLED", "1")
+        monkeypatch.setenv("TEXT_PLAN_RENDERING_ENABLED", "1")
         monkeypatch.setenv("TYPOGRAPHIC_HERO_CANDIDATES", "1")
         db = _mock_db_client(briefs=[self._painted_brief()])
         comfy = _comfyui_client()
@@ -1742,6 +1803,8 @@ class TestModelTextPath:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        monkeypatch.setenv("MODEL_TEXT_CAPTION_ENABLED", "1")
+        monkeypatch.setenv("TEXT_PLAN_RENDERING_ENABLED", "1")
         db = _mock_db_client(briefs=[self._painted_brief()])
         comfy = _comfyui_client()
         comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=_real_png())
@@ -1789,6 +1852,8 @@ class TestModelTextPath:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("MODEL_TEXT_ENABLED", "1")
+        monkeypatch.setenv("MODEL_TEXT_CAPTION_ENABLED", "1")
+        monkeypatch.setenv("TEXT_PLAN_RENDERING_ENABLED", "1")
         monkeypatch.setenv("TYPOGRAPHIC_HERO_DESCRIPTOR", "1")
         composed = MagicMock(return_value=b"composed")
         monkeypatch.setattr(
@@ -1813,3 +1878,112 @@ class TestModelTextPath:
         ]
         bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
         assert b"composed" in bodies
+
+
+class TestCandidateSelection:
+    def _row(self) -> dict[str, Any]:
+        return _brief(
+            product_type="dtf_apparel",
+            copy_mode="caption",
+            layout_type="auto",
+            headline_text="SPOOKY SEASON",
+            scene_description="a skeleton doing yoga on a beach towel",
+            style_preset="vintage_screenprint",
+            recommended_materials=[{"external_id": "shirt-jet-black-m", "color": "Jet Black"}],
+        )
+
+    def test_two_candidates_upload_the_one_the_gate_chooses(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("IMAGE_CANDIDATE_COUNT", "2")
+        monkeypatch.setattr(
+            "store_listing.orchestration.image_pipeline.choose_best",
+            lambda candidates: candidates[1],
+        )
+        db = _mock_db_client(briefs=[self._row()])
+        comfy = _comfyui_client()
+        comfy.generate_image.side_effect = [
+            ComfyUIResult(image_bytes=_real_png(color="red")),
+            ComfyUIResult(image_bytes=_real_png(color="blue")),
+        ]
+        comfy.remove_background.side_effect = [
+            ComfyUIResult(image_bytes=_real_png()),
+            ComfyUIResult(image_bytes=_real_png()),
+        ]
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            text_validator=_validator(True, True),
+        )
+
+        assert result == {"status": "success", "images_generated": 1, "errors": 0}
+        assert comfy.generate_image.call_count == 2
+        db.update_brief_image_keys.assert_called_once()
+
+        # The raw upload is the first put_object call. The second candidate was
+        # blue, so the uploaded artwork must be blue, not red.
+        body = s3.put_object.call_args_list[0].kwargs["Body"]
+        with Image.open(BytesIO(body)) as uploaded:
+            pixel = uploaded.convert("RGB").getpixel((0, 0))
+        assert isinstance(pixel, tuple)
+        red, green, blue = pixel
+        assert blue > red
+        assert blue > green
+
+    def test_candidate_selection_is_dtf_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("IMAGE_CANDIDATE_COUNT", "2")
+        row = self._row()
+        row["product_type"] = "sublimation"
+        db = _mock_db_client(briefs=[row])
+        comfy = _comfyui_client()
+        comfy.generate_image.return_value = ComfyUIResult(image_bytes=_real_png())
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+        )
+
+        comfy.generate_image.assert_called_once()
+
+    def test_candidate_selection_is_skipped_without_a_scene(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("IMAGE_CANDIDATE_COUNT", "2")
+        row = self._row()
+        row["scene_description"] = ""
+        db = _mock_db_client(briefs=[row])
+        comfy = _comfyui_client()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+        )
+
+        comfy.generate_image.assert_not_called()
+        db.update_brief_image_keys.assert_called_once()
+
+    def test_candidate_selection_is_skipped_for_a_text_only_brief(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("IMAGE_CANDIDATE_COUNT", "2")
+        row = self._row()
+        row["layout_type"] = "text_only"
+        db = _mock_db_client(briefs=[row])
+        comfy = _comfyui_client()
+
+        generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+        )
+
+        comfy.generate_image.assert_not_called()
+        db.update_brief_image_keys.assert_called_once()

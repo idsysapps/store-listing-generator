@@ -267,9 +267,10 @@ def build_flux_prompt(brief: DesignBrief) -> str:
         parts.append("The magenta is only the empty key backdrop, never a colour in the artwork.")
         if is_dark_garment(brief.garment_color):
             parts.append(
-                f"The garment is {brief.garment_color}. The black areas are the shirt, "
-                "not ink: draw the design in light cream/white highlights and lines; "
-                "do not fill large areas with black."
+                f"The print is for a {brief.garment_color} garment. Draw the design in "
+                "light cream/white highlights and lines; do not fill large areas with "
+                "black. Do not paint a black or dark background: the only background "
+                "is the magenta key."
             )
 
     if template_id == "full_bleed":
@@ -289,12 +290,29 @@ def build_flux_prompt(brief: DesignBrief) -> str:
         # The template's "edge to edge" is a printed background on a DTF
         # shirt. Keep the subject and the text zone, not the plate (issue
         # #288).
-        composition = composition.replace(
-            "the artwork fills the whole canvas edge to edge",
-            "the subject is isolated on the garment, with the garment colour around it",
-        ).replace(
-            "covers the whole canvas edge to edge",
-            "is isolated on the garment, with the garment colour around it",
+        composition = (
+            composition.replace(
+                "the artwork fills the whole canvas edge to edge",
+                "the subject is isolated on the garment, with the garment colour around it",
+            )
+            .replace(
+                "covers the whole canvas edge to edge",
+                "is isolated on the garment, with the garment colour around it",
+            )
+            .replace(
+                "a wide full-bleed scene that fills the canvas edge to edge, no border and no empty margin",
+                "the subject is isolated on the garment, with the garment colour around it",
+            )
+            .replace(
+                "the subject cropped by the frame and filling the whole canvas, no border and no empty margin",
+                "the subject is isolated on the garment, with the garment colour around it",
+            )
+            .replace(
+                "an all-over repeating pattern that covers the whole canvas edge to edge, "
+                "no border and no empty margin",
+                "an all-over pattern of isolated motifs, with the garment colour showing "
+                "between them",
+            )
         )
     carrier = brief.text_plan is not None and brief.text_plan.needs_carrier
     if carrier:

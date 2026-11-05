@@ -24,6 +24,8 @@ config:
   llmDesignBriefsEnabled: "false"
   llmMaxBriefs: "8"
   llmMaxBriefSeeds: "20"
+  # Production turns the plan off; local experiments can keep it on to inspect
+  # the carrier/region pass.
   llmTextPlan: "true"
   llmTextPlanRegenerate: "true"
   # The copy editor is a separate local-LLM pass that keeps, drops or
@@ -72,6 +74,16 @@ config:
   # A "painted" text plan goes to Qwen-Image so the words live in the art
   # instead of being overlaid by the compositor (issue #133).
   modelTextEnabled: "0"
+  # Qwen is the type_hero model. Letting a caption use it is an experiment,
+  # not the default: it lost or garbled the headline on 5/9 captions in the
+  # bake-off (issue #307).
+  modelTextCaptionEnabled: "0"
+  # Execute the brief's stored carrier/region/method plan. Off by default; the
+  # deterministic compositor owns the default path (issue #307).
+  textPlanRenderingEnabled: "0"
+  # Render two candidates and upload the one the deterministic QA gate likes
+  # best. Production sets 2; local runs default to one to save GPU time.
+  imageCandidateCount: "1"
   # DTF-safe embedded type on planned carriers. Off by default; v11/v12 are
   # standard wear and v13 is heavy distress.
   textEmbedProfile: "off"

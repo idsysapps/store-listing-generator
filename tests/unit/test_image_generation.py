@@ -112,6 +112,20 @@ class TestBuildFluxPrompt:
         assert "the subject is isolated on the garment" in prompt
         assert "fills the whole canvas edge to edge" not in prompt
 
+    def test_an_art_only_dtf_prompt_is_not_a_full_bleed_plate(self) -> None:
+        prompt = build_flux_prompt(
+            _make_brief(
+                layout_type="full_bleed",
+                copy_mode="no_text",
+                headline_text=None,
+                tagline_text=None,
+            )
+        )
+
+        assert "full-bleed" not in prompt.lower()
+        assert "edge to edge" not in prompt.lower()
+        assert "garment colour around it" in prompt
+
     def test_a_dtf_negative_keeps_the_background_and_sticker_border_out(self) -> None:
         negative = build_negative_prompt(_make_brief())
 
@@ -143,7 +157,12 @@ class TestBuildFluxPrompt:
 
         assert "no hot pink" not in build_negative_prompt(brief)
 
-    def test_a_dark_garment_prompt_asks_for_light_highlights(self) -> None:
+    def test_a_dark_garment_prompt_asks_for_light_highlights_without_a_black_background(
+        self,
+    ) -> None:
+        # The old rule said "the black areas are the shirt", and Flux painted a
+        # black half-canvas next to the magenta key (briefs 205, 206). The dark
+        # ink is removed after keying instead.
         brief = _make_brief(
             recommended_materials=[
                 {
@@ -156,8 +175,10 @@ class TestBuildFluxPrompt:
 
         prompt = build_flux_prompt(brief)
 
-        assert "black areas are the shirt" in prompt
         assert "light cream/white highlights" in prompt
+        assert "black areas are the shirt" not in prompt
+        assert "do not paint a black" in prompt.lower()
+        assert "only background is the magenta key" in prompt.lower()
 
     def test_a_light_garment_does_not_get_the_dark_rule(self) -> None:
         brief = _make_brief(
@@ -595,6 +616,7 @@ class TestTheTemplates:
 
     def test_an_art_only_design_gets_a_full_bleed_composition(self) -> None:
         brief = _make_brief(
+            product_type="sublimation",
             layout_type="full_bleed",
             headline_text=None,
             tagline_text=None,
