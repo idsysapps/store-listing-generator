@@ -33,7 +33,9 @@ It covers all three voices, both garment colours, `caption`/`type_hero`/
   is composited afterwards. This is the current hero/model-text strategy.
 
 The hybrid arm deliberately leaves the accent word off. Brief 213 showed that
-`loud` was drawing the first word in a dark accent on a Jet Black shirt.
+`loud` was drawing the first word in a dark accent on a Jet Black shirt. A
+type_hero brief with no `scene_description` (204) falls back to a text-only
+render instead of failing the arm.
 
 ## Run
 
@@ -84,6 +86,11 @@ running app and are gitignored with the rest of `spike/out/`.
 
 The hybrid text is drawn from a font, so its spelling is exact by construction;
 OCR is not needed for that arm.
+
+## Results
+
+The write-up, tables and contact sheets are in
+[`docs/spikes/2026-11-pipeline-bakeoff.md`](../../docs/spikes/2026-11-pipeline-bakeoff.md).
 
 ## Scoring tests
 

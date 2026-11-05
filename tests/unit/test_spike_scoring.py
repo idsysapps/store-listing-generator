@@ -71,6 +71,17 @@ def test_print_metrics_flags_a_solid_light_sticker_fill(tmp_path: Path) -> None:
     assert metrics["solid_light_pct"] > 0.9
 
 
+def test_print_metrics_flags_a_semi_transparent_light_fill(tmp_path: Path) -> None:
+    # A sticker fill can survive the key with partial alpha; it still prints.
+    # The catalogue cream is slightly warm, so a tight grey threshold misses it.
+    values = np.zeros((20, 20, 4), dtype=np.uint8)
+    values[2:18, 2:18] = (253, 243, 208, 150)
+
+    metrics = print_metrics(_path(tmp_path, "semi_cream_fill.png", values))
+
+    assert metrics["solid_light_pct"] > 0.9
+
+
 def test_print_metrics_flags_a_near_white_border(tmp_path: Path) -> None:
     values = np.zeros((20, 20, 4), dtype=np.uint8)
     values[2:18, 2:18] = (30, 30, 30, 255)
@@ -82,6 +93,18 @@ def test_print_metrics_flags_a_near_white_border(tmp_path: Path) -> None:
     metrics = print_metrics(_path(tmp_path, "border.png", values))
 
     assert metrics["near_white_border"] > 0.5
+
+
+def test_print_metrics_does_not_call_white_text_on_one_edge_a_sticker_border(
+    tmp_path: Path,
+) -> None:
+    values = np.zeros((20, 20, 4), dtype=np.uint8)
+    values[2:18, 2:18] = (30, 30, 30, 255)
+    values[16:18, 2:8] = (255, 255, 255, 255)
+
+    metrics = print_metrics(_path(tmp_path, "text_on_bottom.png", values))
+
+    assert metrics["near_white_border"] == 0.0
 
 
 def test_text_overlap_is_the_share_of_the_text_on_the_subject(tmp_path: Path) -> None:

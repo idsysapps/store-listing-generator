@@ -85,7 +85,7 @@ def print_metrics(path: Path) -> dict[str, float]:
     red, green, blue = rgb[..., 0], rgb[..., 1], rgb[..., 2]
     magenta = ((red > 180) & (green < 90) & (blue > 60) & (blue < 200) & opaque).sum()
     luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255
-    light = (luminance > 0.72) & ((rgb.max(axis=2) - rgb.min(axis=2)) < 40) & (alpha > 200)
+    light = (luminance > 0.72) & ((rgb.max(axis=2) - rgb.min(axis=2)) < 60) & (alpha > 20)
     bbox = _bbox(opaque)
     if bbox is None:
         return {
@@ -118,6 +118,12 @@ def _bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
 
 
 def _near_white_border(values: np.ndarray, bbox: tuple[int, int, int, int]) -> float:
+    """The strongest opposite-side white band, so text on one edge is not a border.
+
+    A die-cut sticker border runs around the artwork: top and bottom, or left
+    and right, are both white. A single white word near one edge is not a
+    sticker border, and the earlier whole-ring measure counted it as one.
+    """
     left, top, right, bottom = bbox
     crop = values[top:bottom, left:right]
     rgb = crop[..., :3]
@@ -125,16 +131,33 @@ def _near_white_border(values: np.ndarray, bbox: tuple[int, int, int, int]) -> f
     near_white = (
         (rgb.min(axis=2) > 220) & ((rgb.max(axis=2) - rgb.min(axis=2)) < 30) & (alpha > 200)
     )
+    opaque = alpha > 200
     band = max(2, int(min(crop.shape[:2]) * 0.03))
-    ring = np.zeros_like(near_white)
-    ring[:band, :] = True
-    ring[-band:, :] = True
-    ring[:, :band] = True
-    ring[:, -band:] = True
-    opaque_ring = ring & (alpha > 200)
-    if opaque_ring.sum() == 0:
-        return 0.0
-    return float((near_white & ring).sum() / opaque_ring.sum())
+
+    def side(mask: np.ndarray) -> float:
+        total = int((mask & opaque).sum())
+        if total == 0:
+            return 0.0
+        return float((mask & near_white).sum() / total)
+
+    top_score = side(_band(crop.shape, "top", band))
+    bottom_score = side(_band(crop.shape, "bottom", band))
+    left_score = side(_band(crop.shape, "left", band))
+    right_score = side(_band(crop.shape, "right", band))
+    return max(min(top_score, bottom_score), min(left_score, right_score))
+
+
+def _band(shape: tuple[int, ...], side: str, width: int) -> np.ndarray:
+    mask = np.zeros(shape[:2], dtype=bool)
+    if side == "top":
+        mask[:width, :] = True
+    elif side == "bottom":
+        mask[-width:, :] = True
+    elif side == "left":
+        mask[:, :width] = True
+    else:
+        mask[:, -width:] = True
+    return mask
 
 
 def text_overlap(text_path: Path | None, subject_path: Path | None) -> float:

@@ -27,3 +27,4 @@ helm/values-local.yaml
 # Spike outputs
 spike/out/
 spike/out_pod/
+spike/out_full/

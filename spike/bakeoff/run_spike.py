@@ -190,6 +190,54 @@ def _text_overlay(layout: LayoutSpec, size: tuple[int, int]) -> bytes | None:
     )
 
 
+def _render_text_only_hybrid(
+    brief_id: int,
+    brief: DesignBrief,
+    *,
+    out_dir: Path,
+    seed: int,
+    size: tuple[int, int],
+) -> dict[str, Any]:
+    """A type_hero brief with no scene has no art to generate.
+
+    The deterministic arm draws the type on a blank canvas instead of sending
+    the brief to Qwen. This is the fair test of whether the compositor can
+    replace the hero path when there is no scene.
+    """
+    layout = _layout(brief, "text_only")
+    raw = composite_text(blank_canvas("dtf_apparel", size=size), layout)
+    transparent = composite_text(
+        blank_canvas("dtf_apparel", transparent=True, size=size), layout, transparent=True
+    )
+    overlay = _text_overlay(layout, size)
+    stem = f"{brief_id}_hybrid_{seed}"
+    _save_png(out_dir / "hybrid" / f"{stem}_raw_text.png", raw)
+    _save_png(out_dir / "hybrid" / f"{stem}_transparent.png", transparent)
+    _save_png(
+        out_dir / "hybrid" / f"{stem}_subject.png",
+        blank_canvas("dtf_apparel", transparent=True, size=size),
+    )
+    if overlay is not None:
+        _save_png(out_dir / "hybrid" / f"{stem}_text.png", overlay)
+    dark = is_dark_garment(_garment_colour(brief))
+    return {
+        "brief_id": brief_id,
+        "arm": "hybrid",
+        "seed": seed,
+        "template": "text_only",
+        "garment": _garment_colour(brief),
+        "headline": brief.headline_text,
+        "tagline": brief.tagline_text,
+        "expected": [block for block in (brief.headline_text, brief.tagline_text) if block],
+        "raw_path": str(out_dir / "hybrid" / f"{stem}_raw_text.png"),
+        "transparent_path": str(out_dir / "hybrid" / f"{stem}_transparent.png"),
+        "subject_path": str(out_dir / "hybrid" / f"{stem}_subject.png"),
+        "text_path": str(out_dir / "hybrid" / f"{stem}_text.png") if overlay else None,
+        "text_ink": "#F7F3E8" if dark else "#111111",
+        "prompt": "text-only fallback (no scene_description)",
+    }
+
+
 def _render_hybrid(
     brief_id: int,
     brief: DesignBrief,
@@ -200,6 +248,10 @@ def _render_hybrid(
 ) -> dict[str, Any]:
     template_id = _simple_template(brief)
     width, height = canvas_size(template_id)
+    if not (brief.scene_description or "").strip():
+        return _render_text_only_hybrid(
+            brief_id, brief, out_dir=out_dir, seed=seed, size=(width, height)
+        )
     prompt = hybrid_prompt(brief, template_id)
     result = client.generate_image(
         prompt=prompt,

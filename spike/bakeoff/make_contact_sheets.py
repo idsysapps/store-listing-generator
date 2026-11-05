@@ -28,6 +28,7 @@ GARMENT_HEX = {
 
 THUMB = (520, 420)
 LABEL_HEIGHT = 42
+TILE_HEIGHT = THUMB[1] + LABEL_HEIGHT
 
 
 def _rgb(value: str) -> tuple[int, int, int]:
@@ -44,11 +45,14 @@ def _garment_hex(name: str | None) -> str:
 def _thumbnail(path: Path, garment: str) -> Image.Image:
     with Image.open(path) as opened:
         image = opened.convert("RGBA")
-    canvas = Image.new("RGB", image.size, _rgb(garment))
+    canvas = Image.new("RGB", image.size, _rgb(_garment_hex(garment)))
     canvas.paste(image, mask=image.getchannel("A"))
     canvas.thumbnail(THUMB, Image.Resampling.LANCZOS)
-    tile = Image.new("RGB", THUMB, (250, 250, 250))
-    tile.paste(canvas, ((THUMB[0] - canvas.width) // 2, (THUMB[1] - canvas.height) // 2))
+    tile = Image.new("RGB", (THUMB[0], TILE_HEIGHT), (250, 250, 250))
+    tile.paste(
+        canvas,
+        ((THUMB[0] - canvas.width) // 2, LABEL_HEIGHT + (THUMB[1] - canvas.height) // 2),
+    )
     return tile
 
 
@@ -69,9 +73,9 @@ def _sheet(entries: list[dict[str, Any]], output: Path) -> None:
         return
     width = min(3, len(tiles)) * THUMB[0]
     rows = (len(tiles) + 2) // 3
-    sheet = Image.new("RGB", (width, rows * THUMB[1]), (235, 235, 235))
+    sheet = Image.new("RGB", (width, rows * TILE_HEIGHT), (235, 235, 235))
     for index, tile in enumerate(tiles):
-        sheet.paste(tile, ((index % 3) * THUMB[0], (index // 3) * THUMB[1]))
+        sheet.paste(tile, ((index % 3) * THUMB[0], (index // 3) * TILE_HEIGHT))
     output.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(output)
 
