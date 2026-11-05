@@ -79,6 +79,25 @@ The gates can be tuned with `ARTWORK_VALIDATION_ENABLED`,
 `MAX_LETTERING_REGENERATION_ATTEMPTS`, `MAX_TEXT_REGENERATION_ATTEMPTS` and
 `REQUIRE_TAGLINE_TEXT` in the Helm chart.
 
+### The candidate quality gate
+
+The text gate reads the render, but it does not know what the design will look
+like on the shirt. `IMAGE_CANDIDATE_COUNT=2` renders two candidates and keeps
+the one the deterministic gate prefers: least text over the subject, least
+magenta residue, a coverage that is not a solid sheet, and no sticker border.
+Production sets two; local and test runs default to one.
+
+The gate lives in `store_listing.orchestration.design_quality` and also checks
+the planned ink against the recommended garment colour. The accent word is
+dropped from the `loud` treatment when it would disappear into the shirt
+(brief 213).
+
+Captions stay on the deterministic compositor. `MODEL_TEXT_CAPTION_ENABLED`
+turns the old Qwen caption path back on for an experiment; the bake-off found
+it lost the headline on five of nine caption briefs. `TEXT_PLAN_RENDERING_ENABLED`
+turns the stored carrier/region/method plan back on; it is off by default.
+`type_hero` still goes to the Qwen typographic hero path.
+
 ## The seed pool and the brief mix
 
 A batch of briefs is only as good as the pool it is made of, and the pool used
@@ -570,6 +589,9 @@ Ideogram text routing and the AWS Bedrock image calls have been removed.
 | `MAX_TEXT_REGENERATION_ATTEMPTS` | `2` | Retries after a text mismatch (3 generations max) |
 | `ARTWORK_TEXT_VALIDATION_ENABLED` | `true` | Reject an artwork that carries letters of its own |
 | `MAX_LETTERING_REGENERATION_ATTEMPTS` | `1` | Retries after the artwork came back with lettering in it |
+| `IMAGE_CANDIDATE_COUNT` | `1` (prod `2`) | Renders to compare before uploading; the best candidate wins |
+| `MODEL_TEXT_CAPTION_ENABLED` | `false` | Let a caption use the Qwen model-text path (experiment; also requires `TEXT_PLAN_RENDERING_ENABLED=true`) |
+| `TEXT_PLAN_RENDERING_ENABLED` | `false` | Execute the stored carrier/region/method text plan |
 
 The OCR gate **fails closed**: when the text rendered into the image cannot be
 verified within the retry budget, the image is not uploaded and the brief is

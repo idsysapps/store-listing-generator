@@ -845,3 +845,39 @@ class TestTheTextBar:
 
     def test_a_legacy_brief_keeps_the_bar(self) -> None:
         assert _bar_colour(self._spec(None), TEMPLATES["mid_ribbon"]) is not None
+
+
+class TestGarmentAwareAccent:
+    def test_a_dark_accent_word_is_dropped_on_a_dark_garment(self) -> None:
+        # Brief 213 drew SANTA'S in #1F3050 on a Jet Black shirt. The accent
+        # word has to survive the same contrast check as the main ink.
+        spec = LayoutSpec(
+            layout_type="text_top",
+            headline_text="SANTA'S LAST HAUL",
+            voice="loud",
+            font_color="#FFFFFF",
+            garment_color="Jet Black",
+        )
+
+        assert spec.treatment.accent_word is None
+
+    def test_a_contrasting_accent_word_is_kept(self) -> None:
+        spec = LayoutSpec(
+            layout_type="text_top",
+            headline_text="STILL STANDING",
+            voice="loud",
+            font_color="#111111",
+            garment_color="White",
+        )
+
+        assert spec.treatment.accent_word == 0
+
+    def test_without_a_garment_colour_the_voice_treatment_is_unchanged(self) -> None:
+        spec = LayoutSpec(
+            layout_type="text_top",
+            headline_text="STILL STANDING",
+            voice="loud",
+            font_color="#FFFFFF",
+        )
+
+        assert spec.treatment.accent_word == 0

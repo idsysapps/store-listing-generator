@@ -45,6 +45,10 @@ needs.
   canvas). Coverage above 65% logs a warning: the design may print as a large
   solid area. This is a warning, not a rejection; a large subject can be
   intentional.
+- With `IMAGE_CANDIDATE_COUNT=2`, the renderer compares two candidates and
+  keeps the one with less type on the subject, less key residue, less light
+  fill and a cleaner edge. The QA gate measures text contrast against the
+  recommended garment, not against the magenta key.
 - `TEXT_EMBED_PROFILE` turns on DTF-safe text embedding for planned carriers:
   `off` is the default, `v11`/`v12` are the standard wear levels, and `v13`
   is the heavy distressed level. The font still owns spelling. Glyph pixels
