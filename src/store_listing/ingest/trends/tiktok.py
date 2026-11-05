@@ -7,9 +7,10 @@ tag pages (best-effort). Discoveries are written to the unified trend store
 pool via ``seed_candidates``.
 
 Cost guardrails (Apify bills per returned video, not per run):
-- ``TIKTOK_RESULTS_PER_PAGE`` caps the actor's input (default 20); the paid
-  actor is otherwise uncapped and can return ~50+ videos per tag.
-- Tags come from the active seed set only. Set ``TIKTOK_EXTRA_HASHTAGS`` to add
+- One actor run per harvest, at most 100 videos (``HARVEST_RESULT_CAP``).
+  ``resultsPerPage`` is that cap split across the hashtags in the run.
+- ``TIKTOK_RESULTS_PER_PAGE`` can only lower that share.
+- At most 20 tags from the active seed set. Set ``TIKTOK_EXTRA_HASHTAGS`` to add
   curated tags; there are no hardcoded targets.
 """
 
@@ -21,20 +22,20 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Final, Protocol, runtime_checkable
 
 import httpx
 
 from store_listing.orchestration.promotion import compute_promotion_score
 
+from .apify_budget import actor_call_kwargs, bucket_items, per_target_limit, select_paid_seeds
 from .google_trends import DatabaseClient
 from .schemas import TrendHarvestRequest, TrendResult
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIKTOK_ACTOR: Final[str] = "clockworks/tiktok-hashtag-scraper"
-DEFAULT_TIKTOK_RESULTS_PER_PAGE: Final[int] = 20
 
 _SCRIPT_RE = re.compile(
     r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
@@ -75,6 +76,14 @@ def _iter_dicts(value: Any):
     elif isinstance(value, list):
         for child in value:
             yield from _iter_dicts(child)
+
+
+def _hashtag_label(item: dict[str, Any]) -> str | None:
+    for field in ("searchedHashtag", "hashtag", "challenge"):
+        value = item.get(field)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
 
 
 def _tiktok_item(item: dict[str, Any]) -> TikTokItem:
@@ -134,29 +143,33 @@ class ApifyTikTokGateway:
     def _api_actor_ref(self) -> str:
         return self.actor_id.replace("/", "~")
 
-    @staticmethod
-    def _results_per_page() -> int:
-        return int(os.environ.get("TIKTOK_RESULTS_PER_PAGE") or DEFAULT_TIKTOK_RESULTS_PER_PAGE)
-
     def scrape_hashtag(self, hashtag: str) -> list[TikTokItem]:
+        return self.scrape_hashtags([hashtag]).get(hashtag, [])
+
+    def scrape_hashtags(self, hashtags: list[str]) -> dict[str, list[TikTokItem]]:
+        """One actor run. resultsPerPage is per hashtag, so the share stays inside the cap."""
+        if not hashtags:
+            return {}
+        tags = [hashtag.lstrip("#") for hashtag in hashtags]
         run = (
             self._apify()
             .actor(self._api_actor_ref())
             .call(
-                run_input={
-                    "hashtags": [hashtag.lstrip("#")],
-                    "resultsPerPage": self._results_per_page(),
-                },
-                run_timeout=timedelta(minutes=4),
+                **actor_call_kwargs(
+                    {
+                        "hashtags": tags,
+                        "resultsPerPage": per_target_limit(len(tags), "TIKTOK_RESULTS_PER_PAGE"),
+                    }
+                )
             )
         )
         if run is None:
-            return []
+            return {hashtag: [] for hashtag in hashtags}
         dataset_id = (
             run.get("defaultDatasetId") if isinstance(run, dict) else run.default_dataset_id
         )
         raw_items = self._apify().dataset(dataset_id).list_items().items
-        return [_tiktok_item(item) for item in raw_items]
+        return bucket_items(hashtags, raw_items, _tiktok_item, _hashtag_label)
 
 
 class TikTokWebGateway:
@@ -227,10 +240,14 @@ class TikTokClient:
     def harvest_and_store(
         self, request: TrendHarvestRequest
     ) -> tuple[list[TrendResult], list[str]]:
+        tags = self.target_hashtags(request.seed_keywords)
+        if callable(getattr(type(self.gateway), "scrape_hashtags", None)):
+            return self._harvest_paid(select_paid_seeds(tags))
+
         all_results: list[TrendResult] = []
         failed: list[str] = []
 
-        for tag in self.target_hashtags(request.seed_keywords):
+        for tag in tags:
             try:
                 items = self.gateway.scrape_hashtag(tag)
                 results = self._derive_results(tag, items)
@@ -242,6 +259,22 @@ class TikTokClient:
                 failed.append(tag)
 
         return all_results, failed
+
+    def _harvest_paid(self, tags: list[str]) -> tuple[list[TrendResult], list[str]]:
+        if not tags:
+            return [], []
+        try:
+            grouped = self.gateway.scrape_hashtags(tags)  # type: ignore[attr-defined]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to scrape TikTok batch: %s", e)
+            return [], tags
+
+        all_results: list[TrendResult] = []
+        for tag in tags:
+            for result in self._derive_results(tag, grouped.get(tag, [])):
+                self._store(tag, result)
+                all_results.append(result)
+        return all_results, []
 
     def _store(self, seed_tag: str, result: TrendResult) -> None:
         query_id = self.db_client.insert_trend_query(seed_tag, result.query, source="tiktok")

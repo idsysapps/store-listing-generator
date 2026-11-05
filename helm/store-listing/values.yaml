@@ -146,6 +146,9 @@ redis:
 app:
   image: quay.io/idsysapps/store-listing-generator:latest
   replicas: 1
+  # Celery beat is its own deployment so a second app replica cannot enqueue
+  # the same Apify harvest twice.
+  beatReplicas: 1
   # Celery forks one child per CPU by default, and the node reports enough
   # CPUs for 16 children. Each child holds about 125 MB of interpreter and
   # client state, so the worker was OOM-killed on the 2Gi limit (issue #272).

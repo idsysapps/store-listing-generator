@@ -1,6 +1,7 @@
 """Unit tests for the Pinterest micro-trend harvester (Apify + free web fallback)."""
 
 import os
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from store_listing.ingest.trends.pinterest import (
@@ -184,10 +185,36 @@ def test_apify_gateway_maps_actor_output() -> None:
     assert pins[0].repins == 600
     apify_client_cls.assert_called_once_with("tok123")
     call_kwargs = apify_client_cls.return_value.actor.return_value.call.call_args.kwargs
-    assert call_kwargs["run_input"]["query"] == "pickleball"
-    assert call_kwargs["run_input"]["maxPins"] == 25
+    assert call_kwargs["run_input"]["searchQueries"] == ["pickleball"]
+    assert call_kwargs["run_input"]["maxPins"] == 100
+    assert call_kwargs["max_items"] == 100
+    assert call_kwargs["max_total_charge_usd"] == Decimal("0.50")
     actor_id = apify_client_cls.return_value.actor.call_args.args[0]
     assert actor_id == "automation-lab~pinterest-scraper"
+
+
+class _BatchPinterestGateway:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def scrape_search(self, query: str) -> list[Pin]:
+        raise AssertionError("paid harvest must use one batched run")
+
+    def scrape_searches(self, queries: list[str]) -> dict[str, list[Pin]]:
+        self.queries = list(queries)
+        if not queries:
+            return {}
+        return {queries[0]: [PIN_A]}
+
+
+def test_paid_harvest_is_one_run_for_twenty_seeds() -> None:
+    gateway = _BatchPinterestGateway()
+    client = PinterestClient(db_client=MagicMock(), gateway=gateway)
+    seeds = [f"seed {index}" for index in range(30)]
+
+    client.harvest_and_store(TrendHarvestRequest(seed_keywords=seeds))
+
+    assert gateway.queries == seeds[:20]
 
 
 def test_web_gateway_parses_embedded_state() -> None:

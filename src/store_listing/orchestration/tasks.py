@@ -18,6 +18,7 @@ from store_listing.ingest.trends import (
     XClient,
     YouTubeClient,
 )
+from store_listing.ingest.trends.apify_budget import format_all_in, format_budget
 from store_listing.orchestration import celery_redis_url
 from store_listing.orchestration.product_scope import enabled_product_types
 from store_listing.orchestration.promotion import (
@@ -231,6 +232,8 @@ if _instagram_enabled():
         "schedule": crontab(hour=6, minute=40, day_of_week=5),
     }
 
+logger.info("%s", format_all_in())
+
 
 def _parse_cron(env_var: str, default: str) -> crontab:
     """Parse a 5-field cron expression from an env var into a Celery crontab."""
@@ -332,6 +335,7 @@ def fetch_trends_manual(seeds: list[str] | None = None) -> dict:
 @with_source_health("tiktok")
 def fetch_tiktok_trends() -> dict:
     """Harvest TikTok hashtag/sound micro-trends from the active seed set."""
+    logger.info("%s", format_budget("tiktok"))
     db_client = DatabaseClient()
     request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
     results, failed = TikTokClient(db_client=db_client).harvest_and_store(request)
@@ -342,6 +346,7 @@ def fetch_tiktok_trends() -> dict:
 @with_source_health("pinterest")
 def fetch_pinterest_trends() -> dict:
     """Harvest Pinterest search/board traction from the active seed set."""
+    logger.info("%s", format_budget("pinterest"))
     db_client = DatabaseClient()
     request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
     results, failed = PinterestClient(db_client=db_client).harvest_and_store(request)
@@ -382,6 +387,7 @@ def _record_marketplace_health(
 @with_source_health("x")
 def fetch_x_trends() -> dict:
     """Harvest X hashtag/keyword conversation trends from the active seed set."""
+    logger.info("%s", format_budget("x"))
     db_client = DatabaseClient()
     request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
     results, failed = XClient(db_client=db_client).harvest_and_store(request)
@@ -412,6 +418,7 @@ def fetch_youtube_trends() -> dict:
 @with_source_health("instagram")
 def fetch_instagram_trends() -> dict:
     """Harvest Instagram hashtag engagement from the active seed set."""
+    logger.info("%s", format_budget("instagram"))
     db_client = DatabaseClient()
     request = TrendHarvestRequest(seed_keywords=_active_seed_keywords(db_client) or STARTER_SEEDS)
     results, failed = InstagramClient(db_client=db_client).harvest_and_store(request)
