@@ -73,6 +73,21 @@ class TestNormaliseCopyMode:
             == NO_TEXT
         )
 
+    def test_a_fill_scene_is_a_caption_even_when_the_model_says_hero(self) -> None:
+        assert (
+            normalise_copy_mode(
+                TYPE_HERO,
+                layout_type="auto",
+                headline_text="CHEERS",
+                tagline_text=None,
+                scene_description=(
+                    "A seamless pattern of tangled ribbon bows and tilted "
+                    "champagne flutes filling the design area"
+                ),
+            )
+            == CAPTION
+        )
+
     def test_a_hero_layout_defaults_to_type_hero(self) -> None:
         assert (
             normalise_copy_mode(
@@ -262,6 +277,25 @@ class TestAssignBatchCopyModes:
         result = assign_batch_copy_modes(briefs)
 
         assert [brief.copy_mode for brief in result] == [CAPTION, TYPE_HERO]
+
+    def test_a_fill_scene_is_not_promoted_to_type_hero(self) -> None:
+        briefs = [
+            _brief(
+                concept="Pattern",
+                headline_text="CHEERS",
+                confidence=99,
+                scene_description=("A seamless pattern of ribbon bows filling the design area"),
+            ),
+            _brief(
+                concept="Long",
+                headline_text="A LONG CAPTION LINE THAT IS NOT A HERO WORD",
+                confidence=10,
+            ),
+        ]
+
+        result = assign_batch_copy_modes(briefs)
+
+        assert [brief.copy_mode for brief in result] == [CAPTION, CAPTION]
 
     def test_a_brief_without_a_scene_is_not_promoted(self) -> None:
         briefs = [

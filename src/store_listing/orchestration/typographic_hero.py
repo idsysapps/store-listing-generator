@@ -27,7 +27,12 @@ from store_listing.orchestration.comfyui_client import (
     ComfyUIError,
     ComfyUIResult,
 )
-from store_listing.orchestration.copy_modes import HERO_LAYOUT_TYPES, NO_TEXT, TYPE_HERO
+from store_listing.orchestration.copy_modes import (
+    HERO_LAYOUT_TYPES,
+    NO_TEXT,
+    TYPE_HERO,
+    scene_fills_print_area,
+)
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.text_validation import StrictTextResult
@@ -113,6 +118,8 @@ def is_typographic_hero_brief(brief_row: Mapping[str, Any], brief: DesignBrief) 
     if brief.copy_mode == NO_TEXT:
         return False
     if not (brief.headline_text or "").strip():
+        return False
+    if scene_fills_print_area(brief.scene_description):
         return False
     if brief.copy_mode == TYPE_HERO:
         return True

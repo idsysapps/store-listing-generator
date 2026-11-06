@@ -97,6 +97,22 @@ class TestBuildFluxPrompt:
 
         assert "do not include any text or lettering" in prompt.lower()
 
+    def test_a_fill_scene_is_rewritten_as_isolated_motifs(self) -> None:
+        prompt = build_flux_prompt(
+            _make_brief(
+                scene_description=(
+                    "A seamless pattern of tangled ribbon bows and tilted "
+                    "champagne flutes filling the design area"
+                ),
+            )
+        ).lower()
+
+        assert "isolated motifs" in prompt
+        assert "ribbon bows" in prompt
+        assert "champagne flutes" in prompt
+        assert "seamless pattern" not in prompt
+        assert "filling the design area" not in prompt
+
     def test_a_dtf_prompt_keeps_the_garment_as_the_background(self) -> None:
         prompt = build_flux_prompt(_make_brief())
 

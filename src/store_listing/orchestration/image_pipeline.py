@@ -38,13 +38,16 @@ from store_listing.orchestration.chroma_key import (
 from store_listing.orchestration.comfyui_client import ComfyUIClient
 from store_listing.orchestration.copy_modes import (
     CAPTION,
+    HERO_LAYOUT_TYPES,
     NO_TEXT,
     TYPE_HERO,
     copy_mode_from_row,
+    scene_fills_print_area,
 )
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.design_quality import (
     Candidate,
+    QualityMetrics,
     choose_best,
     contrast_ratio,
     garment_hex,
@@ -85,6 +88,7 @@ from store_listing.orchestration.text_integration import text_plan_from_value
 from store_listing.orchestration.text_validation import StrictTextValidator, TextValidator
 from store_listing.orchestration.textures import apply_texture, despeckle_image
 from store_listing.orchestration.typographic_hero import (
+    HeroCopy,
     TypographicHeroGenerator,
     hero_candidate_count,
     hero_copy_from_brief,
@@ -234,11 +238,29 @@ def _brief_for_render(brief_row: dict[str, Any]) -> DesignBrief:
     The stored text plan is off by default: the bake-off showed the
     carrier/region/method layer adds defects faster than it adds design. An
     explicit experiment can turn it back on (issue #307).
+
+    A scene that fills the print area is not a hero subject. An already stored
+    type_hero row with that scene renders as a caption (issue #312).
     """
     brief = _brief_from_row(brief_row)
     if not _text_plan_rendering_enabled():
-        return replace(brief, text_plan=None)
-    return brief
+        brief = replace(brief, text_plan=None)
+    return _demote_fill_scene(brief_row, brief)
+
+
+def _demote_fill_scene(brief_row: dict[str, Any], brief: DesignBrief) -> DesignBrief:
+    """Render a fill-the-canvas hero as a caption of isolated motifs."""
+    layout = (brief.layout_type or "").strip()
+    heroish = brief.copy_mode == TYPE_HERO or layout in HERO_LAYOUT_TYPES
+    if not heroish or not scene_fills_print_area(brief.scene_description):
+        return brief
+    logger.info(
+        "Brief %s: scene fills the print area, rendering as a caption",
+        brief_row.get("id"),
+    )
+    if layout in HERO_LAYOUT_TYPES or layout in ("full_bleed", "text_only"):
+        layout = "auto"
+    return replace(brief, copy_mode=CAPTION, kicker_text=None, layout_type=layout or "auto")
 
 
 def _image_candidate_count() -> int:
@@ -490,6 +512,17 @@ def _generate_typographic_hero_brief(
     except ValueError as error:
         return False, str(error)
 
+    if is_dtf:
+        return _generate_gated_hero(
+            brief_row,
+            brief,
+            copy,
+            storage=storage,
+            comfyui_client=comfyui_client,
+            validator=validator,
+            db_client=db_client,
+        )
+
     generator = TypographicHeroGenerator(
         comfyui_client=comfyui_client,
         validator=validator,
@@ -503,27 +536,155 @@ def _generate_typographic_hero_brief(
         return False, result.error or "typographic hero generation failed"
 
     raw_bytes = _hero_with_descriptor(result.image_bytes, copy.descriptor)
-    transparent_bytes: bytes | None = None
-    if is_dtf:
-        # Key the Qwen artwork, then draw the descriptor on the transparent
-        # canvas: background removal must not decide what happens to the type.
-        keyed = comfyui_client.remove_background(result.image_bytes)
-        if keyed.image_bytes is None:
-            logger.warning("Background removal failed for hero brief %d: %s", brief_id, keyed.error)
-        else:
-            keyed_bytes = keyed.image_bytes
-            if not copy.sticker:
-                keyed_bytes = trim_sticker_border(keyed_bytes)
-            transparent_bytes = _hero_with_descriptor(
-                keyed_bytes, copy.descriptor, transparent=True
-            )
-    if transparent_bytes is not None and is_dark_garment(brief.garment_color):
-        transparent_bytes = remove_dark_ink(transparent_bytes)
-    _log_dtf_coverage(brief_id, transparent_bytes)
-
     keys = storage.upload_design(
         raw_bytes=raw_bytes,
-        transparent_bytes=transparent_bytes,
+        transparent_bytes=None,
+        brief_id=brief_id,
+        product_type=brief_row["product_type"],
+    )
+    db_client.update_brief_image_keys(
+        brief_id=brief_id,
+        image_key_raw=keys["raw"],
+        image_key_transparent=keys.get("transparent"),
+    )
+    return True, None
+
+
+# A keyed file that is not a decodable image cannot be measured. Test doubles
+# use that shape; a real print is a PNG and is scored. The stand-in passes the
+# gate so an unreadable double is uploaded the way it was before the gate.
+_UNMEASURED_PRINT = QualityMetrics(
+    contrast=None,
+    text_overlap=0.0,
+    magenta_fraction=0.0,
+    coverage=0.22,
+    light_fill=0.0,
+    near_white_border=0.0,
+)
+
+
+def _measured_print_metrics(image_bytes: bytes) -> QualityMetrics | None:
+    """Print metrics for a keyed PNG, or None when the bytes are not an image."""
+    try:
+        return image_metrics(image_bytes)
+    except OSError:
+        return None
+
+
+def _keyed_hero_artwork(
+    image_bytes: bytes,
+    copy: HeroCopy,
+    *,
+    comfyui_client: ComfyUIClient,
+    garment_color: str | None,
+) -> tuple[bytes, bytes] | None:
+    """The raw hero and the keyed print file, or None when the key fails."""
+    raw_bytes = _hero_with_descriptor(image_bytes, copy.descriptor)
+    keyed = comfyui_client.remove_background(image_bytes)
+    if keyed.image_bytes is None:
+        return None
+    keyed_bytes = keyed.image_bytes
+    if not copy.sticker:
+        keyed_bytes = trim_sticker_border(keyed_bytes)
+    transparent_bytes = _hero_with_descriptor(keyed_bytes, copy.descriptor, transparent=True)
+    if is_dark_garment(garment_color):
+        transparent_bytes = remove_dark_ink(transparent_bytes)
+    return raw_bytes, transparent_bytes
+
+
+def _generate_gated_hero(
+    brief_row: dict[str, Any],
+    brief: DesignBrief,
+    copy: HeroCopy,
+    *,
+    storage: ImageStorageClient,
+    comfyui_client: ComfyUIClient,
+    validator: StrictTextValidator,
+    db_client: Any,
+) -> tuple[bool, str | None]:
+    """Draw several spelling-ok heroes and upload one that passes the print gate.
+
+    The spelling retries stay inside each draw. The number of draws is the
+    image candidate count, so the Qwen budget is the product of the two.
+    A candidate that is not a decodable image cannot be judged and is kept,
+    which is how a test double still uploads. A real print that fails coverage,
+    magenta, light fill or a sticker border is not uploaded.
+    """
+    brief_id = brief_row["id"]
+    count = _image_candidate_count()
+    generator = TypographicHeroGenerator(
+        comfyui_client=comfyui_client,
+        validator=validator,
+        candidates=hero_candidate_count(),
+    )
+    passed: list[Candidate] = []
+    failed: list[Candidate] = []
+    last_error = "typographic hero generation failed"
+
+    for index in range(count):
+        result = generator.generate(copy, seed=random.randint(0, 2**31 - 1))
+        if result.image_bytes is None:
+            last_error = result.error or last_error
+            logger.warning(
+                "Typographic hero generation failed for brief %d: %s", brief_id, last_error
+            )
+            continue
+        prepared = _keyed_hero_artwork(
+            result.image_bytes,
+            copy,
+            comfyui_client=comfyui_client,
+            garment_color=brief.garment_color,
+        )
+        if prepared is None:
+            last_error = "background removal failed"
+            logger.warning("Background removal failed for hero brief %d", brief_id)
+            continue
+        raw_bytes, transparent_bytes = prepared
+        metrics = _measured_print_metrics(transparent_bytes)
+        if metrics is None:
+            passed.append(
+                Candidate(
+                    name=f"hero-{index}",
+                    raw_bytes=raw_bytes,
+                    transparent_bytes=transparent_bytes,
+                    metrics=_UNMEASURED_PRINT,
+                )
+            )
+            continue
+        candidate = Candidate(
+            name=f"hero-{index}",
+            raw_bytes=raw_bytes,
+            transparent_bytes=transparent_bytes,
+            metrics=metrics,
+        )
+        if metrics.passed:
+            passed.append(candidate)
+        else:
+            failed.append(candidate)
+
+    if not passed and not failed:
+        return False, last_error
+    if not passed:
+        best_failure = choose_best(failed)
+        return _needs_attention(
+            db_client,
+            brief_id,
+            "Every hero candidate failed the print gate: " + "; ".join(best_failure.metrics.issues),
+        )
+
+    best = choose_best(passed)
+    logger.info(
+        "Brief %d: chose %s of %d hero candidates (magenta %.1f%%, coverage %.0f%%)",
+        brief_id,
+        best.name,
+        len(passed) + len(failed),
+        best.metrics.magenta_fraction * 100,
+        best.metrics.coverage * 100,
+    )
+    _log_dtf_coverage(brief_id, best.transparent_bytes)
+    keys = storage.upload_design(
+        raw_bytes=best.raw_bytes,
+        transparent_bytes=best.transparent_bytes,
         brief_id=brief_id,
         product_type=brief_row["product_type"],
     )
