@@ -26,6 +26,7 @@ from store_listing.orchestration.chroma_key import (
     bleed_transparent_pixels,
     correct_key_mix,
     despill_key_spill,
+    feather_alpha,
     key_out_background,
     punch_out_key_colour,
 )
@@ -330,6 +331,11 @@ class ComfyUIClient:
             white=self._alpha_white_point,
             erode=self._alpha_erode_pixels,
         )
+        # The matte is hard by construction. A sub-pixel feather keeps the
+        # cut from looking like a staircase at print size. It runs before the
+        # hole punch so a letter's counter stays fully transparent; the colour
+        # under the edge is despilled and bled afterwards (issue #292).
+        result.image_bytes = feather_alpha(result.image_bytes)
         if _alpha_is_empty(result.image_bytes):
             # An all-over pattern has no salient subject for BiRefNet to find.
             # Its flat background can still be keyed out exactly, so do that

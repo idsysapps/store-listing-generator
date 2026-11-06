@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, call
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from store_listing.orchestration.artwork_validation import (
     ArtworkTextResult,
@@ -76,6 +76,26 @@ class TestRenderPolicy:
 
         assert plan is not None
         assert plan.carrier == "headstone"
+
+
+def _artwork_with_bottom_subject(size: int = 256) -> bytes:
+    """A keyed DTF render whose subject reaches into the caption zone."""
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, int(size * 0.55), size, size), fill=(120, 120, 120, 255))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _raw_with_bottom_subject(size: int = 256) -> bytes:
+    """The same render before the key, on the magenta DTF background."""
+    image = Image.new("RGB", (size, size), (255, 0, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, int(size * 0.55), size, size), fill=(120, 120, 120))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _mock_db_client(briefs: list[dict[str, Any]] | None = None) -> MagicMock:
@@ -230,6 +250,49 @@ class TestGenerateImagesForBriefs:
 
         assert result["images_generated"] == 1
         assert result["errors"] == 1
+
+
+class TestCaptionPlacement:
+    def test_the_caption_is_moved_off_the_artwork_in_both_files(self) -> None:
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    product_type="dtf_apparel",
+                    layout_type="emblem",
+                    tagline_text="POWERED BY COFFEE",
+                    font_color="#FF0000",
+                )
+            ]
+        )
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(
+                raw=_raw_with_bottom_subject(),
+                transparent=_artwork_with_bottom_subject(),
+            ),
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        assert result["images_generated"] == 1
+        assert s3.put_object.call_count == 2
+        for put in s3.put_object.call_args_list:
+            image = Image.open(BytesIO(put.kwargs["Body"])).convert("RGBA")
+            rows = []
+            for y in range(image.height):
+                for x in range(image.width):
+                    red, green, blue, _alpha = cast(
+                        tuple[int, int, int, int], image.getpixel((x, y))
+                    )
+                    if red > 150 and red - max(green, blue) > 60:
+                        rows.append(y)
+                        break
+            assert rows, "the caption should be drawn"
+            assert max(rows) < int(image.height * 0.55), (
+                "the caption should stay above the artwork in the raw and the print file"
+            )
 
 
 class TestTextValidationGate:

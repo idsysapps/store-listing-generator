@@ -12,6 +12,7 @@ from store_listing.orchestration.chroma_key import (
     correct_key_mix,
     despill_key_spill,
     estimate_key_colour,
+    feather_alpha,
     key_out_background,
     opaque_fraction,
     punch_out_key_colour,
@@ -340,6 +341,37 @@ class TestBleedTransparentPixels:
         with Image.open(io.BytesIO(result)) as output:
             assert _alpha_at(output, 0, 0) == 0
             assert _alpha_at(output, 8, 8) == 255
+
+
+class TestFeatherAlpha:
+    def _square(self, size: int = 32) -> bytes:
+        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        for x in range(8, 24):
+            for y in range(8, 24):
+                image.putpixel((x, y), (220, 40, 40, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def test_a_hard_edge_gains_intermediate_alpha(self) -> None:
+        result = Image.open(io.BytesIO(feather_alpha(self._square()))).convert("RGBA")
+
+        edge = _alpha_at(result, 8, 16)
+        assert 0 < edge < 255
+
+    def test_the_interior_stays_opaque(self) -> None:
+        result = Image.open(io.BytesIO(feather_alpha(self._square()))).convert("RGBA")
+
+        assert _alpha_at(result, 16, 16) == 255
+
+    def test_it_only_changes_the_alpha_channel(self) -> None:
+        original = Image.open(io.BytesIO(self._square())).convert("RGBA")
+        result = Image.open(io.BytesIO(feather_alpha(self._square()))).convert("RGBA")
+
+        assert _rgb_at(result, 8, 16) == _rgb_at(original, 8, 16)
+
+    def test_an_unreadable_image_is_left_alone(self) -> None:
+        assert feather_alpha(b"not an image") == b"not an image"
 
 
 class TestRemoveDarkInk:
