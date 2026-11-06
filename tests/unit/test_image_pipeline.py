@@ -26,11 +26,35 @@ from store_listing.orchestration.image_pipeline import (
 from store_listing.orchestration.text_validation import StrictTextResult, TextValidationResult
 
 
-def _real_png(width: int = 64, height: int = 64, color: str = "white") -> bytes:
+def _real_png(
+    width: int = 64,
+    height: int = 64,
+    color: str | tuple[int, int, int, int] = "white",
+) -> bytes:
     img = Image.new("RGBA", (width, height), color)
     buf = BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _isolated_mark() -> bytes:
+    """A small dark mark. Most of the canvas is the garment, so the print gate passes."""
+    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle((24, 24, 40, 40), fill=(20, 20, 80, 255))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _png_center(body: bytes) -> tuple[int, ...] | None:
+    try:
+        with Image.open(BytesIO(body)) as image:
+            pixel = image.convert("RGBA").getpixel((32, 32))
+    except OSError:
+        return None
+    if not isinstance(pixel, tuple):
+        return None
+    return tuple(int(channel) for channel in pixel)
 
 
 class TestTextEmbedProfileFlag:
@@ -1668,6 +1692,114 @@ class TestTypographicHeroPath:
         bodies = [upload.kwargs["Body"] for upload in s3.put_object.call_args_list]
         assert b"composed-raw" in bodies
         assert b"composed-keyed" in bodies
+
+    def test_a_dtf_hero_uploads_the_candidate_that_passes_the_print_gate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_DESCRIPTOR", "0")
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_CANDIDATES", "1")
+        monkeypatch.setenv("IMAGE_CANDIDATE_COUNT", "2")
+        db = _mock_db_client(
+            briefs=[self._hero_brief(product_type="dtf_apparel", tagline_text=None)]
+        )
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.side_effect = [
+            ComfyUIResult(image_bytes=b"sheet"),
+            ComfyUIResult(image_bytes=b"mark"),
+        ]
+        comfy.remove_background.side_effect = [
+            ComfyUIResult(image_bytes=_real_png(color=(255, 80, 160, 255))),
+            ComfyUIResult(image_bytes=_isolated_mark()),
+        ]
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            hero_validator=self._hero_validator(),
+        )
+
+        assert result == {"status": "success", "images_generated": 1, "errors": 0}
+        assert comfy.generate_qwen_image.call_count == 2
+        db.update_brief_image_status.assert_not_called()
+        centers = [_png_center(upload.kwargs["Body"]) for upload in s3.put_object.call_args_list]
+        assert (20, 20, 80, 255) in centers
+        assert (255, 80, 160, 255) not in centers
+
+    def test_a_dtf_hero_that_fails_the_print_gate_is_not_uploaded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_DESCRIPTOR", "0")
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_CANDIDATES", "1")
+        monkeypatch.setenv("IMAGE_CANDIDATE_COUNT", "2")
+        db = _mock_db_client(
+            briefs=[self._hero_brief(product_type="dtf_apparel", tagline_text=None)]
+        )
+        comfy = _comfyui_client()
+        comfy.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"sheet")
+        comfy.remove_background.return_value = ComfyUIResult(
+            image_bytes=_real_png(color=(255, 80, 160, 255))
+        )
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            hero_validator=self._hero_validator(),
+        )
+
+        assert result["errors"] == 1
+        assert comfy.generate_qwen_image.call_count == 2
+        db.update_brief_image_keys.assert_not_called()
+        db.update_brief_image_status.assert_called_once()
+        status = db.update_brief_image_status.call_args.kwargs
+        assert status["brief_id"] == 254
+        assert status["status"] == "needs_attention"
+        assert "opaque" in status["error"]
+
+    def test_a_fill_scene_renders_as_a_caption_of_isolated_motifs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TYPOGRAPHIC_HERO_ENABLED", "1")
+        scene = (
+            "A seamless pattern of tangled ribbon bows and tilted champagne "
+            "flutes filling the design area"
+        )
+        db = _mock_db_client(
+            briefs=[
+                self._hero_brief(
+                    product_type="dtf_apparel",
+                    copy_mode="type_hero",
+                    layout_type="type_hero",
+                    scene_description=scene,
+                    tagline_text=None,
+                )
+            ]
+        )
+        comfy = _comfyui_client()
+        comfy.generate_image.return_value = ComfyUIResult(image_bytes=_real_png())
+        comfy.remove_background.return_value = ComfyUIResult(image_bytes=_isolated_mark())
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            text_validator=_validator(True),
+            hero_validator=self._hero_validator(),
+        )
+
+        assert result["images_generated"] == 1
+        comfy.generate_qwen_image.assert_not_called()
+        comfy.generate_image.assert_called()
+        prompt = comfy.generate_image.call_args.kwargs["prompt"].lower()
+        assert "isolated motifs" in prompt
+        assert "ribbon bows" in prompt
+        assert "champagne flutes" in prompt
+        assert "seamless pattern" not in prompt
+        assert "filling the design area" not in prompt
 
     def test_a_hero_without_a_descriptor_skips_the_compositor(
         self, monkeypatch: pytest.MonkeyPatch

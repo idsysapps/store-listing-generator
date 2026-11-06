@@ -203,11 +203,13 @@ def _read_brief(
     raw_copy_mode = b.get("copy_mode")
     if not isinstance(raw_copy_mode, str):
         raw_copy_mode = None
+    raw_scene = b.get("scene_description")
     copy_mode = normalise_copy_mode(
         raw_copy_mode,
         layout_type=layout_hint,
         headline_text=headline_text,
         tagline_text=tagline_text,
+        scene_description=raw_scene if isinstance(raw_scene, str) else None,
     )
     kicker_text = normalise_kicker(b.get("kicker_text"), copy_mode=copy_mode)
     if copy_mode == NO_TEXT:

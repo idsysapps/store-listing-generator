@@ -17,7 +17,11 @@ from store_listing.orchestration.art_direction import (
     prompt_for,
 )
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
-from store_listing.orchestration.copy_modes import NO_TEXT
+from store_listing.orchestration.copy_modes import (
+    NO_TEXT,
+    isolated_motif_scene,
+    scene_fills_print_area,
+)
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.design_templates import (
     canvas_size,
@@ -232,6 +236,8 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     scene = _scene_for_prompt(brief)
     if not scene:
         raise PromptBuildError("the brief has no scene_description")
+    if brief.product_type == "dtf_apparel" and scene_fills_print_area(scene):
+        scene = isolated_motif_scene(scene)
 
     if template_id == "full_bleed" and brief.headline_text:
         logger.warning(

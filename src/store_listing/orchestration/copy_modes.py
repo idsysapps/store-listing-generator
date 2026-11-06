@@ -25,6 +25,7 @@ caption render when the Qwen path is off.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any, Final, Protocol, cast
@@ -40,11 +41,37 @@ __all__ = [
     "VALID_COPY_MODES",
     "assign_batch_copy_modes",
     "copy_mode_from_row",
+    "isolated_motif_scene",
     "normalise_copy_mode",
     "normalise_kicker",
+    "scene_fills_print_area",
 ]
 
 logger = logging.getLogger(__name__)
+
+# A scene that asks the print to cover the placement. That is a caption of
+# isolated motifs, not a hero subject woven through a word.
+_FILL_PHRASES: Final[tuple[str, ...]] = (
+    r"a seamless pattern of",
+    r"seamless patterns? of",
+    r"seamless patterns?",
+    r"an all-over print of",
+    r"all-over prints? of",
+    r"all-over",
+    r"all over",
+    r"a repeating pattern of",
+    r"repeating patterns? of",
+    r"a repeat pattern of",
+    r"repeat patterns? of",
+    r"repeating patterns?",
+    r"repeat patterns?",
+    r"filling the design area",
+    r"filling the canvas",
+    r"full-bleed",
+    r"full bleed",
+    r"edge-to-edge",
+    r"edge to edge",
+)
 
 TYPE_HERO: Final[str] = "type_hero"
 CAPTION: Final[str] = "caption"
@@ -70,12 +97,33 @@ def _has_text(value: str | None) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def scene_fills_print_area(scene: str | None) -> bool:
+    """Whether the scene asks for a pattern that covers the print area."""
+    if not scene or not scene.strip():
+        return False
+    text = " ".join(scene.lower().split())
+    return any(re.search(rf"\b{phrase}\b", text) for phrase in _FILL_PHRASES)
+
+
+def isolated_motif_scene(scene: str) -> str:
+    """The same idea as separate motifs, not a sheet that fills the print."""
+    cleaned = scene
+    for phrase in _FILL_PHRASES:
+        cleaned = re.sub(rf"\b{phrase}\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = " ".join(cleaned.split()).strip(" ,.-")
+    cleaned = re.sub(r"^(?:a|an|of)\s+", "", cleaned, flags=re.IGNORECASE).strip(" ,.-")
+    if not cleaned:
+        cleaned = "the subject"
+    return f"isolated motifs of {cleaned}, not a sheet filling the print area"
+
+
 def normalise_copy_mode(
     raw: str | None,
     *,
     layout_type: str | None = None,
     headline_text: str | None = None,
     tagline_text: str | None = None,
+    scene_description: str | None = None,
 ) -> str:
     """The one mode a brief actually has, from what the model answered.
 
@@ -103,9 +151,11 @@ def normalise_copy_mode(
         mode = CAPTION
 
     if mode == TYPE_HERO:
-        if has_headline:
-            return TYPE_HERO
-        return CAPTION if has_tagline else NO_TEXT
+        if not has_headline:
+            return CAPTION if has_tagline else NO_TEXT
+        if scene_fills_print_area(scene_description):
+            return CAPTION
+        return TYPE_HERO
     if mode == NO_TEXT:
         return NO_TEXT
     if layout == "text_only":
@@ -209,6 +259,8 @@ def _fallback_layout(brief: CopyModeBrief) -> str | None:
 def _can_be_hero(brief: CopyModeBrief) -> bool:
     headline = (brief.headline_text or "").strip()
     scene = (brief.scene_description or "").strip()
+    if scene_fills_print_area(scene):
+        return False
     return bool(headline and scene and len(headline.split()) <= MAX_HERO_WORDS)
 
 

@@ -51,12 +51,19 @@ needs.
   a die-cut sticker, so no default white border is drawn.
 - Every DTF render logs its opaque coverage (`alpha > 0` as a share of the
   canvas). Coverage above 65% logs a warning: the design may print as a large
-  solid area. This is a warning, not a rejection; a large subject can be
-  intentional.
+  solid area. On the caption path this is a warning, not a rejection; a large
+  subject can be intentional.
 - With `IMAGE_CANDIDATE_COUNT=2`, the renderer compares two candidates and
   keeps the one with less type on the subject, less key residue, less light
   fill and a cleaner edge. The QA gate measures text contrast against the
   recommended garment, not against the magenta key.
+- The type_hero path uses the same print measurements on each keyed candidate:
+  coverage, magenta residue, light fill, and a sticker border. It uploads a
+  candidate that passes. When every candidate fails, the brief is marked
+  needs_attention and nothing is uploaded.
+- A scene that fills the print area (a seamless pattern, an all-over repeat,
+  a full-bleed sheet) is not a type_hero. It renders as a caption, and the
+  prompt asks for isolated motifs rather than a sheet of ink.
 - `TEXT_EMBED_PROFILE` turns on DTF-safe text embedding for planned carriers:
   `off` is the default, `v11`/`v12` are the standard wear levels, and `v13`
   is the heavy distressed level. The font still owns spelling. Glyph pixels
