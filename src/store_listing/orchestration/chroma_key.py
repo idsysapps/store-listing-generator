@@ -132,6 +132,87 @@ def _alpha_table(similarity: float, blend: float) -> list[int]:
     return table
 
 
+def magenta_share(image_bytes: bytes) -> float:
+    """How much of the frame is the DTF key colour.
+
+    Flux paints that key as hot pink, about ``(225, 8, 96)``, and a local
+    canvas uses pure magenta. A real print is mostly that colour. A product
+    photo has it only in the corners.
+    """
+    with Image.open(io.BytesIO(image_bytes)) as opened:
+        rgb = np.asarray(opened.convert("RGB"))
+    red = rgb[:, :, 0].astype(np.int16)
+    green = rgb[:, :, 1].astype(np.int16)
+    blue = rgb[:, :, 2].astype(np.int16)
+    magenta = (
+        (red > 170)
+        & (green < 90)
+        & (blue > 50)
+        & ((red - green) > 80)
+        & (((blue - green) > 40) | (blue > 160))
+    )
+    return float(magenta.mean())
+
+
+def backdrop_key_colour(image_bytes: bytes) -> tuple[int, int, int]:
+    """The key colour Flux actually painted, including its hot pink.
+
+    A cream strip down the edge can pull the border median off the key.
+    When the frame is mostly the key hue, the key is the median of those
+    pixels. Otherwise the border median stands.
+    """
+    with Image.open(io.BytesIO(image_bytes)) as opened:
+        rgb_image = opened.convert("RGB")
+    rgb = np.asarray(rgb_image)
+    red = rgb[:, :, 0].astype(np.int16)
+    green = rgb[:, :, 1].astype(np.int16)
+    blue = rgb[:, :, 2].astype(np.int16)
+    mask = (
+        (red > 170)
+        & (green < 90)
+        & (blue > 50)
+        & ((red - green) > 80)
+        & (((blue - green) > 40) | (blue > 160))
+    )
+    if float(mask.mean()) >= 0.42:
+        pixels = rgb[mask]
+        return tuple(int(np.median(pixels[:, channel])) for channel in range(3))  # type: ignore[return-value]
+    return estimate_key_colour(rgb_image)
+
+
+def clear_edge_plate(rgba_bytes: bytes, margin: int = 24) -> bytes:
+    """Drop a light plate that touches the edge and leave an interior shape.
+
+    Flux sometimes leaves a cream strip on the side of an otherwise keyed
+    frame. The strip touches the edge. A cream shape in the middle does not.
+    """
+    try:
+        with Image.open(io.BytesIO(rgba_bytes)) as opened:
+            result = opened.convert("RGBA")
+    except OSError:
+        return rgba_bytes
+
+    values = np.asarray(result).astype(np.int16)
+    rgb = values[..., :3]
+    alpha = values[..., 3]
+    low = rgb.min(axis=2)
+    high = rgb.max(axis=2)
+    light = (low > 180) & ((high - low) < 90) & (alpha > 16)
+    band = np.zeros(light.shape, dtype=bool)
+    band[0, :] = band[-1, :] = band[:, 0] = band[:, -1] = True
+    band &= light
+    for _ in range(margin):
+        grown = _dilate(band) & light
+        if np.array_equal(grown, band):
+            break
+        band = grown
+    values[..., 3][band] = 0
+    output = Image.fromarray(values.astype(np.uint8), "RGBA")
+    buffer = io.BytesIO()
+    output.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def key_out_background(
     image_bytes: bytes,
     *,

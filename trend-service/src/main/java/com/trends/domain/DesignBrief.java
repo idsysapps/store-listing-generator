@@ -91,6 +91,16 @@ public class DesignBrief extends PanacheEntityBase {
     @Column(name = "font_family", length = 40)
     public String fontFamily;
 
+    // A commercial layout, or null for an ordinary template.
+    @Column(name = "silhouette", length = 40)
+    public String silhouette;
+
+    @Column(name = "subtitle_text")
+    public String subtitleText;
+
+    @Column(name = "footer_text")
+    public String footerText;
+
     @Column(name = "personal_use", nullable = false)
     public Boolean personalUse = false;
 

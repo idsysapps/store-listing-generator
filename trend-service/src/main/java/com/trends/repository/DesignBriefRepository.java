@@ -89,6 +89,18 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             List<String> sourceSeeds, List<String> specificProducts,
             String audienceContains, int limit, int offset,
             DesignBriefOrderBy orderBy) {
+        return findWithFilters(productType, batchId, startDate, endDate,
+                minConfidence, maxConfidence, sourceSeeds, specificProducts,
+                audienceContains, limit, offset, orderBy, null);
+    }
+
+    public List<DesignBrief> findWithFilters(
+            String productType, String batchId,
+            String startDate, String endDate,
+            Integer minConfidence, Integer maxConfidence,
+            List<String> sourceSeeds, List<String> specificProducts,
+            String audienceContains, int limit, int offset,
+            DesignBriefOrderBy orderBy, String silhouette) {
 
         boolean needsSourceJoin = sourceSeeds != null && !sourceSeeds.isEmpty();
 
@@ -136,6 +148,10 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             conditions.add("LOWER(db.audience) LIKE :audienceContains");
             params.put("audienceContains", "%" + audienceContains.toLowerCase() + "%");
         }
+        if (silhouette != null) {
+            conditions.add("db.silhouette = :silhouette");
+            params.put("silhouette", silhouette);
+        }
 
         if (!conditions.isEmpty()) {
             jpql.append(" WHERE ");
@@ -168,6 +184,16 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             Integer minConfidence, Integer maxConfidence,
             List<String> sourceSeeds,
             String audienceContains) {
+        return countWithFilters(productType, batchId, startDate, endDate,
+                minConfidence, maxConfidence, sourceSeeds, audienceContains, null);
+    }
+
+    public long countWithFilters(
+            String productType, String batchId,
+            String startDate, String endDate,
+            Integer minConfidence, Integer maxConfidence,
+            List<String> sourceSeeds,
+            String audienceContains, String silhouette) {
 
         boolean needsSourceJoin = sourceSeeds != null && !sourceSeeds.isEmpty();
 
@@ -214,6 +240,10 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
         if (audienceContains != null) {
             conditions.add("LOWER(db.audience) LIKE :audienceContains");
             params.put("audienceContains", "%" + audienceContains.toLowerCase() + "%");
+        }
+        if (silhouette != null) {
+            conditions.add("db.silhouette = :silhouette");
+            params.put("silhouette", silhouette);
         }
 
         if (!conditions.isEmpty()) {

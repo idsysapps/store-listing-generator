@@ -562,6 +562,9 @@ class DatabaseClient:
         text_plan: dict[str, Any] | None = None,
         pricing: dict[str, Any] | None = None,
         listing_description: str | None = None,
+        silhouette: str | None = None,
+        subtitle_text: str | None = None,
+        footer_text: str | None = None,
     ) -> int:
         import json as _json
 
@@ -576,8 +579,9 @@ class DatabaseClient:
                      visual_style, confidence, reasoning, llm_model, batch_id,
                      layout_type, headline_text, tagline_text, copy_mode, kicker_text,
                      font_color, scene_description, personal_use, recommended_materials, voice,
-                     font_family, style_preset, text_plan, pricing, listing_description)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     font_family, style_preset, text_plan, pricing, listing_description,
+                     silhouette, subtitle_text, footer_text)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -605,6 +609,9 @@ class DatabaseClient:
                     text_plan_json,
                     pricing_json,
                     listing_description,
+                    silhouette,
+                    subtitle_text,
+                    footer_text,
                 ),
             )
             result = cur.fetchone()
@@ -642,7 +649,7 @@ class DatabaseClient:
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
                            voice, font_family, style_preset, text_plan,
-                           copy_mode, kicker_text
+                           copy_mode, kicker_text, silhouette, subtitle_text, footer_text
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND (image_status IS NULL OR image_status <> 'needs_attention')
@@ -659,7 +666,7 @@ class DatabaseClient:
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
                            voice, font_family, style_preset, text_plan,
-                           copy_mode, kicker_text
+                           copy_mode, kicker_text, silhouette, subtitle_text, footer_text
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND (image_status IS NULL OR image_status <> 'needs_attention')
@@ -690,6 +697,9 @@ class DatabaseClient:
                     "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
                     "copy_mode": row[16] or "caption",
                     "kicker_text": row[17],
+                    "silhouette": row[18],
+                    "subtitle_text": row[19],
+                    "footer_text": row[20],
                 }
                 for row in cur.fetchall()
             ]
@@ -704,7 +714,7 @@ class DatabaseClient:
                        layout_type, headline_text, tagline_text, font_color,
                        regeneration_feedback, scene_description, recommended_materials,
                        voice, font_family, style_preset, text_plan,
-                       copy_mode, kicker_text
+                       copy_mode, kicker_text, silhouette, subtitle_text, footer_text
                 FROM design_briefs
                 WHERE id = %s
                 """,
@@ -734,6 +744,9 @@ class DatabaseClient:
                 "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
                 "copy_mode": row[16] or "caption",
                 "kicker_text": row[17],
+                "silhouette": row[18],
+                "subtitle_text": row[19],
+                "footer_text": row[20],
             }
 
     def list_briefs_by_batch(self, batch_id: str) -> list[dict[str, Any]]:
@@ -747,7 +760,7 @@ class DatabaseClient:
                        layout_type, headline_text, tagline_text, font_color,
                        regeneration_feedback, scene_description, recommended_materials,
                        voice, font_family, style_preset, text_plan,
-                       copy_mode, kicker_text
+                       copy_mode, kicker_text, silhouette, subtitle_text, footer_text
                 FROM design_briefs
                 WHERE batch_id = %s
                 ORDER BY id
@@ -776,6 +789,9 @@ class DatabaseClient:
                     "text_plan": (_json.loads(row[15]) if isinstance(row[15], str) else row[15]),
                     "copy_mode": row[16] or "caption",
                     "kicker_text": row[17],
+                    "silhouette": row[18],
+                    "subtitle_text": row[19],
+                    "footer_text": row[20],
                 }
                 for row in cur.fetchall()
             ]

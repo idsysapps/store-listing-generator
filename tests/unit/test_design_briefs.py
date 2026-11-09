@@ -58,9 +58,10 @@ class TestBuildBriefPrompt:
         )
 
         system = messages[0]["content"]
+        layout = system.split("COMMERCIAL SILHOUETTE")[0]
         assert "'auto'" in system
         assert "text_top" not in system
-        assert "badge" not in system
+        assert "badge" not in layout
         assert "stack_side" not in system
 
     def test_the_prompt_asks_for_print_artwork_not_a_product_photo(self) -> None:

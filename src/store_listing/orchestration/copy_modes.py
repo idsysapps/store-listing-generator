@@ -40,6 +40,7 @@ __all__ = [
     "TYPE_HERO",
     "VALID_COPY_MODES",
     "assign_batch_copy_modes",
+    "clean_kicker",
     "copy_mode_from_row",
     "isolated_motif_scene",
     "normalise_copy_mode",
@@ -190,18 +191,27 @@ def copy_mode_from_row(row: Mapping[str, Any]) -> str:
     )
 
 
-def normalise_kicker(raw: Any, *, copy_mode: str) -> str | None:
-    """The kicker of a hero brief, or None when it is not one.
-
-    Only the hero path renders a kicker. A caption or no-text brief that came
-    back with one drops it rather than storing copy it will never draw.
-    """
-    if copy_mode != TYPE_HERO or not isinstance(raw, str):
+def clean_kicker(raw: Any) -> str | None:
+    """A kicker line short enough to draw, or None."""
+    if not isinstance(raw, str):
         return None
     text = " ".join(raw.split())
     if not text or len(text.split()) > MAX_KICKER_WORDS:
         return None
     return text
+
+
+def normalise_kicker(raw: Any, *, copy_mode: str) -> str | None:
+    """The kicker of a hero brief, or None when it is not one.
+
+    Only the hero path renders a kicker. A caption or no-text brief that came
+    back with one drops it rather than storing copy it will never draw. The
+    cleaned line is kept on ``stacked_kicker`` so a silhouette slot can still
+    draw it.
+    """
+    if copy_mode != TYPE_HERO:
+        return None
+    return clean_kicker(raw)
 
 
 class CopyModeBrief(Protocol):

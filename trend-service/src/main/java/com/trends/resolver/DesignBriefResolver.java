@@ -56,13 +56,25 @@ public class DesignBriefResolver {
 
     private static final int MAX_LIMIT = 100;
 
-    @Query("designBriefs")
     public DesignBriefConnection getDesignBriefs(
             String productType, String batchId,
             String startDate, String endDate,
             Integer minConfidence, Integer maxConfidence,
             List<String> sourceSeeds, List<String> specificProducts,
             String audienceContains, int limit, @DefaultValue("0") int offset,
+            @DefaultValue("CREATED_AT_DESC") DesignBriefOrderBy orderBy) throws GraphQLException {
+        return getDesignBriefs(
+                productType, batchId, startDate, endDate, minConfidence, maxConfidence,
+                sourceSeeds, specificProducts, audienceContains, null, limit, offset, orderBy);
+    }
+
+    @Query("designBriefs")
+    public DesignBriefConnection getDesignBriefs(
+            String productType, String batchId,
+            String startDate, String endDate,
+            Integer minConfidence, Integer maxConfidence,
+            List<String> sourceSeeds, List<String> specificProducts,
+            String audienceContains, String silhouette, int limit, @DefaultValue("0") int offset,
             @DefaultValue("CREATED_AT_DESC") DesignBriefOrderBy orderBy) throws GraphQLException {
         requireAuthentication();
 
@@ -74,13 +86,16 @@ public class DesignBriefResolver {
         String sd = nullIfEmpty(startDate);
         String ed = nullIfEmpty(endDate);
         String ac = nullIfEmpty(audienceContains);
+        String sil = nullIfEmpty(silhouette);
         List<String> ss = nullIfEmptyList(sourceSeeds);
         List<String> sp = nullIfEmptyList(specificProducts);
 
         LOG.debugf("Fetching design briefs: productType=%s, batchId=%s, limit=%d, offset=%d", pt, bi, effectiveLimit, effectiveOffset);
 
         if (effectiveLimit == 0) {
-            long totalCount = designBriefRepository.countWithFilters(pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac);
+            long totalCount = sil == null
+                    ? designBriefRepository.countWithFilters(pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac)
+                    : designBriefRepository.countWithFilters(pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac, sil);
             PageInfo pageInfo = new PageInfo(totalCount > 0, false, (int) totalCount);
             return new DesignBriefConnection(List.of(), pageInfo);
         }
@@ -92,16 +107,24 @@ public class DesignBriefResolver {
                 || minConfidence != null || maxConfidence != null
                 || (ss != null && !ss.isEmpty())
                 || (sp != null && !sp.isEmpty())
-                || ac != null;
+                || ac != null
+                || sil != null;
 
         DesignBriefOrderBy effectiveOrderBy = orderBy != null ? orderBy : DesignBriefOrderBy.CREATED_AT_DESC;
 
         if (hasAdvancedFilters || (pt != null && bi != null) || pt != null || bi != null) {
-            briefs = designBriefRepository.findWithFilters(
-                    pt, bi, sd, ed, minConfidence, maxConfidence,
-                    ss, sp, ac, effectiveLimit, effectiveOffset, effectiveOrderBy);
-            totalCount = designBriefRepository.countWithFilters(
-                    pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac);
+            briefs = sil == null
+                    ? designBriefRepository.findWithFilters(
+                            pt, bi, sd, ed, minConfidence, maxConfidence,
+                            ss, sp, ac, effectiveLimit, effectiveOffset, effectiveOrderBy)
+                    : designBriefRepository.findWithFilters(
+                            pt, bi, sd, ed, minConfidence, maxConfidence,
+                            ss, sp, ac, effectiveLimit, effectiveOffset, effectiveOrderBy, sil);
+            totalCount = sil == null
+                    ? designBriefRepository.countWithFilters(
+                            pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac)
+                    : designBriefRepository.countWithFilters(
+                            pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac, sil);
         } else {
             briefs = designBriefRepository.findRecentPaginated(effectiveLimit, effectiveOffset, effectiveOrderBy);
             totalCount = designBriefRepository.countAll();
@@ -218,6 +241,7 @@ public class DesignBriefResolver {
         summary.setVoice(brief.voice);
         summary.setStylePreset(brief.stylePreset);
         summary.setFontFamily(brief.fontFamily);
+        summary.setSilhouette(brief.silhouette);
         summary.setPersonalUse(brief.personalUse);
         summary.setRecommendedMaterials(
                 materialRecommendationReader.read(brief.recommendedMaterials));
