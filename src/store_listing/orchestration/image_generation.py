@@ -115,7 +115,11 @@ ARTWORK_RETRY_HINT = (
 
 # The artwork must not carry words: the text of the design is drawn on it
 # afterwards, with a font (issue #208).
-NO_LETTERING_RETRY_HINT = "No lettering, no text, no words and no numbers in the artwork."
+NO_LETTERING_RETRY_HINT = (
+    "No lettering: no signs, no titles, no sentences, and no handwriting. "
+    "Digits may stay. A label on a keypad key may stay only when it is spelled "
+    "correctly, such as OK."
+)
 
 # The product types whose background is printed as-is and is therefore white.
 WHITE_BACKGROUND_PRODUCTS = frozenset({"sublimation", "sticker_vinyl"})

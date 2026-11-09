@@ -59,10 +59,17 @@ ARTWORK_CLASSIFICATION_PROMPT = (
     "ARTWORK or PRODUCT."
 )
 
+# Alphabetic marks that belong on a phone key, spelled the way the key is printed.
+CORRECT_KEY_LABELS = frozenset({"OK", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"})
+
 ARTWORK_TEXT_PROMPT = (
-    "Look at this image. Does it contain any letters, words, numbers, handwriting or "
-    "signage anywhere in the artwork? Answer with exactly one word: TEXT if it does, "
-    "NOTEXT if it does not."
+    "Look at this image. Does it contain a sign, a title, a sentence, or "
+    "handwriting that is not printed on the object itself? Digits on a keypad, "
+    "dial, or keys are part of the object, not lettering. A short label printed "
+    "on a key is part of the keypad only when it is spelled correctly, such as "
+    "OK. A misspelled key label, such as 0K or OKK, is lettering. Copy each "
+    "alphabetic key label exactly as printed, after the verdict. Answer TEXT "
+    "if it has lettering, otherwise NOTEXT. Example: NOTEXT OK."
 )
 
 
@@ -122,6 +129,15 @@ def parse_verdict(answer: str) -> str:
     if "PRODUCT" in cleaned:
         return PRODUCT
     return UNKNOWN
+
+
+def misspelled_key_label(answer: str) -> bool:
+    """Whether a quoted key label is not one of the real keypad spellings."""
+    tokens = re.findall(r"[A-Z0-9]+", answer.strip().upper())
+    labels = [
+        token for token in tokens if token not in {"TEXT", "NOTEXT", "NO"} and not token.isdigit()
+    ]
+    return any(label not in CORRECT_KEY_LABELS for label in labels)
 
 
 def parse_text_verdict(answer: str) -> str:
@@ -200,42 +216,52 @@ class ArtworkTextValidator:
         self._client = client
         self._model = model
 
-    def validate(self, image_bytes: bytes) -> ArtworkTextResult:
-        """Report whether the artwork carries lettering of its own."""
+    def validate(self, image_bytes: bytes, *, scene: str | None = None) -> ArtworkTextResult:
+        """Report whether the artwork carries lettering of its own.
+
+        Digits on a keypad or dial of the depicted object are part of that
+        object. Words, signs, and labels are lettering.
+        """
         try:
             data_url = encode_image_for_vision(image_bytes)
-            answer = self._classify(data_url)
+            answer = self._classify(data_url, scene=scene)
         except Exception as e:  # noqa: BLE001
             logger.warning("Artwork lettering validation failed: %s", e)
             return ArtworkTextResult(has_text=False, verdict=UNKNOWN, error=str(e))
 
         verdict = parse_text_verdict(answer)
+        if verdict == NO_LETTERING and misspelled_key_label(answer):
+            verdict = HAS_TEXT
         if verdict == UNKNOWN:
             logger.warning("The artwork lettering verdict could not be read: %r", answer)
         return ArtworkTextResult(has_text=verdict == HAS_TEXT, verdict=verdict)
 
-    def validate_no_text(self, image_bytes: bytes) -> NoTextResult:
+    def validate_no_text(self, image_bytes: bytes, *, scene: str | None = None) -> NoTextResult:
         """The inverted gate: accept only an explicit "no lettering" verdict.
 
         Unknown and failed readings fail closed. A no-text design has no
         compositor pass to correct a letter that the image model drew, so the
         absence of words has to be verified rather than assumed.
         """
-        result = self.validate(image_bytes)
+        result = self.validate(image_bytes, scene=scene)
         return NoTextResult(
             matched=result.verdict == NO_LETTERING,
             verdict=result.verdict,
             error=result.error,
         )
 
-    def _classify(self, data_url: str) -> str:
+    def _classify(self, data_url: str, *, scene: str | None = None) -> str:
+        prompt = ARTWORK_TEXT_PROMPT
+        described = (scene or "").strip()
+        if described:
+            prompt = f"{prompt} The picture was asked to show: {described}."
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": ARTWORK_TEXT_PROMPT},
+                        {"type": "text", "text": prompt},
                         {"type": "image_url", "image_url": {"url": data_url}},
                     ],
                 }

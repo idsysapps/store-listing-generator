@@ -226,6 +226,40 @@ class TestArtworkTextValidator:
         assert "TEXT" in text
         assert "NOTEXT" in text
 
+    def test_digits_on_a_keypad_are_part_of_the_object(self) -> None:
+        client = _client("NOTEXT")
+        validator = ArtworkTextValidator(client=client, model="vl")
+
+        validator.validate(
+            _image_bytes(),
+            scene="a 1990s flip phone tangled in a smartwatch strap",
+        )
+
+        text = client.chat.completions.create.call_args.kwargs["messages"][0]["content"][0][
+            "text"
+        ].lower()
+        assert "keypad" in text
+        assert "part of the object" in text
+        assert "flip phone" in text
+        assert "ok" in text
+        assert "misspelled" in text
+
+    def test_a_correctly_spelled_ok_key_is_not_lettering(self) -> None:
+        validator = ArtworkTextValidator(client=_client("NOTEXT OK"), model="vl")
+
+        result = validator.validate(_image_bytes())
+
+        assert result.has_text is False
+        assert result.verdict == NO_LETTERING
+
+    def test_a_misspelled_key_label_is_lettering(self) -> None:
+        validator = ArtworkTextValidator(client=_client("NOTEXT 0K"), model="vl")
+
+        result = validator.validate(_image_bytes())
+
+        assert result.has_text is True
+        assert result.verdict == HAS_TEXT
+
 
 class TestNoTextGate:
     """A no-text design is only valid when the artwork carries no words.
