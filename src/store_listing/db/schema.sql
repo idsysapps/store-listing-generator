@@ -172,6 +172,10 @@ CREATE TABLE design_briefs (
     copy_mode VARCHAR(20) DEFAULT 'caption',
     -- A short line above a typographic hero word.
     kicker_text TEXT,
+    -- A commercial layout, or null for an ordinary template.
+    silhouette VARCHAR(40),
+    subtitle_text TEXT,
+    footer_text TEXT,
     font_color VARCHAR(20),
     regeneration_feedback TEXT,
     -- The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
@@ -201,6 +205,9 @@ ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS image_error TEXT;
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS copy_mode VARCHAR(20);
 ALTER TABLE design_briefs ALTER COLUMN copy_mode SET DEFAULT 'caption';
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS kicker_text TEXT;
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS silhouette VARCHAR(40);
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS subtitle_text TEXT;
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS footer_text TEXT;
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);
 CREATE INDEX idx_design_briefs_created_at ON design_briefs(created_at);

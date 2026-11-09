@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from PIL import Image
 
 from store_listing.orchestration.comfyui_client import ComfyUIError, ComfyUIResult
 from store_listing.orchestration.design_briefs import DesignBrief
@@ -472,6 +474,49 @@ class TestGenerateImage:
 
         assert result.image_bytes == b"raw-bytes"
         assert result.raw_bytes == b"raw-bytes"
+
+    def test_a_silhouette_mockup_is_rejected_before_the_cutout(self) -> None:
+        shirt = Image.new("RGB", (40, 40), (180, 90, 40))
+        buffer = io.BytesIO()
+        shirt.save(buffer, format="PNG")
+        client = _client(image_bytes=buffer.getvalue())
+        brief = _make_brief(
+            product_type="dtf_apparel",
+            layout_type="emblem",
+            silhouette="retro_badge",
+            scene_description="three small birds under a rainbow",
+        )
+
+        result = generate_image(brief, comfyui_client=client)
+
+        assert result.image_bytes is None
+        assert result.error is not None
+        assert "product photo" in result.error
+        client.remove_background.assert_not_called()
+
+    def test_a_silhouette_on_magenta_is_keyed_without_birefnet(self) -> None:
+        graphic = Image.new("RGB", (40, 40), (255, 0, 255))
+        graphic.paste(Image.new("RGB", (10, 10), (20, 40, 80)), (15, 15))
+        buffer = io.BytesIO()
+        graphic.save(buffer, format="PNG")
+        client = _client(image_bytes=buffer.getvalue())
+        brief = _make_brief(
+            product_type="dtf_apparel",
+            layout_type="emblem",
+            silhouette="flat_icon",
+            scene_description="one flat sun",
+        )
+
+        result = generate_image(brief, comfyui_client=client)
+
+        assert result.error is None
+        assert result.background_removed is True
+        assert result.raw_bytes == buffer.getvalue()
+        keyed = Image.open(io.BytesIO(result.image_bytes or b"")).convert("RGBA")
+        alpha = keyed.getchannel("A")
+        assert alpha.crop((0, 0, 1, 1)).tobytes()[0] == 0
+        assert alpha.crop((20, 20, 21, 21)).tobytes()[0] > 200
+        client.remove_background.assert_not_called()
 
     def test_the_seed_is_passed_through(self) -> None:
         client = _client()

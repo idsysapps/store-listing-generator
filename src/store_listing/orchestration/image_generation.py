@@ -16,6 +16,12 @@ from store_listing.orchestration.art_direction import (
     preset_for,
     prompt_for,
 )
+from store_listing.orchestration.chroma_key import (
+    backdrop_key_colour,
+    clear_edge_plate,
+    key_out_background,
+    magenta_share,
+)
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
 from store_listing.orchestration.copy_modes import (
     NO_TEXT,
@@ -23,6 +29,7 @@ from store_listing.orchestration.copy_modes import (
     scene_fills_print_area,
 )
 from store_listing.orchestration.design_briefs import DesignBrief
+from store_listing.orchestration.design_silhouettes import silhouette_for
 from store_listing.orchestration.design_templates import (
     canvas_size,
     composition_for,
@@ -229,6 +236,7 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     template_id = resolve_template(
         brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
     )
+    silhouette = silhouette_for(getattr(brief, "silhouette", None))
 
     if template_id == "text_only":
         raise PromptBuildError("a text_only brief is drawn without the image model")
@@ -247,6 +255,15 @@ def build_flux_prompt(brief: DesignBrief) -> str:
 
     parts: list[str] = []
 
+    if silhouette is not None:
+        # Flux Schnell ignores the negative prompt at cfg 1, and "on the garment"
+        # makes it draw a person wearing the graphic. The positive prompt has
+        # to say the picture is a flat graphic on magenta.
+        parts.append(
+            "A single flat graphic centered on a solid pure magenta field. "
+            "No person, no body, no face, no hands, no clothing, no fabric, "
+            "no collar, no sleeves, no mockup, no product photo."
+        )
     parts.append(f"{DESIGN_ONLY}: {scene}.")
     # The look of the design is a preset, not the free text of the brief: free
     # text made every design come out as the same flat vector clip-art
@@ -260,10 +277,12 @@ def build_flux_prompt(brief: DesignBrief) -> str:
         # design the same flat clip-art (issue #227).
         look_parts.append(brief.visual_style)
     look = ", ".join(look_parts)
-    parts.append(
-        f"{look}, {product_context}, {NO_MOCKUP}." if look else f"{product_context}, {NO_MOCKUP}."
-    )
-    if brief.product_type == "dtf_apparel":
+    if silhouette is not None:
+        context = "flat vector graphic, spot colours, no photo"
+    else:
+        context = product_context
+    parts.append(f"{look}, {context}, {NO_MOCKUP}." if look else f"{context}, {NO_MOCKUP}.")
+    if brief.product_type == "dtf_apparel" and silhouette is None:
         # The magenta backdrop is a key, not printed. The design itself must
         # not paint a backdrop behind the subject (issue #288).
         parts.append(
@@ -290,9 +309,13 @@ def build_flux_prompt(brief: DesignBrief) -> str:
 
     # The composition of the template, including the space the text needs. It
     # replaced the fixed "compact centered composition" that made every design
-    # an object in the middle (issue #238).
-    composition = composition_for(template_id, brief.concept)
-    if brief.product_type == "dtf_apparel":
+    # an object in the middle (issue #238). A commercial silhouette replaces
+    # that composition with its own picture.
+    if silhouette is not None and silhouette.composition:
+        composition = silhouette.composition
+    else:
+        composition = composition_for(template_id, brief.concept)
+    if brief.product_type == "dtf_apparel" and silhouette is None:
         # The template's "edge to edge" is a printed background on a DTF
         # shirt. Keep the subject and the text zone, not the plate (issue
         # #288).
@@ -343,6 +366,11 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     # The background comes last so that it survives a visual style that asks
     # for something else (issue #188).
     parts.append(f"{background}.")
+    if silhouette is not None:
+        parts.append(
+            "The whole frame outside the graphic is solid pure magenta. "
+            "No person, no clothing, no fabric, no collar, no sleeves."
+        )
 
     if feedback:
         parts.append(feedback.strip())
@@ -423,6 +451,44 @@ def generate_image(
     raw_bytes = result.image_bytes
     image_bytes = raw_bytes
     background_removed = False
+
+    if brief.silhouette and brief.product_type == "dtf_apparel":
+        # BiRefNet treats a worn shirt as the subject and either keeps the
+        # person or throws the drawing away. A real print is mostly magenta;
+        # a mockup is not. The magenta is then keyed locally.
+        try:
+            share = magenta_share(raw_bytes)
+        except OSError as e:
+            logger.warning("Cannot measure the magenta backdrop: %s", e)
+            return ImageResult(image_bytes=None, prompt=prompt, raw_bytes=raw_bytes, error=str(e))
+        if share < 0.42:
+            logger.warning(
+                "Silhouette render is a mockup (magenta share %.2f), rejecting it",
+                share,
+            )
+            return ImageResult(
+                image_bytes=None,
+                prompt=prompt,
+                raw_bytes=raw_bytes,
+                error=(
+                    "the image is a product photo: the magenta backdrop covers "
+                    f"only {share:.0%} of the frame"
+                ),
+            )
+        try:
+            image_bytes = clear_edge_plate(
+                key_out_background(raw_bytes, key_colour=backdrop_key_colour(raw_bytes))
+            )
+        except OSError as e:
+            logger.warning("Magenta key failed, returning raw image: %s", e)
+        else:
+            background_removed = True
+        return ImageResult(
+            image_bytes=image_bytes,
+            prompt=prompt,
+            raw_bytes=raw_bytes,
+            background_removed=background_removed,
+        )
 
     if brief.product_type == "dtf_apparel":
         try:

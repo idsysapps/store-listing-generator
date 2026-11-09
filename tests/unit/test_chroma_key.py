@@ -7,13 +7,16 @@ import io
 from PIL import Image
 
 from store_listing.orchestration.chroma_key import (
+    backdrop_key_colour,
     background_fraction,
     bleed_transparent_pixels,
+    clear_edge_plate,
     correct_key_mix,
     despill_key_spill,
     estimate_key_colour,
     feather_alpha,
     key_out_background,
+    magenta_share,
     opaque_fraction,
     punch_out_key_colour,
     remove_dark_ink,
@@ -39,6 +42,54 @@ def _alpha_at(image: Image.Image, x: int, y: int) -> int:
 
 def _rgb_at(image: Image.Image, x: int, y: int) -> bytes:
     return bytes(image.convert("RGB").crop((x, y, x + 1, y + 1)).tobytes()[:3])
+
+
+class TestMagentaShare:
+    def test_a_graphic_on_magenta_is_mostly_magenta(self) -> None:
+        image = Image.new("RGB", (40, 40), (255, 0, 255))
+        image.paste(Image.new("RGB", (12, 12), (20, 40, 80)), (14, 14))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        assert magenta_share(buffer.getvalue()) > 0.42
+
+    def test_the_hot_pink_flux_key_counts_as_the_backdrop(self) -> None:
+        image = Image.new("RGB", (40, 40), (225, 8, 96))
+        image.paste(Image.new("RGB", (12, 12), (20, 40, 80)), (14, 14))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        assert magenta_share(buffer.getvalue()) > 0.42
+
+    def test_a_shirt_photo_with_magenta_corners_is_not_mostly_magenta(self) -> None:
+        image = Image.new("RGB", (40, 40), (180, 90, 40))
+        for x in range(6):
+            for y in range(40):
+                image.putpixel((x, y), (255, 0, 255))
+                image.putpixel((39 - x, y), (255, 0, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        assert magenta_share(buffer.getvalue()) < 0.42
+
+
+class TestBackdropKey:
+    def test_a_cream_side_strip_does_not_become_the_key(self) -> None:
+        image = Image.new("RGB", (40, 40), (225, 8, 96))
+        for x in range(4):
+            for y in range(40):
+                image.putpixel((x, y), (248, 240, 184))
+        image.paste(Image.new("RGB", (8, 8), (248, 240, 184)), (16, 16))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        raw = buffer.getvalue()
+
+        assert backdrop_key_colour(raw)[1] < 40
+
+        keyed = clear_edge_plate(key_out_background(raw, key_colour=backdrop_key_colour(raw)))
+        art = Image.open(io.BytesIO(keyed))
+        assert _alpha_at(art, 0, 20) == 0
+        assert _alpha_at(art, 20, 20) > 200
 
 
 class TestEstimateKeyColour:

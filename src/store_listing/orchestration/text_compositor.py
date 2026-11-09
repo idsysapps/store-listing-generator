@@ -110,6 +110,40 @@ DTF_KEY_COLOUR = (255, 0, 255)
 # the white of the paper.
 PAPER_COLOUR = (255, 255, 255)
 
+# Where a silhouette line sits, as shares of the canvas: (x, y, width, height).
+ROLE_BOXES: dict[str, tuple[float, float, float, float]] = {
+    "top": (0.08, 0.08, 0.84, 0.18),
+    "middle": (0.08, 0.36, 0.84, 0.22),
+    "bottom": (0.05, 0.62, 0.90, 0.28),
+    "centre_band": (0.10, 0.40, 0.80, 0.14),
+    "arc_top": (0.06, 0.04, 0.88, 0.30),
+    "arch_belly": (0.24, 0.24, 0.52, 0.11),
+    "flank_left": (0.06, 0.42, 0.26, 0.16),
+    "flank_right": (0.68, 0.42, 0.26, 0.16),
+    "script_below": (0.12, 0.72, 0.76, 0.16),
+    "crest_banner": (0.12, 0.62, 0.76, 0.12),
+    "crest_tiny": (0.22, 0.78, 0.56, 0.10),
+    "script_above": (0.08, 0.04, 0.84, 0.20),
+    "stack_kicker": (0.08, 0.26, 0.84, 0.16),
+    "stack_script": (0.14, 0.44, 0.72, 0.14),
+    "stack_closer": (0.04, 0.58, 0.92, 0.22),
+}
+
+
+@dataclass(frozen=True)
+class DrawnRole:
+    """One line of a commercial silhouette, ready to draw."""
+
+    text: str
+    family: str
+    color: str
+    uppercase: bool
+    region: str
+    arc: str | None = None
+    rule: str | None = None
+    tracking: float = 0.04
+    outline: bool = False
+
 
 @dataclass
 class LayoutSpec:
@@ -144,6 +178,9 @@ class LayoutSpec:
     # Feature-flagged DTF safe embedding for a planned carrier. The text is
     # still drawn from the font; this only textures the ink.
     text_embed_profile: str | None = None
+    # Silhouette lines. When these are set they replace the headline and the
+    # tagline: each line has its own family, colour, case and box.
+    roles: tuple[DrawnRole, ...] | None = None
 
     def __post_init__(self) -> None:
         self.layout_type = resolve_template(self.layout_type, self.headline_text, self.tagline_text)
@@ -157,7 +194,7 @@ class LayoutSpec:
 
     @property
     def needs_text(self) -> bool:
-        return bool(self.headline_text or self.tagline_text)
+        return bool(self.headline_text or self.tagline_text or self.roles)
 
     @property
     def family(self) -> str:
@@ -608,6 +645,200 @@ def _draw_text(
         word_index += len(line.split())
 
 
+def _draw_upward_arc(
+    base: Image.Image,
+    text: str,
+    *,
+    color: str,
+    box: tuple[int, int, int, int],
+    family: str,
+    treatment: TextTreatment | None,
+    force_outline: bool,
+) -> None:
+    """Draw a wide shallow arch. Each glyph is rotated along the curve."""
+    treatment = treatment or TextTreatment()
+    text = text.strip()
+    if treatment.uppercase:
+        text = text.upper()
+    text = _drop_unsupported(text, family)
+    if not text:
+        return
+
+    x, y, width, height = box
+    if width < 1 or height < 1:
+        return
+
+    probe = ImageDraw.Draw(base)
+    size = max(MIN_FONT_SIZE, int(height * 0.55))
+    tracking_em = max(treatment.tracking, 0.04)
+    while size > MIN_FONT_SIZE:
+        font = _font(size, family)
+        rise = min(int(size * 0.34), int(height * 0.28))
+        fits_width = _measure_run(probe, text, font, tracking_em * size) <= width * 0.90
+        fits_height = size + rise <= height * 0.92
+        if fits_width and fits_height:
+            break
+        size -= 2
+    font = _font(size, family)
+    tracking = tracking_em * size
+    rise = min(int(size * 0.34), int(height * 0.28))
+    widths = [probe.textlength(character, font=font) for character in text]
+    total = sum(widths) + tracking * max(0, len(text) - 1)
+    if total <= 0:
+        return
+
+    halo = max(1, int(size * HALO_RATIO)) if treatment.style == "halo" else 0
+    if force_outline:
+        halo = max(halo, max(2, int(size * HALO_RATIO)))
+    baseline = y + height - int(size * 0.55)
+    if baseline - rise < y + int(size * 0.45):
+        baseline = y + int(size * 0.45) + rise
+
+    cursor = 0.0
+    origin = x + (width - total) / 2
+    pad = max(4, halo + 2)
+    for character, character_width in zip(text, widths):
+        centre = cursor + character_width / 2
+        along = centre / total
+        slope = -rise * math.pi * math.cos(math.pi * along) / total
+        angle = -math.degrees(math.atan(slope))
+        glyph = Image.new("RGBA", (int(character_width) + pad * 2, size + pad * 2), (0, 0, 0, 0))
+        ImageDraw.Draw(glyph).text(
+            (pad, pad),
+            character,
+            font=font,
+            fill=color,
+            stroke_width=halo,
+            stroke_fill=_halo_colour(color),
+        )
+        rotated = glyph.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)
+        cx = origin + centre
+        cy = baseline - rise * math.sin(math.pi * along)
+        base.alpha_composite(
+            rotated,
+            (int(cx - rotated.width / 2), int(cy - rotated.height / 2)),
+        )
+        cursor += character_width + tracking
+
+
+def _draw_rule(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    color: str,
+    kind: str,
+) -> None:
+    """A thin rule under a line. It is a stroke, not a filled plate."""
+    x, y, width, height = box
+    if width < 4 or height < 4:
+        return
+    y_line = y + height // 2
+    x0 = x + int(width * 0.08)
+    x1 = x + int(width * 0.92)
+    if kind == "wavy":
+        points: list[tuple[int, int]] = []
+        span = max(1, x1 - x0)
+        for step in range(0, span + 1, 8):
+            points.append((x0 + step, y_line + int(3 * math.sin(step / 14))))
+        if len(points) >= 2:
+            draw.line(points, fill=color, width=3)
+        return
+    draw.line([(x0, y_line), (x1, y_line)], fill=color, width=3)
+
+
+def _clearer_box(
+    alpha: np.ndarray | None,
+    box: tuple[int, int, int, int],
+    width: int,
+    height: int,
+    reserved: tuple[tuple[int, int, int, int], ...] = (),
+) -> tuple[int, int, int, int]:
+    """The same line, slid a short way into open shirt, never onto another line."""
+    x, y, box_width, box_height = box
+    if alpha is None or box_width < 1 or box_height < 1:
+        return box
+
+    def rank(top: int) -> tuple[int, float, int]:
+        share = _ink_share(alpha, (x, top, box_width, box_height))
+        clear = 0 if share <= CLEAR_INK_SHARE else 1
+        return (clear, share, abs(top - y))
+
+    best = box
+    best_rank = rank(y)
+    step = max(2, box_height // 6)
+    window = int(height * 0.22)
+    start = max(0, y - window)
+    stop = min(height - box_height, y + window)
+    for top in range(start, max(start, stop) + 1, step):
+        candidate = (x, top, box_width, box_height)
+        if any(_boxes_overlap(candidate, other) for other in reserved):
+            continue
+        candidate_rank = rank(top)
+        if candidate_rank < best_rank:
+            best = candidate
+            best_rank = candidate_rank
+    return best
+
+
+def _draw_roles(
+    base: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    roles: tuple[DrawnRole, ...],
+    width: int,
+    height: int,
+    *,
+    alpha: np.ndarray | None,
+) -> None:
+    """Draw each silhouette line in its own box, family and colour."""
+    placed = {
+        role.region: _box(ROLE_BOXES[role.region], width, height)
+        for role in roles
+        if role.region in ROLE_BOXES
+    }
+    for role in roles:
+        placement = ROLE_BOXES.get(role.region)
+        if placement is None:
+            continue
+        own = placed[role.region]
+        reserved = tuple(box for region, box in placed.items() if region != role.region)
+        box = _clearer_box(alpha, own, width, height, reserved)
+        text_box = box
+        rule_box: tuple[int, int, int, int] | None = None
+        if role.rule:
+            rule_band = max(12, int(box[3] * 0.16))
+            gap = 8
+            text_box = (box[0], box[1], box[2], max(1, box[3] - rule_band - gap))
+            rule_box = (box[0], box[1] + box[3] - rule_band, box[2], rule_band)
+        treatment = TextTreatment(
+            uppercase=role.uppercase,
+            tracking=role.tracking,
+            style="shadow",
+        )
+        if role.arc:
+            _draw_arc_text(
+                draw,
+                role.text,
+                color=role.color,
+                box=text_box,
+                family=role.family,
+                treatment=treatment,
+                force_outline=role.outline,
+                direction=role.arc,
+                base=base,
+            )
+        else:
+            _draw_text(
+                draw,
+                role.text,
+                color=role.color,
+                box=text_box,
+                family=role.family,
+                treatment=treatment,
+                force_outline=role.outline,
+            )
+        if rule_box is not None and role.rule:
+            _draw_rule(draw, rule_box, role.color, role.rule)
+
+
 def _draw_arc_text(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -617,14 +848,29 @@ def _draw_arc_text(
     family: str = DEFAULT_FONT,
     treatment: TextTreatment | None = None,
     force_outline: bool = False,
+    direction: str = "down",
+    base: Image.Image | None = None,
 ) -> None:
-    """Draw the text along a downward curve.
+    """Draw the text along a curve.
 
-    A ``roundel`` uses it for the tagline, which follows the bottom of the
-    circle. The characters stay upright so the arc is still readable by the
-    text gate; the tagline is secondary, so a curve the gate cannot read does
-    not fail the design.
+    ``down`` follows the bottom of a roundel. ``up`` is the collegiate arch:
+    the middle of the word is higher than the ends, and the glyphs stay
+    inside the box.
     """
+    if direction == "up":
+        if base is None:
+            return
+        _draw_upward_arc(
+            base,
+            text,
+            color=color,
+            box=box,
+            family=family,
+            treatment=treatment,
+            force_outline=force_outline,
+        )
+        return
+
     treatment = treatment or TextTreatment()
     text = text.strip()
     if treatment.uppercase:
@@ -891,6 +1137,18 @@ def composite_text(
 
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
+
+    if layout.roles:
+        mask_bytes = ink_mask_bytes if ink_mask_bytes is not None else image_bytes
+        _draw_roles(
+            overlay,
+            draw,
+            layout.roles,
+            width,
+            height,
+            alpha=_alpha_mask(mask_bytes),
+        )
+        return _composite(image, overlay)
 
     margin_x = int(width * MARGIN_X)
     text_width = width - 2 * margin_x

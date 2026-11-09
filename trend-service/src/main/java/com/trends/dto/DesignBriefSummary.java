@@ -31,6 +31,7 @@ public class DesignBriefSummary {
     private String voice;
     private String stylePreset;
     private String fontFamily;
+    private String silhouette;
     private Boolean personalUse;
     private List<MaterialRecommendation> recommendedMaterials;
     private String previewBackgroundColor;
@@ -141,6 +142,9 @@ public class DesignBriefSummary {
 
     public String getFontFamily() { return fontFamily; }
     public void setFontFamily(String fontFamily) { this.fontFamily = fontFamily; }
+
+    public String getSilhouette() { return silhouette; }
+    public void setSilhouette(String silhouette) { this.silhouette = silhouette; }
 
     public Boolean getPersonalUse() { return personalUse; }
     public void setPersonalUse(Boolean personalUse) { this.personalUse = personalUse; }

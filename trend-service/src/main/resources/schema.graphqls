@@ -82,6 +82,7 @@ type DesignBriefSummary {
   voice: String
   stylePreset: String
   fontFamily: String
+  silhouette: String
   recommendedMaterials: [MaterialRecommendation!]!
   previewBackgroundColor: String
   pricing: BriefPricing
@@ -159,7 +160,7 @@ type Query {
   trendHistory(query: String!, days: Int = 30): [TrendScore!]!
   activeSeeds(tag: String, limit: Int = 50): [ActiveSeedSummary!]!
   productTags: [String!]!
-  designBriefs(productType: String, batchId: String, limit: Int = 20): [DesignBriefSummary!]!
+  designBriefs(productType: String, batchId: String, silhouette: String, limit: Int = 20): [DesignBriefSummary!]!
 }
 
 type Subscription {

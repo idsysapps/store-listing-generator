@@ -55,6 +55,7 @@ from store_listing.orchestration.design_quality import (
     text_overlap,
     with_contrast,
 )
+from store_listing.orchestration.design_silhouettes import drawn_roles, silhouette_for
 from store_listing.orchestration.design_templates import composition_for, resolve_template
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE
 from store_listing.orchestration.hero_descriptor import (
@@ -193,12 +194,17 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
     layout_type = brief_row.get("layout_type", "full_bleed")
     headline_text = brief_row.get("headline_text")
     tagline_text = brief_row.get("tagline_text")
-    kicker_text = brief_row.get("kicker_text") if copy_mode == TYPE_HERO else None
+    has_silhouette = silhouette_for(brief_row.get("silhouette")) is not None
+    kicker_text = brief_row.get("kicker_text") if copy_mode == TYPE_HERO or has_silhouette else None
+    subtitle_text = brief_row.get("subtitle_text") if has_silhouette else None
+    footer_text = brief_row.get("footer_text") if has_silhouette else None
     if copy_mode == NO_TEXT:
         layout_type = "full_bleed"
         headline_text = None
         tagline_text = None
         kicker_text = None
+        subtitle_text = None
+        footer_text = None
     elif (copy_mode == TYPE_HERO and layout_type in ("full_bleed", "text_only")) or (
         copy_mode == CAPTION
         and layout_type == "full_bleed"
@@ -229,6 +235,9 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         text_plan=text_plan_from_value(brief_row.get("text_plan"))
         if copy_mode != NO_TEXT
         else None,
+        silhouette=brief_row.get("silhouette"),
+        subtitle_text=subtitle_text,
+        footer_text=footer_text,
     )
 
 
@@ -458,6 +467,8 @@ def _upload_text_only(
                 f"observed {verdict.observed!r}"
             )
 
+    raw_bytes, transparent_bytes = _distress_type_ink(brief_row, raw_bytes, transparent_bytes)
+
     keys = storage.upload_design(
         raw_bytes=raw_bytes,
         transparent_bytes=transparent_bytes,
@@ -470,6 +481,28 @@ def _upload_text_only(
         image_key_transparent=keys.get("transparent"),
     )
     return True, None
+
+
+def _distress_type_ink(
+    brief_row: dict[str, Any],
+    raw_bytes: bytes,
+    transparent_bytes: bytes | None,
+) -> tuple[bytes, bytes | None]:
+    """Grain and crackle on the letters of a type-only silhouette.
+
+    The texture is masked to the ink. A transparent pixel stays transparent,
+    and the keyed background is not distressed.
+    """
+    spec = silhouette_for(brief_row.get("silhouette"))
+    if spec is None or not spec.textures:
+        return raw_bytes, transparent_bytes
+    for texture in spec.textures:
+        if transparent_bytes is not None:
+            raw_bytes = apply_texture(raw_bytes, texture, alpha_mask_bytes=transparent_bytes)
+            transparent_bytes = apply_texture(transparent_bytes, texture)
+        else:
+            raw_bytes = apply_texture(raw_bytes, texture)
+    return raw_bytes, transparent_bytes
 
 
 def _hero_with_descriptor(
@@ -857,7 +890,8 @@ def _generate_single_brief(
     # carry the type_hero copy mode, and the feature flag has to be on
     # (issues #254 and #258).
     if (
-        copy_mode != NO_TEXT
+        not brief.silhouette
+        and copy_mode != NO_TEXT
         and typographic_hero_enabled()
         and hero_validator is not None
         and is_typographic_hero_brief(brief_row, brief)
@@ -875,7 +909,8 @@ def _generate_single_brief(
     # compositor can fill a sign or a label, but it cannot paint into smoke,
     # so these briefs go to the image model too (issue #133).
     if (
-        copy_mode != NO_TEXT
+        not brief.silhouette
+        and copy_mode != NO_TEXT
         and model_text_enabled()
         and _model_text_caption_enabled()
         and hero_validator is not None
@@ -904,6 +939,7 @@ def _generate_single_brief(
         garment_color=brief.garment_color,
         text_plan=brief.text_plan,
         text_embed_profile=_text_embed_profile(),
+        roles=drawn_roles(brief) or None,
     )
     needs_text_check = layout.needs_text
     max_retries = _max_text_retries()
@@ -953,6 +989,18 @@ def _generate_single_brief(
         )
 
         if result.image_bytes is None:
+            if result.raw_bytes is not None and "product photo" in (result.error or ""):
+                artwork_attempts += 1
+                if artwork_attempts <= max_artwork_retries:
+                    logger.warning(
+                        "Brief %d: the artwork came back as a worn shirt, retrying",
+                        brief_id,
+                    )
+                    retry_hint = (
+                        f"{ARTWORK_RETRY_HINT} A flat graphic centered on solid pure "
+                        "magenta. No person, no body, no clothing, no fabric."
+                    )
+                    continue
             logger.warning(
                 "Image generation failed for brief %d: %s",
                 brief_id,

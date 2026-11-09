@@ -48,9 +48,15 @@ from store_listing.orchestration.copy_modes import (
     NO_TEXT,
     TYPE_HERO,
     assign_batch_copy_modes,
+    clean_kicker,
     copy_mode_from_row,
     normalise_copy_mode,
     normalise_kicker,
+)
+from store_listing.orchestration.design_silhouettes import (
+    assign_batch_silhouettes,
+    plan_silhouette_slots,
+    silhouette_rules,
 )
 from store_listing.orchestration.design_templates import (
     LEGACY_LAYOUTS,
@@ -169,6 +175,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         f"{voice_rules()}\n"
         f"{art_direction_rules()}\n"
         f"{idea_device_rules()}\n"
+        f"{silhouette_rules()}\n"
         f"{DESIGN_ONLY_RULES}\n"
         "MATERIALS — picking the garment and the substrate:\n"
         "- recommended_materials: array of 1-3 objects from available_materials, each with "
@@ -195,7 +202,8 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         '"reasoning": "...", "source_seed_ids": [id1, id2], '
         '"layout_type": "auto", "headline_text": "...", '
         '"tagline_text": "...", "copy_mode": "type_hero | caption | no_text", '
-        '"kicker_text": "... or null", "font_color": "#000000", '
+        '"kicker_text": "... or null", "subtitle_text": "... or null", '
+        '"footer_text": "... or null", "font_color": "#000000", '
         '"voice": "deadpan | loud | cozy", '
         '"idea_device": "juxtaposition | transformation | scale | narrative | '
         'collection | pattern", '
@@ -294,6 +302,16 @@ class DesignBrief:
     # snapshot so a later cost-book change cannot move an existing listing
     # (issue #295).
     pricing: dict[str, Any] | None = None
+    # A commercial layout: vintage_stack, retro_badge, band_crest, flat_icon,
+    # collegiate_arch or icon_row. None keeps the ordinary template.
+    silhouette: str | None = None
+    # A kicker the parser kept for a silhouette even when the brief is not a
+    # hero. It is not stored; the silhouette assignment copies it onto
+    # kicker_text when a slot draws it.
+    stacked_kicker: str | None = None
+    # Extra lines for a market label. They are not a hero kicker.
+    subtitle_text: str | None = None
+    footer_text: str | None = None
 
     @property
     def garment_material(self) -> dict[str, Any] | None:
@@ -349,6 +367,9 @@ class DesignBriefDBClient(Protocol):
         text_plan: dict[str, Any] | None = None,
         pricing: dict[str, Any] | None = None,
         listing_description: str | None = None,
+        silhouette: str | None = None,
+        subtitle_text: str | None = None,
+        footer_text: str | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -558,8 +579,14 @@ def build_brief_prompt(
         # One device per brief, so the batch covers the vocabulary instead of
         # the model writing the same still life eight times (issue #240).
         "brief_slots": [
-            {"brief": index + 1, "idea_device": device}
-            for index, device in enumerate(plan_device_slots(MAX_BRIEFS, today.isoformat()))
+            {"brief": index + 1, "idea_device": device, "silhouette": silhouette}
+            for index, (device, silhouette) in enumerate(
+                zip(
+                    plan_device_slots(MAX_BRIEFS, today.isoformat()),
+                    plan_silhouette_slots(MAX_BRIEFS, today.isoformat()),
+                    strict=True,
+                )
+            )
         ],
         "signals_by_source": dict(by_source),
     }
@@ -661,7 +688,10 @@ def _brief_from(
         tagline_text=tagline_text,
         scene_description=raw_scene if isinstance(raw_scene, str) else None,
     )
+    held_kicker = clean_kicker(b.get("kicker_text"))
     kicker_text = normalise_kicker(b.get("kicker_text"), copy_mode=copy_mode)
+    subtitle_text = clean_kicker(b.get("subtitle_text"))
+    footer_text = clean_kicker(b.get("footer_text"))
     if copy_mode == NO_TEXT:
         # A no-text design has no copy at all, even when the model ignored the
         # instruction and wrote some. The layout is forced art-only so the
@@ -670,6 +700,9 @@ def _brief_from(
         headline_text = None
         tagline_text = None
         kicker_text = None
+        held_kicker = None
+        subtitle_text = None
+        footer_text = None
     elif copy_mode == TYPE_HERO:
         # The hero path ignores the template, but the template is the fallback
         # when Qwen is off. A hero brief cannot live on a full-bleed or
@@ -779,6 +812,9 @@ def _brief_from(
         font_family=font_family,
         style_preset=style_preset,
         idea_device=idea_device,
+        stacked_kicker=held_kicker,
+        subtitle_text=subtitle_text,
+        footer_text=footer_text,
     )
 
 
@@ -1123,6 +1159,8 @@ def generate_design_briefs(
     if listing_issues:
         logger.warning("Listing copy fell back: %s", "; ".join(listing_issues))
 
+    kept = assign_batch_silhouettes(kept, batch_id)
+
     created = 0
     for brief in kept:
         brief_id = db_client.insert_design_brief(
@@ -1149,6 +1187,9 @@ def generate_design_briefs(
             text_plan=brief.text_plan.to_dict() if brief.text_plan else None,
             pricing=brief.pricing,
             listing_description=brief.listing_description,
+            silhouette=brief.silhouette,
+            subtitle_text=brief.subtitle_text,
+            footer_text=brief.footer_text,
         )
         linked = 0
         for seed_id in brief.source_seed_ids:
@@ -1482,6 +1523,10 @@ def _brief_from_row(row: dict[str, Any]) -> DesignBrief:
         font_family=row.get("font_family"),
         style_preset=row.get("style_preset"),
         text_plan=text_plan_from_value(row.get("text_plan")),
+        silhouette=row.get("silhouette"),
+        stacked_kicker=None if copy_mode in (TYPE_HERO, NO_TEXT) else row.get("kicker_text"),
+        subtitle_text=None if copy_mode == NO_TEXT else row.get("subtitle_text"),
+        footer_text=None if copy_mode == NO_TEXT else row.get("footer_text"),
     )
 
 
