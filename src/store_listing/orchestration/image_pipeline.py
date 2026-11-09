@@ -1043,7 +1043,8 @@ def _generate_single_brief(
         if artwork_text_validator is not None:
             if copy_mode == NO_TEXT:
                 no_text = artwork_text_validator.validate_no_text(
-                    result.raw_bytes or result.image_bytes
+                    result.raw_bytes or result.image_bytes,
+                    scene=brief.scene_description,
                 )
                 if not no_text.matched:
                     lettering_attempts += 1
@@ -1054,7 +1055,7 @@ def _generate_single_brief(
                         )
                         retry_hint = (
                             f"{NO_LETTERING_RETRY_HINT} This design must contain no words "
-                            "at all: no letters, no numbers, no signage and no labels."
+                            "at all: no letters, no signage and no labels."
                         )
                         continue
                     return _needs_attention(
@@ -1065,7 +1066,10 @@ def _generate_single_brief(
                         "then regenerate.",
                     )
             else:
-                lettering = artwork_text_validator.validate(result.raw_bytes or result.image_bytes)
+                lettering = artwork_text_validator.validate(
+                    result.raw_bytes or result.image_bytes,
+                    scene=brief.scene_description,
+                )
                 if lettering.has_text:
                     lettering_attempts += 1
                     if lettering_attempts <= max_lettering_retries:

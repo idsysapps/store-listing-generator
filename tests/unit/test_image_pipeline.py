@@ -878,8 +878,9 @@ class TestArtworkLetteringGate:
             artwork_text_validator=_artwork_text_validator(True, False),
         )
 
-        second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"]
-        assert "no lettering" in second_prompt.lower()
+        second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"].lower()
+        assert "no lettering" in second_prompt
+        assert "keypad" in second_prompt
 
     def test_rejected_lettering_marks_the_brief_for_attention(self) -> None:
         db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
