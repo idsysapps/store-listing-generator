@@ -208,6 +208,7 @@ ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS kicker_text TEXT;
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS silhouette VARCHAR(40);
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS subtitle_text TEXT;
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS footer_text TEXT;
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS label_plates JSONB;
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);
 CREATE INDEX idx_design_briefs_created_at ON design_briefs(created_at);

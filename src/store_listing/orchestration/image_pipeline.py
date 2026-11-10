@@ -71,6 +71,7 @@ from store_listing.orchestration.image_generation import (
     is_dark_garment,
 )
 from store_listing.orchestration.image_storage import ImageStorageClient
+from store_listing.orchestration.label_plates import draw_label_plates, plates_from_value
 from store_listing.orchestration.model_text import (
     ModelTextGenerator,
     is_model_text_brief,
@@ -238,6 +239,7 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         silhouette=brief_row.get("silhouette"),
         subtitle_text=subtitle_text,
         footer_text=footer_text,
+        label_plates=plates_from_value(brief_row.get("label_plates")),
     )
 
 
@@ -369,6 +371,26 @@ def _textured(
         key_colour=DTF_KEY_COLOUR if is_dtf else None,
         alpha_mask_bytes=alpha_mask,
     )
+
+
+def _apply_label_plates(result: ImageResult, brief: DesignBrief) -> ImageResult | None:
+    """Draw declared labels onto the print, or None when the shapes do not match.
+
+    A brief with no plate is unchanged. The keyed print is labeled when the
+    background has been removed; otherwise the picture itself is the print.
+    """
+    if not brief.label_plates:
+        return result
+    source = result.image_bytes
+    if not source:
+        return None
+    drawn = draw_label_plates(source, brief.label_plates)
+    if drawn is None:
+        return None
+    stamped, _placements = drawn
+    if result.background_removed:
+        return replace(result, image_bytes=stamped)
+    return replace(result, image_bytes=stamped, raw_bytes=stamped)
 
 
 def _retry_hint(brief: DesignBrief) -> str:
@@ -1097,6 +1119,16 @@ def _generate_single_brief(
                         brief_id,
                         lettering.error or "unknown verdict",
                     )
+
+        labeled = _apply_label_plates(result, brief)
+        if labeled is None:
+            return _needs_attention(
+                db_client,
+                brief_id,
+                "The blank controls could not be labeled. The picture does not have "
+                "one blank shape for each declared label, so nothing was uploaded.",
+            )
+        result = labeled
 
         # The text is drawn onto the artwork, not asked of the model: it cannot
         # spell, and a colour in a prompt is not a colour (issue #187). A

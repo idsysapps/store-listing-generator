@@ -27,6 +27,7 @@ REQUIRED_COLUMNS: Final[tuple[tuple[str, str], ...]] = (
     # The text-plan pass writes this, so a pod must not serve a brief batch
     # before the migration has added it (issue #246).
     ("design_briefs", "text_plan"),
+    ("design_briefs", "label_plates"),
 )
 
 DEFAULT_TIMEOUT_SECONDS: Final[int] = 120

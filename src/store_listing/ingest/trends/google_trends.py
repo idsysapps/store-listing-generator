@@ -565,12 +565,14 @@ class DatabaseClient:
         silhouette: str | None = None,
         subtitle_text: str | None = None,
         footer_text: str | None = None,
+        label_plates: list[dict[str, Any]] | None = None,
     ) -> int:
         import json as _json
 
         materials_json = _json.dumps(recommended_materials) if recommended_materials else None
         text_plan_json = _json.dumps(text_plan) if text_plan else None
         pricing_json = _json.dumps(pricing) if pricing else None
+        label_plates_json = _json.dumps(label_plates) if label_plates else None
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -580,8 +582,8 @@ class DatabaseClient:
                      layout_type, headline_text, tagline_text, copy_mode, kicker_text,
                      font_color, scene_description, personal_use, recommended_materials, voice,
                      font_family, style_preset, text_plan, pricing, listing_description,
-                     silhouette, subtitle_text, footer_text)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     silhouette, subtitle_text, footer_text, label_plates)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -612,6 +614,7 @@ class DatabaseClient:
                     silhouette,
                     subtitle_text,
                     footer_text,
+                    label_plates_json,
                 ),
             )
             result = cur.fetchone()
@@ -649,7 +652,8 @@ class DatabaseClient:
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
                            voice, font_family, style_preset, text_plan,
-                           copy_mode, kicker_text, silhouette, subtitle_text, footer_text
+                           copy_mode, kicker_text, silhouette, subtitle_text, footer_text,
+                           label_plates
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND (image_status IS NULL OR image_status <> 'needs_attention')
@@ -666,7 +670,8 @@ class DatabaseClient:
                            layout_type, headline_text, tagline_text, font_color,
                            regeneration_feedback, scene_description, recommended_materials,
                            voice, font_family, style_preset, text_plan,
-                           copy_mode, kicker_text, silhouette, subtitle_text, footer_text
+                           copy_mode, kicker_text, silhouette, subtitle_text, footer_text,
+                           label_plates
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND (image_status IS NULL OR image_status <> 'needs_attention')
@@ -700,6 +705,7 @@ class DatabaseClient:
                     "silhouette": row[18],
                     "subtitle_text": row[19],
                     "footer_text": row[20],
+                    "label_plates": (_json.loads(row[21]) if isinstance(row[21], str) else row[21]),
                 }
                 for row in cur.fetchall()
             ]
@@ -714,7 +720,8 @@ class DatabaseClient:
                        layout_type, headline_text, tagline_text, font_color,
                        regeneration_feedback, scene_description, recommended_materials,
                        voice, font_family, style_preset, text_plan,
-                       copy_mode, kicker_text, silhouette, subtitle_text, footer_text
+                       copy_mode, kicker_text, silhouette, subtitle_text, footer_text,
+                       label_plates
                 FROM design_briefs
                 WHERE id = %s
                 """,
@@ -747,6 +754,7 @@ class DatabaseClient:
                 "silhouette": row[18],
                 "subtitle_text": row[19],
                 "footer_text": row[20],
+                "label_plates": (_json.loads(row[21]) if isinstance(row[21], str) else row[21]),
             }
 
     def list_briefs_by_batch(self, batch_id: str) -> list[dict[str, Any]]:
@@ -760,7 +768,8 @@ class DatabaseClient:
                        layout_type, headline_text, tagline_text, font_color,
                        regeneration_feedback, scene_description, recommended_materials,
                        voice, font_family, style_preset, text_plan,
-                       copy_mode, kicker_text, silhouette, subtitle_text, footer_text
+                       copy_mode, kicker_text, silhouette, subtitle_text, footer_text,
+                       label_plates
                 FROM design_briefs
                 WHERE batch_id = %s
                 ORDER BY id
@@ -792,6 +801,7 @@ class DatabaseClient:
                     "silhouette": row[18],
                     "subtitle_text": row[19],
                     "footer_text": row[20],
+                    "label_plates": (_json.loads(row[21]) if isinstance(row[21], str) else row[21]),
                 }
                 for row in cur.fetchall()
             ]

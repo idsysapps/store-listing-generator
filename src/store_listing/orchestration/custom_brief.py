@@ -37,6 +37,7 @@ from store_listing.orchestration.design_briefs import (
 from store_listing.orchestration.headline_voice import normalise_voice, screen_text
 from store_listing.orchestration.idea_devices import device_for, idea_device_rules
 from store_listing.orchestration.json_response import extract_json_objects, repair_truncated_object
+from store_listing.orchestration.label_plates import plates_to_value
 from store_listing.orchestration.llm_client import (
     create_answer,
     is_model_missing_error,
@@ -470,6 +471,7 @@ def create_custom_brief(
         style_preset=brief.style_preset,
         text_plan=brief.text_plan.to_dict() if brief.text_plan else None,
         listing_description=brief.listing_description,
+        label_plates=plates_to_value(brief.label_plates),
     )
 
     return {"status": "success", "brief_id": brief_id, "personal_use": personal_use}
