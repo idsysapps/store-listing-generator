@@ -116,9 +116,7 @@ ARTWORK_RETRY_HINT = (
 # The artwork must not carry words: the text of the design is drawn on it
 # afterwards, with a font (issue #208).
 NO_LETTERING_RETRY_HINT = (
-    "No lettering: no signs, no titles, no sentences, and no handwriting. "
-    "Digits may stay. A label on a keypad key may stay only when it is spelled "
-    "correctly, such as OK."
+    "No lettering: no signs, no titles, no sentences, no handwriting, no digits and no labels."
 )
 
 # The product types whose background is printed as-is and is therefore white.
@@ -269,6 +267,13 @@ def build_flux_prompt(brief: DesignBrief) -> str:
             "no collar, no sleeves, no mockup, no product photo."
         )
     parts.append(f"{DESIGN_ONLY}: {scene}.")
+    plates = getattr(brief, "label_plates", ())
+    if plates:
+        count = sum(len(plate.marks) for plate in plates)
+        parts.append(
+            f"The picture has {count} blank controls and no readable marks on them: "
+            "no digits, no letters, no symbols."
+        )
     # The look of the design is a preset, not the free text of the brief: free
     # text made every design come out as the same flat vector clip-art
     # (issue #227). A brief that was written before the presets existed keeps

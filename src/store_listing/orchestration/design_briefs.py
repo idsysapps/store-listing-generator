@@ -76,6 +76,11 @@ from store_listing.orchestration.json_response import (
     extract_json_objects,
     merge_items,
 )
+from store_listing.orchestration.label_plates import (
+    LabelPlate,
+    plates_from_value,
+    plates_to_value,
+)
 from store_listing.orchestration.llm_client import (
     create_answer,
     is_model_missing_error,
@@ -190,6 +195,12 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         "- If the first material's color is black or dark, the black areas of the design are "
         "the shirt, not ink: design light highlights and lines. If it is light or white, the "
         "design is printed in ink.\n"
+        "- Never write the headline, the tagline, or a label into the scene. "
+        "label_plates is how a picture carries short labels that must be read, "
+        "such as the keys of a control. Each plate is a region and an ordered "
+        "list of marks, and each mark is at most four characters. The scene "
+        "describes those controls as blank shapes and does not contain the "
+        "marks. Omit label_plates when the picture has no such labels.\n"
         "- font_color must contrast with the first material's color: a light ink on a "
         "black/dark garment, a dark ink on a white/light garment.\n"
         "- Only recommend a material whose product_type matches the brief.\n"
@@ -211,6 +222,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         "riso_two_color | hand_inked_woodcut | kawaii_flat | art_nouveau | "
         'distressed_band_tee", '
         '"scene_description": "...", '
+        '"label_plates": [{"region": "center", "marks": ["1", "2"]}], '
         '"recommended_materials": [{"external_id": "...", "name": "...", '
         '"color": "...", "substrate_type": "...", "unit_cost": 0.00}]}]}'
     )
@@ -312,6 +324,9 @@ class DesignBrief:
     # Extra lines for a market label. They are not a hero kicker.
     subtitle_text: str | None = None
     footer_text: str | None = None
+    # Short labels drawn onto blank controls after the picture is generated.
+    # The strings are exact; the boxes are measured from the picture.
+    label_plates: tuple[LabelPlate, ...] = ()
 
     @property
     def garment_material(self) -> dict[str, Any] | None:
@@ -370,6 +385,7 @@ class DesignBriefDBClient(Protocol):
         silhouette: str | None = None,
         subtitle_text: str | None = None,
         footer_text: str | None = None,
+        label_plates: list[dict[str, Any]] | None = None,
     ) -> int: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
@@ -815,6 +831,7 @@ def _brief_from(
         stacked_kicker=held_kicker,
         subtitle_text=subtitle_text,
         footer_text=footer_text,
+        label_plates=plates_from_value(b.get("label_plates")),
     )
 
 
@@ -1190,6 +1207,7 @@ def generate_design_briefs(
             silhouette=brief.silhouette,
             subtitle_text=brief.subtitle_text,
             footer_text=brief.footer_text,
+            label_plates=plates_to_value(brief.label_plates),
         )
         linked = 0
         for seed_id in brief.source_seed_ids:
@@ -1527,6 +1545,7 @@ def _brief_from_row(row: dict[str, Any]) -> DesignBrief:
         stacked_kicker=None if copy_mode in (TYPE_HERO, NO_TEXT) else row.get("kicker_text"),
         subtitle_text=None if copy_mode == NO_TEXT else row.get("subtitle_text"),
         footer_text=None if copy_mode == NO_TEXT else row.get("footer_text"),
+        label_plates=plates_from_value(row.get("label_plates")),
     )
 
 

@@ -59,17 +59,9 @@ ARTWORK_CLASSIFICATION_PROMPT = (
     "ARTWORK or PRODUCT."
 )
 
-# Alphabetic marks that belong on a phone key, spelled the way the key is printed.
-CORRECT_KEY_LABELS = frozenset({"OK", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"})
-
 ARTWORK_TEXT_PROMPT = (
-    "Look at this image. Does it contain a sign, a title, a sentence, or "
-    "handwriting that is not printed on the object itself? Digits on a keypad, "
-    "dial, or keys are part of the object, not lettering. A short label printed "
-    "on a key is part of the keypad only when it is spelled correctly, such as "
-    "OK. A misspelled key label, such as 0K or OKK, is lettering. Copy each "
-    "alphabetic key label exactly as printed, after the verdict. Answer TEXT "
-    "if it has lettering, otherwise NOTEXT. Example: NOTEXT OK."
+    "Look at this image. Does it contain readable marks: words, digits, labels, "
+    "or handwriting? Answer TEXT if it does, otherwise NOTEXT."
 )
 
 
@@ -131,13 +123,14 @@ def parse_verdict(answer: str) -> str:
     return UNKNOWN
 
 
-def misspelled_key_label(answer: str) -> bool:
-    """Whether a quoted key label is not one of the real keypad spellings."""
+def quoted_mark(answer: str) -> bool:
+    """Whether the answer quotes a digit or a label after the verdict.
+
+    A model that says NOTEXT and then reads a 5 or an OK has found a readable
+    mark. The mark is lettering whichever way it is spelled.
+    """
     tokens = re.findall(r"[A-Z0-9]+", answer.strip().upper())
-    labels = [
-        token for token in tokens if token not in {"TEXT", "NOTEXT", "NO"} and not token.isdigit()
-    ]
-    return any(label not in CORRECT_KEY_LABELS for label in labels)
+    return any(token not in {"TEXT", "NOTEXT", "NO"} for token in tokens)
 
 
 def parse_text_verdict(answer: str) -> str:
@@ -219,8 +212,8 @@ class ArtworkTextValidator:
     def validate(self, image_bytes: bytes, *, scene: str | None = None) -> ArtworkTextResult:
         """Report whether the artwork carries lettering of its own.
 
-        Digits on a keypad or dial of the depicted object are part of that
-        object. Words, signs, and labels are lettering.
+        Words, digits, and labels the image model drew are lettering. The
+        words of the design, and any declared plate, are drawn afterwards.
         """
         try:
             data_url = encode_image_for_vision(image_bytes)
@@ -230,7 +223,7 @@ class ArtworkTextValidator:
             return ArtworkTextResult(has_text=False, verdict=UNKNOWN, error=str(e))
 
         verdict = parse_text_verdict(answer)
-        if verdict == NO_LETTERING and misspelled_key_label(answer):
+        if verdict == NO_LETTERING and quoted_mark(answer):
             verdict = HAS_TEXT
         if verdict == UNKNOWN:
             logger.warning("The artwork lettering verdict could not be read: %r", answer)

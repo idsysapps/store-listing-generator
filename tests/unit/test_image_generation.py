@@ -99,6 +99,22 @@ class TestBuildFluxPrompt:
 
         assert "do not include any text or lettering" in prompt.lower()
 
+    def test_a_label_plate_asks_for_blank_controls_and_hides_the_marks(self) -> None:
+        from store_listing.orchestration.label_plates import LabelPlate
+
+        brief = _make_brief(
+            layout_type="full_bleed",
+            headline_text=None,
+            tagline_text=None,
+            label_plates=(LabelPlate(marks=("QX", "Z9"), region="center"),),
+        )
+
+        prompt = build_flux_prompt(brief).lower()
+
+        assert "blank control" in prompt
+        assert "qx" not in prompt
+        assert "z9" not in prompt
+
     def test_a_fill_scene_is_rewritten_as_isolated_motifs(self) -> None:
         prompt = build_flux_prompt(
             _make_brief(

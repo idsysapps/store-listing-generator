@@ -226,7 +226,7 @@ class TestArtworkTextValidator:
         assert "TEXT" in text
         assert "NOTEXT" in text
 
-    def test_digits_on_a_keypad_are_part_of_the_object(self) -> None:
+    def test_readable_marks_are_lettering_on_every_scene(self) -> None:
         client = _client("NOTEXT")
         validator = ArtworkTextValidator(client=client, model="vl")
 
@@ -238,19 +238,26 @@ class TestArtworkTextValidator:
         text = client.chat.completions.create.call_args.kwargs["messages"][0]["content"][0][
             "text"
         ].lower()
-        assert "keypad" in text
-        assert "part of the object" in text
+        assert "digits" in text
         assert "flip phone" in text
-        assert "ok" in text
-        assert "misspelled" in text
+        assert "keypad" not in text
+        assert "part of the object" not in text
 
-    def test_a_correctly_spelled_ok_key_is_not_lettering(self) -> None:
+    def test_a_quoted_digit_is_lettering(self) -> None:
+        validator = ArtworkTextValidator(client=_client("NOTEXT 5"), model="vl")
+
+        result = validator.validate(_image_bytes())
+
+        assert result.has_text is True
+        assert result.verdict == HAS_TEXT
+
+    def test_a_quoted_key_label_is_lettering(self) -> None:
         validator = ArtworkTextValidator(client=_client("NOTEXT OK"), model="vl")
 
         result = validator.validate(_image_bytes())
 
-        assert result.has_text is False
-        assert result.verdict == NO_LETTERING
+        assert result.has_text is True
+        assert result.verdict == HAS_TEXT
 
     def test_a_misspelled_key_label_is_lettering(self) -> None:
         validator = ArtworkTextValidator(client=_client("NOTEXT 0K"), model="vl")

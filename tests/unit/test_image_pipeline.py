@@ -880,7 +880,7 @@ class TestArtworkLetteringGate:
 
         second_prompt = comfyui.generate_image.call_args_list[1].kwargs["prompt"].lower()
         assert "no lettering" in second_prompt
-        assert "keypad" in second_prompt
+        assert "no digits" in second_prompt
 
     def test_rejected_lettering_marks_the_brief_for_attention(self) -> None:
         db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
@@ -932,6 +932,96 @@ class TestArtworkLetteringGate:
 
         checked = validator.validate.call_args.args[0]
         assert checked == b"raw-bytes"
+
+
+def _control_png(centers: list[tuple[int, int]]) -> bytes:
+    image = Image.new("RGBA", (220, 160), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    for x, y in centers:
+        draw.ellipse(
+            (x - 16, y - 12, x + 16, y + 12),
+            fill=(250, 244, 224, 255),
+            outline=(15, 15, 15, 255),
+            width=3,
+        )
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+class TestLabelPlateRendering:
+    """Declared labels are drawn after the lettering gate, or the brief is held."""
+
+    def test_a_brief_without_a_plate_does_not_need_blank_shapes(self) -> None:
+        picture = _real_png()
+        db = _mock_db_client(briefs=[_brief()])
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=picture),
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(False),
+        )
+
+        assert result["images_generated"] == 1
+        s3.put_object.assert_called()
+
+    def test_the_wrong_number_of_shapes_is_not_uploaded(self) -> None:
+        picture = _control_png([(40, 50), (110, 50), (70, 110)])
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    label_plates=[{"region": "any", "marks": ["1", "2"]}],
+                )
+            ]
+        )
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=picture),
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(False),
+        )
+
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        s3.put_object.assert_not_called()
+        call = db.update_brief_image_status.call_args.kwargs
+        assert call["status"] == "needs_attention"
+        assert "label" in (call["error"] or "").lower()
+
+    def test_matching_shapes_are_labeled_before_upload(self) -> None:
+        picture = _control_png([(50, 70), (130, 70)])
+        db = _mock_db_client(briefs=[_brief(label_plates=[{"region": "any", "marks": ["A", "B"]}])])
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=_comfyui_client(raw=picture),
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(False),
+        )
+
+        assert result["images_generated"] == 1
+        uploaded = s3.put_object.call_args.kwargs["Body"]
+        with Image.open(BytesIO(uploaded)) as image:
+            pixels = image.convert("RGBA").load()
+        assert pixels is not None
+        dark = 0
+        for y in range(58, 82):
+            for x in range(38, 62):
+                raw = pixels[x, y]
+                if not isinstance(raw, tuple) or len(raw) < 4:
+                    continue
+                red, green, blue, alpha = (int(raw[0]), int(raw[1]), int(raw[2]), int(raw[3]))
+                if alpha > 200 and red < 80 and green < 80 and blue < 80:
+                    dark += 1
+        assert dark > 0
 
 
 class TestNoTextDesigns:
