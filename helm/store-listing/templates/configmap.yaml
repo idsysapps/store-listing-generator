@@ -223,7 +223,9 @@ data:
         -- A commercial layout, or null for an ordinary template.
         silhouette VARCHAR(40),
         subtitle_text TEXT,
-        footer_text TEXT
+        footer_text TEXT,
+        -- Short marks drawn onto blank controls after the picture is made.
+        label_plates JSONB
     );
 
     CREATE INDEX IF NOT EXISTS idx_design_briefs_product_type ON design_briefs(product_type);
@@ -532,6 +534,7 @@ data:
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS silhouette VARCHAR(40);
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS subtitle_text TEXT;
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS footer_text TEXT;
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS label_plates JSONB;
 
     -- Table: app_settings (the settings the operator can change without a
     -- redeploy, e.g. which product types the pipeline produces)

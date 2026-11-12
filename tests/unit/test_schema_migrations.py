@@ -112,6 +112,15 @@ class TestListingDescriptionMigration:
         assert "ADD COLUMN IF NOT EXISTS listing_description TEXT" in _migration_sql()
 
 
+class TestLabelPlatesMigration:
+    def test_the_fresh_schema_carries_label_plates(self) -> None:
+        assert "ADD COLUMN IF NOT EXISTS label_plates JSONB" in FRESH_SCHEMA.read_text()
+
+    def test_the_configured_schema_carries_label_plates(self) -> None:
+        assert "label_plates JSONB" in _schema_sql()
+        assert "ADD COLUMN IF NOT EXISTS label_plates JSONB" in _migration_sql()
+
+
 class TestImageAttentionMigration:
     def test_the_fresh_schema_carries_the_image_status(self) -> None:
         schema = FRESH_SCHEMA.read_text()
