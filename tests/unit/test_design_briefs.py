@@ -20,6 +20,7 @@ from store_listing.orchestration.design_briefs import (
     generate_design_briefs,
     parse_brief_response,
     read_brief_response,
+    rewrite_lettered_brief,
     screen_scene,
 )
 from store_listing.orchestration.idea_devices import DEVICE_IDS
@@ -2539,3 +2540,93 @@ class TestTheGarmentMaterial:
 
     def test_a_brief_without_materials_has_no_garment_color(self) -> None:
         assert self._brief().garment_color is None
+
+
+class TestRewriteLetteredBrief:
+    """A lettered illustration goes back through the briefs model for a new scene."""
+
+    def _row(self) -> dict[str, Any]:
+        return {
+            "id": 226,
+            "concept": "Skeleton yoga",
+            "product_type": "dtf_apparel",
+            "audience": "yoga fans",
+            "visual_style": "retro",
+            "layout_type": "text_top",
+            "headline_text": "SPOOKY SEASON",
+            "tagline_text": None,
+            "copy_mode": "caption",
+            "voice": "deadpan",
+            "scene_description": "a skeleton doing yoga beside a wooden welcome sign",
+        }
+
+    def _raw(self, response_json: dict[str, Any]) -> MagicMock:
+        choice = MagicMock()
+        choice.message.content = json.dumps(response_json)
+        parsed = MagicMock(choices=[choice])
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = parsed
+        return raw
+
+    def _llm(self, response_json: dict[str, Any]) -> MagicMock:
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = self._raw(response_json)
+        return llm
+
+    def _answer(self, scene: str) -> dict[str, Any]:
+        return {
+            "briefs": [
+                {
+                    "concept": "Skeleton yoga",
+                    "product_type": "dtf_apparel",
+                    "confidence": 80,
+                    "source_seed_ids": [],
+                    "layout_type": "text_top",
+                    "headline_text": "SPOOKY SEASON",
+                    "copy_mode": "caption",
+                    "voice": "deadpan",
+                    "scene_description": scene,
+                }
+            ]
+        }
+
+    def test_a_lettered_illustration_is_sent_back_through_the_briefs_model(self) -> None:
+        llm = self._llm(self._answer("a skeleton doing yoga on a beach towel"))
+        reason = (
+            "The illustration came back with lettering. Rewrite the scene "
+            "without signs, labels, badges or other readable objects, then regenerate."
+        )
+
+        rewritten = rewrite_lettered_brief(llm, "briefs-model", self._row(), reason)
+
+        assert rewritten is not None
+        assert rewritten.scene_description == "a skeleton doing yoga on a beach towel"
+        assert rewritten.concept == "Skeleton yoga"
+        assert rewritten.headline_text == "SPOOKY SEASON"
+        messages = llm.with_raw_response.create.call_args.kwargs["messages"]
+        system = messages[0]["content"].lower()
+        user = messages[1]["content"].lower()
+        assert "welcome sign" in user
+        assert "signs" in system
+        assert "labels" in system
+        assert "badges" in system
+        assert "lettering" in system
+
+    def test_an_unreadable_answer_does_not_rewrite_the_brief(self) -> None:
+        choice = MagicMock()
+        choice.message.content = "not json"
+        parsed = MagicMock(choices=[choice])
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = parsed
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = raw
+
+        assert rewrite_lettered_brief(llm, "briefs-model", self._row(), "lettering") is None
+
+    def test_the_same_scene_is_not_treated_as_a_rewrite(self) -> None:
+        scene = "a skeleton doing yoga beside a wooden welcome sign"
+        llm = self._llm(self._answer(scene))
+
+        assert rewrite_lettered_brief(llm, "briefs-model", self._row(), "lettering") is None

@@ -405,6 +405,10 @@ def _retry_hint(brief: DesignBrief) -> str:
     return composition_for(template_id, brief.concept)
 
 
+# (brief row, lettering failure) -> a rewritten scene, or None when it cannot.
+BriefRewriter = Callable[[dict[str, Any], str], str | None]
+
+
 def generate_images_for_briefs(
     *,
     db_client: Any,
@@ -418,6 +422,7 @@ def generate_images_for_briefs(
     artwork_text_validator: ArtworkTextValidator | None = None,
     hero_validator: StrictTextValidator | None = None,
     product_types: list[str] | None = None,
+    brief_rewriter: BriefRewriter | None = None,
 ) -> dict[str, Any]:
     # A store that focuses on one production method does not spend GPU time
     # on the briefs of the others (issue #215).
@@ -429,6 +434,7 @@ def generate_images_for_briefs(
 
     generated = 0
     errors = 0
+    rewritten_brief_ids: set[int] = set()
 
     for brief_row in briefs:
         success, _ = _generate_best_candidate(
@@ -440,6 +446,8 @@ def generate_images_for_briefs(
             artwork_text_validator=artwork_text_validator,
             hero_validator=hero_validator,
             db_client=db_client,
+            brief_rewriter=brief_rewriter,
+            rewritten_brief_ids=rewritten_brief_ids,
         )
         if success:
             generated += 1
@@ -890,6 +898,42 @@ def _needs_attention(
     return False, message
 
 
+def _scene_rewritten_for_lettering(
+    brief_row: dict[str, Any],
+    message: str,
+    *,
+    db_client: Any,
+    brief_rewriter: BriefRewriter | None,
+    rewritten_brief_ids: set[int],
+) -> str | None:
+    """Ask for one new scene, store it, and hand it back for another render.
+
+    A brief is rewritten once. A second lettering failure, or a reply that
+    does not change the scene, is left for the caller to mark.
+    """
+    brief_id = brief_row["id"]
+    if brief_rewriter is None or brief_id in rewritten_brief_ids:
+        return None
+    rewritten_brief_ids.add(brief_id)
+    try:
+        scene = brief_rewriter(brief_row, message)
+    except Exception as error:  # noqa: BLE001
+        logger.warning("Brief %d: the scene rewrite failed: %s", brief_id, error)
+        return None
+    if not isinstance(scene, str):
+        return None
+    scene = scene.strip()
+    current = (brief_row.get("scene_description") or "").strip()
+    if not scene or scene == current:
+        return None
+    brief_row["scene_description"] = scene
+    update = getattr(db_client, "update_brief_scene", None)
+    if callable(update):
+        update(brief_id=brief_id, scene_description=scene)
+    logger.info("Brief %d: rewrote the scene after lettering, rendering again", brief_id)
+    return scene
+
+
 def _generate_single_brief(
     brief_row: dict[str, Any],
     *,
@@ -901,6 +945,8 @@ def _generate_single_brief(
     artwork_text_validator: ArtworkTextValidator | None = None,
     hero_validator: StrictTextValidator | None = None,
     candidate_sink: Callable[[Candidate], None] | None = None,
+    brief_rewriter: BriefRewriter | None = None,
+    rewritten_brief_ids: set[int] | None = None,
 ) -> tuple[bool, str | None]:
     brief = _brief_for_render(brief_row)
     brief_id = brief_row["id"]
@@ -1000,6 +1046,7 @@ def _generate_single_brief(
     artwork_attempts = 0
     lettering_attempts = 0
     text_attempts = 0
+    rewritten_ids = rewritten_brief_ids if rewritten_brief_ids is not None else set()
 
     while True:
         attempts += 1
@@ -1080,13 +1127,26 @@ def _generate_single_brief(
                             "at all: no letters, no signage and no labels."
                         )
                         continue
-                    return _needs_attention(
-                        db_client,
-                        brief_id,
+                    message = (
                         "The no-text illustration came back with lettering. Rewrite the "
                         "scene without signs, labels, badges or other readable objects, "
-                        "then regenerate.",
+                        "then regenerate."
                     )
+                    if (
+                        _scene_rewritten_for_lettering(
+                            brief_row,
+                            message,
+                            db_client=db_client,
+                            brief_rewriter=brief_rewriter,
+                            rewritten_brief_ids=rewritten_ids,
+                        )
+                        is not None
+                    ):
+                        brief = _brief_for_render(brief_row)
+                        lettering_attempts = 0
+                        retry_hint = ""
+                        continue
+                    return _needs_attention(db_client, brief_id, message)
             else:
                 lettering = artwork_text_validator.validate(
                     result.raw_bytes or result.image_bytes,
@@ -1106,13 +1166,26 @@ def _generate_single_brief(
                                 "billboard or label may have writing."
                             )
                         continue
-                    return _needs_attention(
-                        db_client,
-                        brief_id,
+                    message = (
                         "The illustration came back with lettering. Rewrite the scene "
                         "without signs, labels, badges or other readable objects, then "
-                        "regenerate.",
+                        "regenerate."
                     )
+                    if (
+                        _scene_rewritten_for_lettering(
+                            brief_row,
+                            message,
+                            db_client=db_client,
+                            brief_rewriter=brief_rewriter,
+                            rewritten_brief_ids=rewritten_ids,
+                        )
+                        is not None
+                    ):
+                        brief = _brief_for_render(brief_row)
+                        lettering_attempts = 0
+                        retry_hint = ""
+                        continue
+                    return _needs_attention(db_client, brief_id, message)
                 if lettering.verdict == "unknown":
                     logger.warning(
                         "Brief %d: the lettering could not be judged (%s), keeping the image",
@@ -1239,6 +1312,8 @@ def _generate_best_candidate(
     artwork_validator: ArtworkValidator | None = None,
     artwork_text_validator: ArtworkTextValidator | None = None,
     hero_validator: StrictTextValidator | None = None,
+    brief_rewriter: BriefRewriter | None = None,
+    rewritten_brief_ids: set[int] | None = None,
 ) -> tuple[bool, str | None]:
     """Render N candidates, upload the one the deterministic gate likes best.
 
@@ -1257,6 +1332,7 @@ def _generate_best_candidate(
         and hero_validator is not None
         and is_model_text_brief(brief)
     )
+    rewritten_ids = rewritten_brief_ids if rewritten_brief_ids is not None else set()
     if (
         count <= 1
         or brief.copy_mode == TYPE_HERO
@@ -1273,6 +1349,8 @@ def _generate_best_candidate(
             artwork_text_validator=artwork_text_validator,
             hero_validator=hero_validator,
             db_client=db_client,
+            brief_rewriter=brief_rewriter,
+            rewritten_brief_ids=rewritten_ids,
         )
 
     candidates: list[Candidate] = []
@@ -1287,6 +1365,8 @@ def _generate_best_candidate(
             hero_validator=hero_validator,
             db_client=db_client,
             candidate_sink=candidates.append,
+            brief_rewriter=brief_rewriter,
+            rewritten_brief_ids=rewritten_ids,
         )
         if not success:
             return False, error
@@ -1338,6 +1418,7 @@ def generate_image_for_brief(
     artwork_validator: ArtworkValidator | None = None,
     artwork_text_validator: ArtworkTextValidator | None = None,
     hero_validator: StrictTextValidator | None = None,
+    brief_rewriter: BriefRewriter | None = None,
 ) -> dict[str, Any]:
     brief_row = db_client.get_brief_by_id(brief_id)
     if brief_row is None:
@@ -1353,6 +1434,7 @@ def generate_image_for_brief(
         artwork_text_validator=artwork_text_validator,
         hero_validator=hero_validator,
         db_client=db_client,
+        brief_rewriter=brief_rewriter,
     )
     if success:
         return {"status": "success", "brief_id": brief_id}

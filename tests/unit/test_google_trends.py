@@ -314,6 +314,24 @@ class TestDatabaseClient:
             42,
         )
 
+    def test_update_brief_scene_stores_the_rewritten_scene(self) -> None:
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            DatabaseClient().update_brief_scene(226, "a skeleton doing yoga on a beach towel")
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "scene_description = %s" in sql
+        assert "image_status = NULL" in sql
+        assert "image_error = NULL" in sql
+        assert mock_cursor.execute.call_args[0][1] == (
+            "a skeleton doing yoga on a beach towel",
+            226,
+        )
+
     def test_get_app_setting_returns_the_stored_value(self) -> None:
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = ("dtf_apparel",)

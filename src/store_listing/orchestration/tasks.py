@@ -160,6 +160,38 @@ def _build_artwork_text_validator() -> Any:
     return ArtworkTextValidator(client=get_vision_client(), model=get_artwork_vision_model())
 
 
+def _lettering_brief_rewriter() -> Any:
+    """Rewrite a lettered scene through the briefs model, then render it again.
+
+    The image task does not know how a brief is written. When the illustration
+    still has lettering after its retries, this asks the same model that wrote
+    the brief for a scene without signs, labels, badges or other readable
+    objects. Without an LLM the brief is left for attention.
+    """
+
+    def rewrite(brief_row: dict[str, Any], reason: str) -> str | None:
+        from store_listing.orchestration.design_briefs import rewrite_lettered_brief
+        from store_listing.orchestration.llm_client import (
+            configured,
+            get_llm_client,
+            get_llm_model,
+        )
+
+        brief_id = brief_row.get("id")
+        if not configured():
+            logger.warning("Brief %s: lettering rewrite skipped, LLM_API_KEY is not set", brief_id)
+            return None
+        client = get_llm_client()
+        model = get_llm_model()
+        _check_llm_model(client, model)
+        rewritten = rewrite_lettered_brief(client.chat.completions, model, brief_row, reason)
+        if rewritten is None or not rewritten.scene_description:
+            return None
+        return rewritten.scene_description
+
+    return rewrite
+
+
 def _build_hero_validator() -> Any:
     """The strict OCR gate for Qwen-drawn lettering, or None when the path is off.
 
@@ -699,6 +731,7 @@ def generate_design_images_task() -> dict:
         artwork_text_validator=_build_artwork_text_validator(),
         hero_validator=_build_hero_validator(),
         product_types=enabled_product_types(DatabaseClient()),
+        brief_rewriter=_lettering_brief_rewriter(),
     )
 
 
@@ -751,4 +784,5 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         artwork_validator=_build_artwork_validator(),
         artwork_text_validator=_build_artwork_text_validator(),
         hero_validator=_build_hero_validator(),
+        brief_rewriter=_lettering_brief_rewriter(),
     )

@@ -535,12 +535,18 @@ language. A scene that names a product is rejected with the batch rejection
 reasons, so the existing brief retry asks the model for a new scene
 automatically.
 
-If the artwork or lettering gate still rejects a render after its retries, the
-brief is marked `imageStatus: needs_attention` with a human-readable
-`imageError`. The pipeline does **not** silently upload a typography-only
-design in its place. The automatic image sweep skips needs-attention briefs so
-they do not loop; `requestRegeneration` clears the status and dispatches a new
-render.
+If the artwork gate still rejects a render after its retries, the brief is
+marked `imageStatus: needs_attention` with a human-readable `imageError`. The
+pipeline does **not** silently upload a typography-only design in its place.
+The automatic image sweep skips needs-attention briefs so they do not loop;
+`requestRegeneration` clears the status and dispatches a new render.
+
+If the lettering gate still rejects a render after its retries, the brief is
+sent back through the briefs model. The model rewrites `scene_description`
+without signs, labels, badges or other readable objects, the new scene is
+stored, and the image is rendered again. A rewritten scene that still comes
+back with lettering is marked `needs_attention`. When the briefs model is not
+configured, the lettering failure is marked for attention immediately.
 
 ### Seed pool and brief mix
 | Variable | Default | Description |

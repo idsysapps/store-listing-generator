@@ -979,6 +979,20 @@ class DatabaseClient:
                 (image_key_raw, image_key_transparent, brief_id),
             )
 
+    def update_brief_scene(self, brief_id: int, scene_description: str) -> None:
+        """Store a scene rewritten after the illustration came back with lettering."""
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE design_briefs
+                SET scene_description = %s,
+                    image_status = NULL,
+                    image_error = NULL
+                WHERE id = %s
+                """,
+                (scene_description, brief_id),
+            )
+
     def update_brief_image_status(
         self,
         brief_id: int,

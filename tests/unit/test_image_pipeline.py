@@ -902,6 +902,85 @@ class TestArtworkLetteringGate:
         assert call["status"] == "needs_attention"
         assert "lettering" in (call["error"] or "").lower()
 
+    def test_lettering_rewrites_the_brief_and_then_renders_the_new_scene(self) -> None:
+        db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
+        comfy = _comfyui_client()
+        s3 = MagicMock()
+        rewritten = "a skeleton holding a yoga pose under a palm tree"
+        reasons: list[str] = []
+
+        def rewrite(row: dict[str, Any], reason: str) -> str:
+            reasons.append(reason)
+            assert row["id"] == 42
+            return rewritten
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(True, True, False),
+            brief_rewriter=rewrite,
+        )
+
+        assert result["images_generated"] == 1
+        assert result["errors"] == 0
+        assert len(reasons) == 1
+        assert "lettering" in reasons[0].lower()
+        assert "signs" in reasons[0].lower()
+        assert comfy.generate_image.call_count == 3
+        third_prompt = comfy.generate_image.call_args_list[2].kwargs["prompt"].lower()
+        assert "palm tree" in third_prompt
+        db.update_brief_scene.assert_called_once_with(brief_id=42, scene_description=rewritten)
+        db.update_brief_image_status.assert_not_called()
+        s3.put_object.assert_called()
+
+    def test_a_rewrite_that_still_has_lettering_is_marked_for_attention(self) -> None:
+        db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
+        comfy = _comfyui_client()
+        calls: list[str] = []
+
+        def rewrite(_row: dict[str, Any], reason: str) -> str:
+            calls.append(reason)
+            return "a skeleton holding a yoga pose under a palm tree"
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(True, True, True, True),
+            brief_rewriter=rewrite,
+        )
+
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        assert calls == [calls[0]]
+        assert comfy.generate_image.call_count == 4
+        db.update_brief_scene.assert_called_once()
+        call = db.update_brief_image_status.call_args.kwargs
+        assert call["status"] == "needs_attention"
+        assert "lettering" in (call["error"] or "").lower()
+
+    def test_a_rewriter_that_cannot_change_the_scene_marks_the_brief(self) -> None:
+        db = _mock_db_client(briefs=[_brief(layout_type="text_top", headline_text="SPOOKY SEASON")])
+        comfy = _comfyui_client()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=_artwork_text_validator(True, True),
+            brief_rewriter=lambda _row, _reason: None,
+        )
+
+        assert result["images_generated"] == 0
+        assert result["errors"] == 1
+        assert comfy.generate_image.call_count == 2
+        db.update_brief_scene.assert_not_called()
+        assert db.update_brief_image_status.call_args.kwargs["status"] == "needs_attention"
+
     def test_the_gate_is_not_run_for_a_typography_only_design(self) -> None:
         db = _mock_db_client(
             briefs=[_brief(layout_type="text_only", headline_text="SPOOKY SEASON")]
@@ -1110,6 +1189,30 @@ class TestNoTextDesigns:
         assert comfy.generate_image.call_count == 2
         s3.put_object.assert_not_called()
         db.update_brief_image_keys.assert_not_called()
+
+    def test_lettering_rewrites_the_scene_and_then_the_design_is_uploaded(self) -> None:
+        db = _mock_db_client(briefs=[self._no_text_brief()])
+        comfy = _comfyui_client()
+        s3 = MagicMock()
+        rewritten = "a ghost tucked inside a pumpkin"
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfy,
+            s3_client=s3,
+            bucket="test-bucket",
+            artwork_text_validator=_no_text_validator(
+                self._lettered(), self._lettered(), self._passed()
+            ),
+            brief_rewriter=lambda _row, _reason: rewritten,
+        )
+
+        assert result["images_generated"] == 1
+        assert comfy.generate_image.call_count == 3
+        third_prompt = comfy.generate_image.call_args_list[2].kwargs["prompt"].lower()
+        assert "pumpkin" in third_prompt
+        db.update_brief_scene.assert_called_once_with(brief_id=42, scene_description=rewritten)
+        s3.put_object.assert_called()
 
     def test_the_retry_asks_for_no_words_at_all(self) -> None:
         db = _mock_db_client(briefs=[self._no_text_brief()])

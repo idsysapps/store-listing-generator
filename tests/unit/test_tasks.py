@@ -71,6 +71,11 @@ class TestGenerateDesignImagesTask:
 
         assert pipeline.call_args.kwargs["artwork_validator"] is not None
 
+    def test_lettering_sends_the_brief_back_through_the_briefs_model(self, tasks) -> None:
+        pipeline, _ = _run_task(tasks, "generate_design_images_task", {})
+
+        assert pipeline.call_args.kwargs["brief_rewriter"] is not None
+
     def test_the_artwork_validator_can_be_switched_off(self, tasks) -> None:
         pipeline, _ = _run_task(
             tasks, "generate_design_images_task", {"ARTWORK_VALIDATION_ENABLED": "false"}
@@ -120,6 +125,11 @@ class TestGenerateSingleBriefImageTask:
         pipeline, _ = _run_task(tasks, "generate_single_brief_image_task", {}, args=(7,))
 
         assert pipeline.call_args.kwargs["artwork_text_validator"] is not None
+
+    def test_lettering_sends_the_brief_back_through_the_briefs_model(self, tasks) -> None:
+        pipeline, _ = _run_task(tasks, "generate_single_brief_image_task", {}, args=(7,))
+
+        assert pipeline.call_args.kwargs["brief_rewriter"] is not None
 
     def test_the_lettering_gate_can_be_turned_off(self, tasks) -> None:
         pipeline, _ = _run_task(
@@ -249,3 +259,38 @@ class TestLlmModelCheck:
         result = self._run_brief_task(tasks, ["qwen38_briefs"], "qwen38_briefs", caplog)
 
         assert result["llm_model"] == "qwen38_briefs"
+
+
+class TestLetteringBriefRewriter:
+    def test_the_rewriter_asks_the_briefs_model_for_a_new_scene(self, tasks) -> None:
+        rewritten = SimpleNamespace(scene_description="a skeleton doing yoga on a beach towel")
+        client = MagicMock()
+        with (
+            patch("store_listing.orchestration.llm_client.configured", return_value=True),
+            patch("store_listing.orchestration.llm_client.get_llm_client", return_value=client),
+            patch(
+                "store_listing.orchestration.llm_client.get_llm_model", return_value="briefs-model"
+            ),
+            patch("store_listing.orchestration.llm_client.check_model_available", return_value=""),
+            patch(
+                "store_listing.orchestration.design_briefs.rewrite_lettered_brief",
+                return_value=rewritten,
+            ) as rewrite,
+        ):
+            scene = tasks._lettering_brief_rewriter()({"id": 226}, "lettering")
+
+        assert scene == "a skeleton doing yoga on a beach towel"
+        rewrite.assert_called_once()
+        assert rewrite.call_args.args[1] == "briefs-model"
+        assert rewrite.call_args.args[2]["id"] == 226
+        assert rewrite.call_args.args[3] == "lettering"
+
+    def test_the_rewriter_skips_when_the_briefs_model_is_not_configured(self, tasks) -> None:
+        with (
+            patch("store_listing.orchestration.llm_client.configured", return_value=False),
+            patch("store_listing.orchestration.design_briefs.rewrite_lettered_brief") as rewrite,
+        ):
+            scene = tasks._lettering_brief_rewriter()({"id": 226}, "lettering")
+
+        assert scene is None
+        rewrite.assert_not_called()
