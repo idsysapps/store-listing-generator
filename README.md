@@ -541,11 +541,11 @@ pipeline does **not** silently upload a typography-only design in its place.
 The automatic image sweep skips needs-attention briefs so they do not loop;
 `requestRegeneration` clears the status and dispatches a new render.
 
-If the lettering gate still rejects a render after its retries, the brief is
-sent back through the briefs model. The model rewrites `scene_description`
-without signs, labels, badges or other readable objects, the new scene is
-stored, and the image is rendered again. A rewritten scene that still comes
-back with lettering is marked `needs_attention`. When the briefs model is not
+If the lettering gate still rejects a render after its retries, the briefs
+model is asked for a new scene and nothing else. The previous scene is named
+as the picture that failed. The new scene is stored and the image is rendered
+again. A reply that repeats the scene, or a rewritten scene that still comes
+back with lettering, is marked `needs_attention`. When the briefs model is not
 configured, the lettering failure is marked for attention immediately.
 
 ### Seed pool and brief mix
