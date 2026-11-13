@@ -2606,8 +2606,11 @@ class TestRewriteLetteredBrief:
         assert rewritten.headline_text == "SPOOKY SEASON"
         messages = llm.with_raw_response.create.call_args.kwargs["messages"]
         system = messages[0]["content"].lower()
-        user = messages[1]["content"].lower()
-        assert "welcome sign" in user
+        user = messages[1]["content"]
+        assert "wooden welcome sign" in user
+        assert "must not be repeated" in user
+        assert '"scene_description"' not in user
+        assert "do not return the previous scene" in system
         assert "signs" in system
         assert "labels" in system
         assert "badges" in system
@@ -2625,8 +2628,27 @@ class TestRewriteLetteredBrief:
 
         assert rewrite_lettered_brief(llm, "briefs-model", self._row(), "lettering") is None
 
-    def test_the_same_scene_is_not_treated_as_a_rewrite(self) -> None:
+    def test_a_plain_scene_answer_is_the_new_picture(self) -> None:
+        llm = MagicMock()
+        choice = MagicMock()
+        choice.message.content = json.dumps(
+            {"scene_description": "a skeleton holding a yoga pose under a palm tree"}
+        )
+        parsed = MagicMock(choices=[choice])
+        raw = MagicMock()
+        raw.headers = {}
+        raw.parse.return_value = parsed
+        llm.with_raw_response.create.return_value = raw
+
+        rewritten = rewrite_lettered_brief(llm, "briefs-model", self._row(), "lettering")
+
+        assert rewritten is not None
+        assert rewritten.scene_description == "a skeleton holding a yoga pose under a palm tree"
+        assert llm.with_raw_response.create.call_count == 1
+
+    def test_a_repeated_scene_is_not_a_rewrite(self) -> None:
         scene = "a skeleton doing yoga beside a wooden welcome sign"
         llm = self._llm(self._answer(scene))
 
         assert rewrite_lettered_brief(llm, "briefs-model", self._row(), "lettering") is None
+        assert llm.with_raw_response.create.call_count == 1

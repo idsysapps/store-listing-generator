@@ -1609,21 +1609,63 @@ def _merge_briefs(first: list[DesignBrief], second: list[DesignBrief]) -> list[D
     return merged
 
 
-_SCENE_REWRITE_FIELDS: Final[tuple[str, ...]] = (
-    "concept",
-    "product_type",
-    "audience",
-    "visual_style",
-    "layout_type",
-    "headline_text",
-    "tagline_text",
-    "copy_mode",
-    "kicker_text",
-    "voice",
-    "style_preset",
-    "idea_device",
-    "scene_description",
-)
+def _scene_identity(scene: str | None) -> str:
+    """A scene as a comparison key, so a copied sentence reads as the same scene."""
+    return " ".join((scene or "").casefold().split())
+
+
+def _lettering_rewrite_messages(
+    brief_row: dict[str, Any],
+    reason: str,
+) -> list[dict[str, str]]:
+    """Ask for one new picture, not a filled-in copy of the brief.
+
+    The batch brief prompt hands the model a brief object and a schema with
+    scene_description in it, and the model writes that sentence back. A call
+    that asks only for a new scene, and names the old one as the picture that
+    failed, writes a different picture.
+    """
+    scene = (str(brief_row.get("scene_description") or "")).strip()
+    headline = brief_row.get("headline_text") or "none"
+    system = (
+        "The image model drew writing into this design. Write a different picture "
+        "of the same idea.\n"
+        f"{reason}\n"
+        'Return ONLY JSON: {"scene_description": "..."}.\n'
+        "One sentence, under 35 words. No signs, labels, badges, menus, screens, "
+        "newspapers, packaging, or anything a person would read. Do not put the "
+        "headline in the scene. Do not return the previous scene. Do not name the "
+        "product the design is printed on.\n"
+    )
+    user = (
+        f"Idea: {brief_row.get('concept') or 'the design'}. "
+        f"Headline, which must NOT appear in the picture: {headline}. "
+        f"Voice: {brief_row.get('voice') or 'deadpan'}. "
+        f"Look: {brief_row.get('style_preset') or brief_row.get('visual_style') or 'the look'}.\n"
+        f"Previous scene, which failed and must not be repeated: {scene}"
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def _scene_from_rewrite(text: str) -> str | None:
+    """The scene_description in a rewrite answer."""
+    for obj in extract_json_objects(text):
+        scene = obj.get("scene_description")
+        if isinstance(scene, str) and scene.strip():
+            return scene.strip()
+        briefs = obj.get("briefs")
+        if not isinstance(briefs, list):
+            continue
+        for brief in briefs:
+            if not isinstance(brief, dict):
+                continue
+            nested = brief.get("scene_description")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return None
 
 
 def rewrite_lettered_brief(
@@ -1632,51 +1674,62 @@ def rewrite_lettered_brief(
     brief_row: dict[str, Any],
     reason: str,
 ) -> DesignBrief | None:
-    """Ask the briefs model to rewrite a scene that rendered with lettering.
+    """Ask the briefs model for a different picture of the same idea.
 
-    The illustration already failed the lettering gate. The same model that
-    wrote the brief gets the scene and the reason, and returns one brief whose
-    picture has no signs, labels, badges or other readable objects. The concept
-    and the copy stay. A reply that cannot be read, or that does not change
-    the scene, leaves the brief alone.
+    The call asks for a scene and nothing else. The previous scene is named as
+    the picture that failed, not as a field to copy. A reply that cannot be
+    read, names the product, or repeats that picture is left unused.
     """
-    product_type = brief_row.get("product_type")
-    enabled = [product_type] if isinstance(product_type, str) and product_type else None
-    system = (
-        f"{system_prompt(enabled)}\n"
-        "REWRITE - this one brief was already written, and its illustration came "
-        "back with lettering.\n"
-        f"{reason}\n"
-        "Rewrite scene_description and keep the concept, the headline, the tagline, "
-        "the voice, the product and the look. The new scene has no signs, labels, "
-        "badges, menus, screens, newspapers or other objects that would be drawn "
-        "with writing. Return exactly one brief.\n"
-    )
-    payload = {key: brief_row.get(key) for key in _SCENE_REWRITE_FIELDS}
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": json.dumps({"brief": payload}, indent=2)},
-    ]
-    try:
-        briefs, error = _request_briefs(llm_completions, model, messages, enabled)
-    except LLMResponseParseError as error:
-        logger.warning("The lettering rewrite could not be read: %s", error)
+    messages = _lettering_rewrite_messages(brief_row, reason)
+    raw, error = create_answer(llm_completions, model, messages, "scene rewrite")
+    if error is not None or raw is None:
+        logger.warning("The lettering rewrite failed: %s", error or "no response")
         return None
-    if error or not briefs:
-        if error:
-            logger.warning("The lettering rewrite failed: %s", error)
+    try:
+        response = raw.parse()
+        _log_llm_response(response, raw.headers, "scene rewrite")
+        content = response.choices[0].message.content or ""
+    except Exception as parse_error:  # noqa: BLE001
+        logger.warning("The lettering rewrite could not be read: %s", parse_error)
         return None
 
-    rewritten = briefs[0]
+    scene = _scene_from_rewrite(content)
+    if scene is None:
+        logger.warning("The lettering rewrite had no scene: %s", content[:500])
+        return None
+    scene = strip_lettering(scene).strip()
+    if not scene:
+        logger.warning("The lettering rewrite was only words for brief %s", brief_row.get("id"))
+        return None
+    scene_reason = screen_scene(scene)
+    if scene_reason is not None:
+        logger.warning("The lettering rewrite was rejected: %s", scene_reason)
+        return None
     current = strip_lettering((str(brief_row.get("scene_description") or "")).strip())
-    scene = (rewritten.scene_description or "").strip()
-    if not scene or scene == current:
+    if _scene_identity(scene) == _scene_identity(current):
         logger.warning(
-            "The lettering rewrite did not change the scene of brief %s",
+            "The lettering rewrite repeated the scene of brief %s: %s",
             brief_row.get("id"),
+            scene,
         )
         return None
-    return rewritten
+    headline = brief_row.get("headline_text")
+    return DesignBrief(
+        concept=str(brief_row.get("concept") or ""),
+        product_type=str(brief_row.get("product_type") or "dtf_apparel"),
+        specific_products=[],
+        audience=str(brief_row.get("audience") or ""),
+        visual_style=str(brief_row.get("visual_style") or ""),
+        confidence=0,
+        reasoning="",
+        source_seed_ids=[],
+        headline_text=headline if isinstance(headline, str) else None,
+        scene_description=scene,
+        voice=str(brief_row.get("voice") or "deadpan"),
+        style_preset=brief_row.get("style_preset")
+        if isinstance(brief_row.get("style_preset"), str)
+        else None,
+    )
 
 
 def _request_briefs_with_retry(
