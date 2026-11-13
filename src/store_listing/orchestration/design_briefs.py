@@ -1609,6 +1609,76 @@ def _merge_briefs(first: list[DesignBrief], second: list[DesignBrief]) -> list[D
     return merged
 
 
+_SCENE_REWRITE_FIELDS: Final[tuple[str, ...]] = (
+    "concept",
+    "product_type",
+    "audience",
+    "visual_style",
+    "layout_type",
+    "headline_text",
+    "tagline_text",
+    "copy_mode",
+    "kicker_text",
+    "voice",
+    "style_preset",
+    "idea_device",
+    "scene_description",
+)
+
+
+def rewrite_lettered_brief(
+    llm_completions: Any,
+    model: str,
+    brief_row: dict[str, Any],
+    reason: str,
+) -> DesignBrief | None:
+    """Ask the briefs model to rewrite a scene that rendered with lettering.
+
+    The illustration already failed the lettering gate. The same model that
+    wrote the brief gets the scene and the reason, and returns one brief whose
+    picture has no signs, labels, badges or other readable objects. The concept
+    and the copy stay. A reply that cannot be read, or that does not change
+    the scene, leaves the brief alone.
+    """
+    product_type = brief_row.get("product_type")
+    enabled = [product_type] if isinstance(product_type, str) and product_type else None
+    system = (
+        f"{system_prompt(enabled)}\n"
+        "REWRITE - this one brief was already written, and its illustration came "
+        "back with lettering.\n"
+        f"{reason}\n"
+        "Rewrite scene_description and keep the concept, the headline, the tagline, "
+        "the voice, the product and the look. The new scene has no signs, labels, "
+        "badges, menus, screens, newspapers or other objects that would be drawn "
+        "with writing. Return exactly one brief.\n"
+    )
+    payload = {key: brief_row.get(key) for key in _SCENE_REWRITE_FIELDS}
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": json.dumps({"brief": payload}, indent=2)},
+    ]
+    try:
+        briefs, error = _request_briefs(llm_completions, model, messages, enabled)
+    except LLMResponseParseError as error:
+        logger.warning("The lettering rewrite could not be read: %s", error)
+        return None
+    if error or not briefs:
+        if error:
+            logger.warning("The lettering rewrite failed: %s", error)
+        return None
+
+    rewritten = briefs[0]
+    current = strip_lettering((str(brief_row.get("scene_description") or "")).strip())
+    scene = (rewritten.scene_description or "").strip()
+    if not scene or scene == current:
+        logger.warning(
+            "The lettering rewrite did not change the scene of brief %s",
+            brief_row.get("id"),
+        )
+        return None
+    return rewritten
+
+
 def _request_briefs_with_retry(
     llm_completions: Any,
     model: str,
