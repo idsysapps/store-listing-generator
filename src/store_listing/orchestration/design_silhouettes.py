@@ -51,6 +51,11 @@ class RoleSpec:
     tracking: float = 0.04
     max_words: int = 4
     outline: bool = False
+    # A drawn mark instead of a line of type. "loading_bar" is the striped
+    # progress capsule. The text fields are ignored for a mark.
+    graphic: str | None = None
+    graphic_slot: int = 2
+    max_font_size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -313,6 +318,103 @@ SILHOUETTES: Final[dict[str, DesignSilhouette]] = {
             RoleSpec("headline", "pacifico", False, 1, "script_above", tracking=0.0, max_words=3),
         ),
     ),
+    "status_bar": DesignSilhouette(
+        id="status_bar",
+        label="Status bar",
+        copy_mode=CAPTION,
+        layout_type="text_only",
+        style_preset="distressed_band_tee",
+        textures=("grain", "crackle"),
+        copy_shape=(
+            "three original lines and no picture, the kind of shirt that says "
+            "something is loading: headline_text is two or three tracked words, "
+            "subtitle_text is one status word, tagline_text is two or three short "
+            "words, and a striped progress bar is drawn between the status and "
+            "the last line"
+        ),
+        roles=(
+            RoleSpec(
+                "headline",
+                "anton",
+                True,
+                1,
+                "status_title",
+                tracking=0.04,
+                max_words=3,
+            ),
+            RoleSpec(
+                "subtitle",
+                "anton",
+                True,
+                1,
+                "status_word",
+                tracking=0.08,
+                max_words=2,
+            ),
+            RoleSpec(
+                "bar",
+                "bebas",
+                True,
+                1,
+                "status_bar",
+                graphic="loading_bar",
+                graphic_slot=2,
+            ),
+            RoleSpec(
+                "tagline",
+                "bebas",
+                True,
+                1,
+                "status_wait",
+                tracking=0.1,
+                max_words=4,
+            ),
+        ),
+    ),
+    "dictionary": DesignSilhouette(
+        id="dictionary",
+        label="Dictionary entry",
+        copy_mode=CAPTION,
+        layout_type="text_only",
+        style_preset="distressed_band_tee",
+        textures=("grain", "crackle"),
+        copy_shape=(
+            "an original dictionary entry and no picture: headline_text is one "
+            "invented word in title case, subtitle_text is a short pronunciation "
+            "and part of speech such as '(fuhn-kul) - noun' and stays under six "
+            "words, tagline_text is the definition in one sentence of 8 to 16 words"
+        ),
+        roles=(
+            RoleSpec(
+                "headline",
+                "abril",
+                False,
+                1,
+                "dict_word",
+                tracking=0.01,
+                max_words=2,
+            ),
+            RoleSpec(
+                "subtitle",
+                "dejavu",
+                False,
+                1,
+                "dict_speak",
+                tracking=0.0,
+                max_words=6,
+            ),
+            RoleSpec(
+                "tagline",
+                "dejavu",
+                False,
+                1,
+                "dict_definition",
+                tracking=0.0,
+                max_words=18,
+                max_font_size=36,
+            ),
+        ),
+    ),
 }
 
 SILHOUETTE_IDS: Final[tuple[str, ...]] = tuple(SILHOUETTES)
@@ -480,6 +582,19 @@ def drawn_roles(brief: Any) -> tuple[DrawnRole, ...]:
     palette = preset.palette if preset is not None else ("#111111",)
     drawn: list[DrawnRole] = []
     for role in spec.roles:
+        if role.graphic:
+            drawn.append(
+                DrawnRole(
+                    text="",
+                    family=role.family,
+                    color=palette[role.color_slot % len(palette)],
+                    uppercase=role.uppercase,
+                    region=role.region,
+                    graphic=role.graphic,
+                    graphic_color=palette[role.graphic_slot % len(palette)],
+                )
+            )
+            continue
         text = _line(brief, role.field)
         if not text:
             continue
@@ -494,6 +609,7 @@ def drawn_roles(brief: Any) -> tuple[DrawnRole, ...]:
                 rule=role.rule,
                 tracking=role.tracking,
                 outline=role.outline,
+                max_font_size=role.max_font_size,
             )
         )
     return tuple(drawn)
