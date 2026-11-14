@@ -17,6 +17,7 @@ from store_listing.orchestration.design_silhouettes import (
     SILHOUETTE_IDS,
     apply_silhouette,
     assign_batch_silhouettes,
+    drawn_roles,
     plan_silhouette_slots,
     silhouette_for,
 )
@@ -92,7 +93,7 @@ class TestSilhouetteSlots:
 
     def test_a_run_of_batches_covers_every_silhouette(self) -> None:
         seen: set[str] = set()
-        for index in range(6):
+        for index in range(len(SILHOUETTE_IDS)):
             seen.update(slot for slot in plan_silhouette_slots(8, f"run-{index}") if slot)
 
         assert seen == set(SILHOUETTE_IDS)
@@ -199,6 +200,102 @@ def _near(pixel: np.ndarray, colour: str, tolerance: int = 36) -> bool:
 def _png(image_bytes: bytes) -> np.ndarray:
     with Image.open(BytesIO(image_bytes)) as image:
         return np.asarray(image.convert("RGBA"))
+
+
+def _colour_mask(pixels: np.ndarray, colour: str, tolerance: int = 36) -> np.ndarray:
+    opaque = pixels[:, :, 3] > 16
+    matched = np.zeros(opaque.shape, dtype=bool)
+    matched[opaque] = [_near(pixel, colour, tolerance) for pixel in pixels[opaque][:, :3]]
+    return matched
+
+
+def _row_clusters(rows: np.ndarray) -> list[tuple[int, int]]:
+    clusters: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, hit in enumerate(rows):
+        if hit and start is None:
+            start = index
+        elif not hit and start is not None:
+            clusters.append((start, index))
+            start = None
+    if start is not None:
+        clusters.append((start, len(rows)))
+    return clusters
+
+
+class TestStatusAndDictionaryShirts:
+    def test_a_status_shirt_is_three_lines_and_a_partial_striped_bar(self) -> None:
+        brief = apply_silhouette(
+            _brief(
+                "A sarcastic wait",
+                headline_text="Sarcastic comment",
+                subtitle_text="Loading",
+                tagline_text="Please wait",
+            ),
+            "status_bar",
+        )
+
+        assert brief.layout_type == "text_only"
+        assert brief.scene_description is None
+        assert brief.headline_text == "Sarcastic comment"
+        assert brief.subtitle_text == "Loading"
+        assert brief.tagline_text == "Please wait"
+        image_bytes = composite_text(
+            blank_canvas("dtf_apparel", transparent=True),
+            LayoutSpec(layout_type="text_only", roles=drawn_roles(brief)),
+            transparent=True,
+        )
+        pixels = _png(image_bytes)
+        red = _colour_mask(pixels, "#8C1C13")
+        cream = _colour_mask(pixels, "#E8E1D5")
+        assert int(red.sum()) > 80
+        assert int(cream.sum()) > 80
+        red_rows, red_cols = np.where(red)
+        _height, width = red.shape
+        assert red_cols.max() < width * 0.85
+        band = red[red_rows.min() : red_rows.max() + 1, red_cols.min() : red_cols.max() + 1]
+        assert band.mean() < 0.75
+        assert int(cream[: red_rows.min()].sum()) > 40
+        assert int(cream[red_rows.max() + 1 :].sum()) > 40
+        beside = cream[red_rows.min() : red_rows.max() + 1, red_cols.max() + 1 :]
+        assert int(beside.sum()) > 20
+
+    def test_a_dictionary_shirt_stacks_the_word_the_pronunciation_and_the_definition(
+        self,
+    ) -> None:
+        definition = "like an uncle, only funner and also handsome and awesome"
+        brief = apply_silhouette(
+            _brief(
+                "Funcle",
+                headline_text="Funcle",
+                subtitle_text="(fuhng-kuhl) - noun",
+                tagline_text=definition,
+            ),
+            "dictionary",
+        )
+
+        assert brief.layout_type == "text_only"
+        assert brief.scene_description is None
+        assert brief.headline_text == "Funcle"
+        assert brief.subtitle_text == "(fuhng-kuhl) - noun"
+        assert brief.tagline_text == definition
+        roles = drawn_roles(brief)
+        assert [role.uppercase for role in roles] == [False, False, False]
+        image_bytes = composite_text(
+            blank_canvas("dtf_apparel", transparent=True),
+            LayoutSpec(layout_type="text_only", roles=roles),
+            transparent=True,
+        )
+        pixels = _png(image_bytes)
+        cream = _colour_mask(pixels, "#E8E1D5")
+        clusters = _row_clusters(cream.any(axis=1))
+
+        assert len(clusters) >= 3
+        word_height = clusters[0][1] - clusters[0][0]
+        pronunciation_height = clusters[1][1] - clusters[1][0]
+        definition_height = sum(end - start for start, end in clusters[2:])
+        assert word_height > pronunciation_height
+        assert definition_height > pronunciation_height
 
 
 class TestTheTypeStack:

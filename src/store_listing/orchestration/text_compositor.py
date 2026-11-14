@@ -127,6 +127,13 @@ ROLE_BOXES: dict[str, tuple[float, float, float, float]] = {
     "stack_kicker": (0.08, 0.26, 0.84, 0.16),
     "stack_script": (0.14, 0.44, 0.72, 0.14),
     "stack_closer": (0.04, 0.58, 0.92, 0.22),
+    "status_title": (0.06, 0.22, 0.88, 0.14),
+    "status_word": (0.22, 0.38, 0.56, 0.10),
+    "status_bar": (0.10, 0.50, 0.80, 0.14),
+    "status_wait": (0.16, 0.68, 0.68, 0.10),
+    "dict_word": (0.12, 0.24, 0.76, 0.16),
+    "dict_speak": (0.16, 0.44, 0.68, 0.07),
+    "dict_definition": (0.16, 0.56, 0.68, 0.24),
 }
 
 
@@ -143,6 +150,9 @@ class DrawnRole:
     rule: str | None = None
     tracking: float = 0.04
     outline: bool = False
+    graphic: str | None = None
+    graphic_color: str | None = None
+    max_font_size: int | None = None
 
 
 @dataclass
@@ -779,6 +789,57 @@ def _clearer_box(
     return best
 
 
+def _draw_loading_bar(
+    base: Image.Image,
+    box: tuple[int, int, int, int],
+    *,
+    stroke: str,
+    stripe: str,
+) -> None:
+    """A progress capsule: a stroke, stripes part way across, shirt in the rest.
+
+    The filled part is diagonal stripes with gaps, so the garment shows through
+    between them. It is not a solid plate. The outline continues past the
+    stripes to the empty end of the bar.
+    """
+    x, y, width, height = box
+    inset = max(4, int(height * 0.22))
+    top = y + inset
+    bottom = y + height - inset
+    bar_height = bottom - top
+    if bar_height < 10 or width < 24:
+        return
+    radius = bar_height // 2
+    right = x + width - 1
+    fill_right = x + int(width * 0.68)
+
+    stripes = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    stripe_draw = ImageDraw.Draw(stripes)
+    stripe_width = max(5, bar_height // 4)
+    start = x - bar_height
+    while start < fill_right + bar_height:
+        stripe_draw.line(
+            [(start, bottom), (start + bar_height, top)],
+            fill=stripe,
+            width=stripe_width,
+        )
+        start += stripe_width * 2
+
+    clip = Image.new("L", base.size, 0)
+    clip_draw = ImageDraw.Draw(clip)
+    clip_draw.rounded_rectangle((x, top, right, bottom), radius=radius, fill=255)
+    clip_draw.rectangle((fill_right, 0, base.size[0], base.size[1]), fill=0)
+    red, green, blue, alpha = stripes.split()
+    base.alpha_composite(Image.merge("RGBA", (red, green, blue, ImageChops.multiply(alpha, clip))))
+
+    ImageDraw.Draw(base).rounded_rectangle(
+        (x, top, right, bottom),
+        radius=radius,
+        outline=stroke,
+        width=max(3, bar_height // 10),
+    )
+
+
 def _draw_roles(
     base: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -808,6 +869,14 @@ def _draw_roles(
             gap = 8
             text_box = (box[0], box[1], box[2], max(1, box[3] - rule_band - gap))
             rule_box = (box[0], box[1] + box[3] - rule_band, box[2], rule_band)
+        if role.graphic == "loading_bar":
+            _draw_loading_bar(
+                base,
+                box,
+                stroke=role.color,
+                stripe=role.graphic_color or role.color,
+            )
+            continue
         treatment = TextTreatment(
             uppercase=role.uppercase,
             tracking=role.tracking,
@@ -834,6 +903,7 @@ def _draw_roles(
                 family=role.family,
                 treatment=treatment,
                 force_outline=role.outline,
+                max_font_size=role.max_font_size,
             )
         if rule_box is not None and role.rule:
             _draw_rule(draw, rule_box, role.color, role.rule)
