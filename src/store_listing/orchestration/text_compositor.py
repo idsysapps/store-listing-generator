@@ -928,15 +928,23 @@ def _draw_arc_text(
 
 
 def _bar_colour(layout: LayoutSpec, template: DesignTemplate) -> str | None:
-    """The band behind the text, only when the design asks for a carrier.
+    """The band behind the text, only when the words need a surface.
 
     A bar is printed ink. A typographic plan that needs no carrier puts the
-    words straight on the garment, so it gets no plate (issue #288).
+    words straight on the garment, so it gets no plate (issue #288). Ink that
+    already contrasts with the garment does not need a plate either: white
+    type on a dark shirt is the shirt showing through, not a navy box.
     """
     if not template.bar:
         return None
     plan = layout.text_plan
     if plan is not None and not plan.needs_carrier:
+        return None
+    if (
+        layout.garment_color
+        and contrast_ratio(layout.font_color, garment_hex(layout.garment_color))
+        >= MIN_TEXT_CONTRAST
+    ):
         return None
     return accent_for(layout.font_color)
 
