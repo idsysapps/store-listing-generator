@@ -970,6 +970,33 @@ class TestTheTextBar:
     def test_a_legacy_brief_keeps_the_bar(self) -> None:
         assert _bar_colour(self._spec(None), TEMPLATES["mid_ribbon"]) is not None
 
+    def test_light_type_on_a_dark_garment_gets_no_bar(self) -> None:
+        # White already reads on a dark shirt. The navy plate is extra ink.
+        bar = _bar_colour(
+            LayoutSpec(
+                layout_type="mid_ribbon",
+                headline_text="LEGACY PROTOCOL",
+                font_color="#FFFFFF",
+                garment_color="Jet Black",
+            ),
+            TEMPLATES["mid_ribbon"],
+        )
+
+        assert bar is None
+
+    def test_light_type_on_a_light_garment_keeps_the_bar(self) -> None:
+        bar = _bar_colour(
+            LayoutSpec(
+                layout_type="mid_ribbon",
+                headline_text="LEGACY PROTOCOL",
+                font_color="#FFFFFF",
+                garment_color="White",
+            ),
+            TEMPLATES["mid_ribbon"],
+        )
+
+        assert bar is not None
+
 
 class TestGarmentAwareAccent:
     def test_a_dark_accent_word_is_dropped_on_a_dark_garment(self) -> None:
