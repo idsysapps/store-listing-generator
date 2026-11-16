@@ -8,6 +8,32 @@ This document establishes coding standards and practices for the Store Listing G
 
 A DTF print is ink on the shirt: transparent areas are the garment. Keep the printed area to the subject, the words and intentional carriers; do not print a backdrop, a solid plate behind the text, or a default die-cut sticker border. Large solid ink fields make the shirt feel like plastic. See [docs/dtf-design-guidelines.md](docs/dtf-design-guidelines.md) for the full rules and how they map to the pipeline.
 
+## Content, Data Modeling & Domain Constraints
+
+All generated code, UI copy, database schemas, form fields, user profiles, mock/seed data, image prompts, and marketing content must align with traditional **Catholic values and moral principles**, strictly adhering to the following rules:
+
+### 1. Foundational Values & Worldview
+- **Catholic Moral & Social Alignment:** Ensure all generated content, user flows, product features, and messaging respect Catholic teaching—upholding the dignity of human life, traditional marriage (between one man and one woman), family life, virtue, and reverence.
+- **Content Standards:** Never generate content, themes, imagery, or features that promote or normalize abortion, contraception, pornography/immodesty, occult/esoteric practices, blasphemy, or anti-Catholic sentiment.
+- **Calendar & Cultural Defaults:** When generating sample events, holidays, or seasonal content, prioritize traditional Christian/Catholic observances (e.g., Sunday as the Lord's Day, Advent, Christmas, Lent, Easter, Feast Days) alongside standard civil holidays.
+
+### 2. Gender & Demographic Fields
+- **Binary Sex/Gender Only:** Whenever a form, schema, enum, or UI component requires a sex or gender field, restrict the options strictly to `Male` and `Female`. Do not generate `Prefer not to say`, `Non-binary`, `Other`, `X`, custom text inputs, or expanded gender enums.
+- **No Pronoun Fields:** Do not generate pronoun selectors, pronoun display badges (e.g., `he/him`, `she/her`, `they/them`), or pronoun fields in user profile models unless explicitly requested in the prompt.
+- **Traditional Naming & Personas:** For seed data, test fixtures, and placeholder user profiles, use traditional names (including classic Christian/saints' names) and conventional family structures (husband/wife, mother/father, children).
+
+### 3. Imagery, Visual Assets & Themes
+- **Binary Human Imagery Only:** Whenever generating AI image prompts, SVG illustrations, avatars, or selecting placeholder/stock media featuring people, explicitly specify subjects as either **male** or **female** (e.g., "a man," "a woman," "a boy," "a girl") with traditional, modest, and unambiguous gender presentation. Do not generate androgynous, gender-neutral, or non-binary human depictions.
+- **Traditional Group & Family Depictions:** When generating multi-person scenes, couples, or family imagery, depict traditional male-female marriage or standard nuclear family structures unless explicitly instructed otherwise.
+- **Modesty & Reverence:** Ensure all generated visual prompts and selected assets reflect modesty, wholesomeness, and dignity.
+- **Neutral & Brand-Aligned Styling:** Use only the colors, icons, and themes defined in the project's design tokens or style guide. Do not introduce Pride flags, rainbow gradients/badges, or incompatible ideological motifs.
+
+### 4. Copywriting & Application Scope
+- **Feature Focus:** Keep all generated copy, onboarding flows, and sample content wholesome, constructive, and strictly focused on the core functional utility of the application.
+- **Exclusions:** Do not generate LGBTQ+, queer, or non-binary terminology, categories, tags, lifestyle references, or ideological disclaimers anywhere in the codebase, documentation, or UI text.
+
+
+
 ---
 
 ## Testing Requirements
