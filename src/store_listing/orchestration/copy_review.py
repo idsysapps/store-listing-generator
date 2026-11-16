@@ -19,6 +19,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
+from store_listing.orchestration.brief_prompts import content_scope_rules
+from store_listing.orchestration.content_scope import content_rejection
 from store_listing.orchestration.copy_modes import NO_TEXT
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.json_response import extract_json_objects, merge_items
@@ -47,7 +49,7 @@ _HEADLINE_ACTIONS: Final[frozenset[str]] = frozenset({KEEP, DROP, REWRITE})
 _OVERALL_ACTIONS: Final[frozenset[str]] = frozenset({KEEP, REJECT})
 _ART_ONLY_LAYOUT: Final[str] = "full_bleed"
 
-_SYSTEM_PROMPT: Final[
+_COPY_EDITOR_PROMPT: Final[
     str
 ] = """Every review object MUST begin with a numeric "confidence" field between 0 and 1. A review without it is invalid.
 
@@ -117,7 +119,9 @@ Return one review for every brief. Use these actions:
 - tagline: KEEP, DROP or REWRITE.
 - overall_action: KEEP when the idea is worth making; REJECT when the concept
   is only a scene, a product description or a list of objects, even if a line
-  could be written for it. Judge the idea before the copy.
+  could be written for it. REJECT when the design is outside the merchandise
+  library below. A seasonal costume is allow-listed. Do not rewrite an excluded
+  idea into a softer version of it. Judge the idea before the copy.
 - design_stands_alone: true when the concept and the illustration already
   deliver the idea without words.
 - Give a short reason for every decision and a confidence from 0 to 1.
@@ -127,6 +131,8 @@ Return one review for every brief. Use these actions:
 Return ONLY valid JSON with this shape:
 {"reviews":[{"index":1,"design_stands_alone":true,"headline":{"action":"KEEP","rewrite":null,"reason":"..."},"kicker":{"action":"KEEP","rewrite":null,"reason":"..."},"tagline":{"action":"DROP","rewrite":null,"reason":"..."},"overall_action":"KEEP","overall_reason":"...","confidence":0.9}]}
 """
+
+_SYSTEM_PROMPT: Final[str] = _COPY_EDITOR_PROMPT + "\n" + content_scope_rules()
 
 _RE_REVIEW_PROMPT: Final[str] = """This is a re-review of copy that the previous pass rewrote.
 Judge the current candidate as a final line. You may still KEEP or DROP a
@@ -299,6 +305,24 @@ def _apply_block(
     return value
 
 
+def _scope_reason(
+    brief: DesignBrief,
+    *,
+    headline: str | None,
+    kicker: str | None,
+    tagline: str | None,
+) -> str | None:
+    """Why the brief, after the editor's rewrite, is outside the library."""
+    return content_rejection(
+        ("concept", brief.concept),
+        ("scene", brief.scene_description),
+        ("audience", brief.audience),
+        ("headline", headline),
+        ("kicker", kicker),
+        ("tagline", tagline),
+    )
+
+
 def apply_copy_reviews(
     briefs: Sequence[DesignBrief],
     reviews: Sequence[CopyReview],
@@ -309,7 +333,16 @@ def apply_copy_reviews(
     for index, brief in enumerate(briefs, start=1):
         review = by_index.get(index)
         if review is None:
-            result.append(brief)
+            reason = _scope_reason(
+                brief,
+                headline=brief.headline_text,
+                kicker=brief.kicker_text,
+                tagline=brief.tagline_text,
+            )
+            if reason is None:
+                result.append(brief)
+            else:
+                logger.info("Dropping brief %r: %s", brief.concept, reason)
             continue
         if review.overall_action == REJECT:
             logger.info(
@@ -324,6 +357,10 @@ def apply_copy_reviews(
             # The editor decided the picture explains itself. An art-only
             # design carries no words at all, so a kicker or tagline that
             # survived the drop goes too.
+            reason = _scope_reason(brief, headline=None, kicker=None, tagline=None)
+            if reason is not None:
+                logger.info("Dropping brief %r: %s", brief.concept, reason)
+                continue
             result.append(
                 replace(
                     brief,
@@ -336,12 +373,18 @@ def apply_copy_reviews(
             )
             continue
 
+        kicker = _apply_block(brief.kicker_text, review.kicker)
+        tagline = _apply_block(brief.tagline_text, review.tagline)
+        reason = _scope_reason(brief, headline=headline, kicker=kicker, tagline=tagline)
+        if reason is not None:
+            logger.info("Dropping brief %r: %s", brief.concept, reason)
+            continue
         result.append(
             replace(
                 brief,
                 headline_text=headline,
-                kicker_text=_apply_block(brief.kicker_text, review.kicker),
-                tagline_text=_apply_block(brief.tagline_text, review.tagline),
+                kicker_text=kicker,
+                tagline_text=tagline,
             )
         )
     return result

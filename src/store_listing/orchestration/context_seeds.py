@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
+from store_listing.orchestration.content_scope import excluded_theme
 from store_listing.orchestration.promotion import (
     CALENDAR_SEEDS_PER_EVENT_PER_DAY,
     EVERGREEN_SEEDS_PER_DAY,
@@ -329,6 +330,9 @@ def inject_seasonal_seeds(
     injected = 0
     events_seen: set[str] = set()
     for seed, event_name in pairs:
+        if excluded_theme(seed):
+            logger.warning("Skipping calendar seed %r: it is outside the theme library", seed)
+            continue
         rule = SEASONAL_SEED_RULES[event_name]
         result = db_client.insert_active_seed(
             query=seed,
@@ -371,6 +375,9 @@ def inject_evergreen_seeds(
     injected = 0
     themes_seen: set[str] = set()
     for seed, theme, rule_name in pairs:
+        if excluded_theme(seed):
+            logger.warning("Skipping evergreen seed %r: it is outside the theme library", seed)
+            continue
         result = db_client.insert_active_seed(
             query=seed,
             promotion_score=0,

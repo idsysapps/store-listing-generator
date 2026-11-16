@@ -10,6 +10,7 @@ from store_listing.orchestration.custom_brief import (
     build_custom_brief_prompt,
     create_custom_brief,
     parse_custom_brief_response,
+    read_custom_brief,
 )
 from store_listing.orchestration.llm_client import LLM_MAX_TOKENS
 
@@ -628,6 +629,31 @@ class TestTheVoiceOfTheCustomBrief:
         response = _brief_response(headline_text="Thanksgiving in the Magic Kingdom")
 
         assert parse_custom_brief_response(response) is None
+
+    def test_a_personal_use_brief_may_not_leave_the_library(self) -> None:
+        response = _brief_response(headline_text="Tarot Night", concept="Tarot Night")
+
+        brief, reason = read_custom_brief(response, personal_use=True)
+
+        assert brief is None
+        assert reason is not None
+        assert "occult" in reason
+
+    def test_an_excluded_description_is_refused_before_the_model(self) -> None:
+        llm = MagicMock()
+
+        result = create_custom_brief(
+            MagicMock(),
+            llm,
+            "test-model",
+            "a tarot shirt for me",
+            "dtf_apparel",
+            personal_use=True,
+        )
+
+        assert result["status"] == "error"
+        assert "occult" in result["error"]
+        assert not llm.with_raw_response.create.called
 
     def test_a_personal_use_brief_may_name_a_franchise(self) -> None:
         # A brief for personal use is allowed to be about a franchise.

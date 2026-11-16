@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any, Final, Protocol
 
+from store_listing.orchestration.brief_prompts import content_scope_rules
+from store_listing.orchestration.content_scope import content_rejection
 from store_listing.orchestration.context_seeds import SEASONAL_EVENT_THEME, get_upcoming_events
 from store_listing.orchestration.json_response import extract_json_objects, merge_items
 from store_listing.orchestration.llm_client import (
@@ -90,7 +92,11 @@ SYSTEM_PROMPT = (
     "2. For PROMOTE, assign product_tags and suggest a design style.\n"
     "3. For PIVOT, provide a specific pivot seed and product_tags.\n"
     "4. Flag trademark/copyright risks.\n"
-    "5. Respond ONLY with a valid JSON object. No text before or after the JSON."
+    "5. REJECT a trend that is outside the merchandise library below, or that "
+    "depicts an excluded theme. Do not PIVOT it into a softer version of the "
+    "same idea.\n"
+    "6. Respond ONLY with a valid JSON object. No text before or after the JSON.\n\n"
+    f"{content_scope_rules()}"
 )
 
 MAX_CANDIDATES = int(os.environ.get("LLM_MAX_CANDIDATES", "10"))
@@ -363,6 +369,24 @@ def curate_seeds(
         candidate = by_id[ev.id]
 
         if ev.action == "PROMOTE":
+            scope_reason = content_rejection(("seed", candidate.query))
+            if scope_reason is not None:
+                logger.info(
+                    "Rejecting seed %r instead of promoting it: %s",
+                    candidate.query,
+                    scope_reason,
+                )
+                db_client.reject_candidate(ev.id)
+                db_client.insert_curation_log(
+                    candidate_id=ev.id,
+                    action="reject",
+                    reasoning=scope_reason,
+                    event_context=None,
+                    llm_model=model,
+                )
+                rejected += 1
+                continue
+
             seed_id = db_client.insert_active_seed(
                 query=candidate.query,
                 promotion_score=candidate.promotion_score,
@@ -383,6 +407,24 @@ def curate_seeds(
 
         elif ev.action == "PIVOT":
             pivot_seed = ev.pivot_to or candidate.query
+            scope_reason = content_rejection(("seed", candidate.query), ("pivot", pivot_seed))
+            if scope_reason is not None:
+                logger.info(
+                    "Rejecting seed %r instead of pivoting it: %s",
+                    candidate.query,
+                    scope_reason,
+                )
+                db_client.reject_candidate(ev.id)
+                db_client.insert_curation_log(
+                    candidate_id=ev.id,
+                    action="reject",
+                    reasoning=scope_reason,
+                    event_context=None,
+                    llm_model=model,
+                )
+                rejected += 1
+                continue
+
             db_client.reject_candidate(ev.id)
             inserted = db_client.insert_active_seed(
                 query=pivot_seed,
@@ -414,6 +456,10 @@ def curate_seeds(
 
     event_count = 0
     for es in result.event_seeds:
+        scope_reason = content_rejection(("seed", es.seed))
+        if scope_reason is not None:
+            logger.info("Skipping event seed %r: %s", es.seed, scope_reason)
+            continue
         inserted = db_client.insert_active_seed(
             query=es.seed,
             promotion_score=0,

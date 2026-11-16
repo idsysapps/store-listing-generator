@@ -14,6 +14,7 @@ from pytrends.request import TrendReq
 
 from store_listing.orchestration.brand_guard import licensed_brand
 from store_listing.orchestration.brief_reranking import RerankableBrief
+from store_listing.orchestration.content_scope import excluded_theme
 from store_listing.orchestration.design_briefs import BriefableCandidate
 from store_listing.orchestration.headline_voice import DEFAULT_VOICE
 from store_listing.orchestration.promotion import (
@@ -46,6 +47,8 @@ def _is_candidate_noise(query: str) -> bool:
     if "&#" in query or "http" in query or "www." in query or "@" in query:
         return True
     if licensed_brand(query):
+        return True
+    if excluded_theme(query):
         return True
     return bool(_CANDIDATE_NOISE_RE.search(query))
 

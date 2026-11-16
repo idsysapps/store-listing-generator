@@ -19,6 +19,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
+from store_listing.orchestration.brief_prompts import content_scope_rules
+from store_listing.orchestration.content_scope import excluded_theme
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.json_response import extract_json_objects, merge_items
 from store_listing.orchestration.llm_client import create_answer
@@ -67,7 +69,7 @@ _BANNED_CLAIMS: Final[tuple[str, ...]] = (
 _HTML_TAG = re.compile(r"<[^>]+>")
 _WHITESPACE = re.compile(r"\s+")
 
-_SYSTEM_PROMPT: Final[str] = """You write Amazon product descriptions for a print-on-demand store.
+_LISTING_PROMPT: Final[str] = """You write Amazon product descriptions for a print-on-demand store.
 Each description is what a buyer reads on the product page. It must sell the
 product, not describe the picture that will be printed.
 
@@ -81,6 +83,7 @@ RULES
 - Use the primary material's colour and substrate when it is given.
 - Do not name a brand, franchise, team or trademark.
 - Do not wrap the whole description in quotation marks.
+- A seasonal costume is allow-listed. Do not depict or promote an excluded theme.
 
 BAD: "A skeleton doing yoga on a beach towel in a retro palette." This describes
 the picture.
@@ -90,6 +93,12 @@ pose. Wear it to class or give it to the friend who never misses a flow."
 Return ONLY valid JSON with this shape:
 {"listings":[{"index":1,"description":"..."}]}
 """
+
+_SYSTEM_PROMPT: Final[str] = _LISTING_PROMPT + "\n" + content_scope_rules()
+
+# Used when the model, and the fallback built from the brief, are both outside
+# the library. The buyer still gets a description, and it carries no theme.
+_SAFE_LISTING: Final[str] = "An original printed design for everyday outfits and gifting."
 
 
 def listing_copy_enabled() -> bool:
@@ -280,6 +289,19 @@ def fallback_listing_description(brief: DesignBrief) -> str:
     return f"{first} A wearable design for everyday outfits and gifting."
 
 
+def _publishable_description(candidate: str, fallback: str) -> str:
+    """The description a buyer may read.
+
+    A seasonal costume stays. An excluded theme is replaced, and if the
+    fallback built from the brief is excluded too, a plain line is used.
+    """
+    if excluded_theme(candidate):
+        candidate = fallback
+    if excluded_theme(candidate):
+        return _SAFE_LISTING
+    return candidate
+
+
 def write_batch_listing_copy(
     llm_completions: Any,
     model: str,
@@ -299,7 +321,10 @@ def write_batch_listing_copy(
         enabled = listing_copy_enabled()
     if not enabled:
         return [
-            replace(brief, listing_description=fallback[index])
+            replace(
+                brief,
+                listing_description=_publishable_description(fallback[index], fallback[index]),
+            )
             for index, brief in enumerate(original, start=1)
         ], []
 
@@ -307,7 +332,10 @@ def write_batch_listing_copy(
     copies, issues = _request_listing_copy(llm_completions, model, entries)
     if issues:
         return [
-            replace(brief, listing_description=fallback[index])
+            replace(
+                brief,
+                listing_description=_publishable_description(fallback[index], fallback[index]),
+            )
             for index, brief in enumerate(original, start=1)
         ], issues
 
@@ -315,5 +343,10 @@ def write_batch_listing_copy(
     for index, brief in enumerate(original, start=1):
         copy = copies.get(index)
         description = copy.description if copy is not None else fallback[index]
-        result.append(replace(brief, listing_description=description))
+        result.append(
+            replace(
+                brief,
+                listing_description=_publishable_description(description, fallback[index]),
+            )
+        )
     return result, []

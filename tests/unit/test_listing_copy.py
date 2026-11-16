@@ -250,6 +250,48 @@ class TestWriteBatch:
         assert description is not None
         assert description.startswith("A white t-shirt")
 
+    def test_an_excluded_description_falls_back(self) -> None:
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = _raw(
+            {
+                "listings": [
+                    {
+                        "index": 1,
+                        "description": "A white t-shirt for tarot readers, featuring "
+                        "a card spread. Wear it to a reading or give it to the "
+                        "friend who never misses a sitting.",
+                    }
+                ]
+            }
+        )
+
+        briefs, issues = write_batch_listing_copy(llm, "test-model", [_brief()], enabled=True)
+
+        assert issues == []
+        description = briefs[0].listing_description or ""
+        assert "tarot" not in description.lower()
+        assert "Powered by Coffee" in description or "POWERED BY COFFEE" in description
+
+    def test_a_halloween_description_is_kept(self) -> None:
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = _raw(
+            {
+                "listings": [
+                    {
+                        "index": 1,
+                        "description": "A white t-shirt for Halloween, featuring a "
+                        "smiling witch on a broomstick. Wear it to a costume party "
+                        "or give it to the friend who loves the season.",
+                    }
+                ]
+            }
+        )
+
+        briefs, _issues = write_batch_listing_copy(llm, "test-model", [_brief()], enabled=True)
+
+        description = briefs[0].listing_description or ""
+        assert "witch" in description.lower()
+
     def test_a_failed_call_falls_back(self) -> None:
         llm = MagicMock()
         llm.with_raw_response.create.side_effect = RuntimeError("API down")

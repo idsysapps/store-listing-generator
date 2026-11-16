@@ -11,6 +11,7 @@ from store_listing.orchestration.art_direction import family_for, preset_for
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
     art_direction_rules,
+    content_scope_rules,
     copy_mode_rules,
     layout_rules,
     product_belongs_to,
@@ -18,6 +19,7 @@ from store_listing.orchestration.brief_prompts import (
     sellability_rules,
     voice_rules,
 )
+from store_listing.orchestration.content_scope import content_rejection
 from store_listing.orchestration.copy_modes import (
     CAPTION,
     NO_TEXT,
@@ -32,6 +34,7 @@ from store_listing.orchestration.design_briefs import (
     assign_batch_devices,
     assign_batch_templates,
     headline_for_text_only,
+    merchandise_rejection,
     plan_batch_text_integration,
 )
 from store_listing.orchestration.headline_voice import normalise_voice, screen_text
@@ -85,6 +88,7 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         f"{introduction}"
         f"{personal_use_rules}"
         f"{product_catalog(types)}\n"
+        f"{content_scope_rules()}\n"
         "Return a single JSON object with this structure:\n"
         '{"brief": {\n'
         '  "concept": "design-ready phrase or visual idea",\n'
@@ -159,6 +163,11 @@ def _read_brief(
     concept = b.get("concept", "")
     if not concept:
         return None, "the answer has no concept"
+
+    scope_reason = merchandise_rejection(b)
+    if scope_reason is not None:
+        logger.warning("Skipping the custom brief %r: %s", concept, scope_reason)
+        return None, scope_reason
 
     product_type = b.get("product_type", "")
     if product_type not in PRODUCT_TAGS:
@@ -363,6 +372,11 @@ def create_custom_brief(
     personal_use: bool = False,
     enabled: Sequence[str] | None = None,
 ) -> dict[str, Any]:
+    scope_reason = content_rejection(("description", description))
+    if scope_reason is not None:
+        # Personal use waives the trademark ban. It does not waive the library.
+        return {"status": "error", "error": f"The brief was not created: {scope_reason}"}
+
     if enabled and product_type not in enabled:
         if len(enabled) > 1:
             # There is no single type to fall back to, so the request is

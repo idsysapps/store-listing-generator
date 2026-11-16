@@ -33,6 +33,7 @@ from store_listing.orchestration.brief_prompts import (
     DIVERSITY_RULES,
     art_direction_rules,
     concept_freshness_rules,
+    content_scope_rules,
     copy_mode_rules,
     dtf_rules,
     layout_rules,
@@ -41,6 +42,7 @@ from store_listing.orchestration.brief_prompts import (
     sellability_rules,
     voice_rules,
 )
+from store_listing.orchestration.content_scope import content_rejection
 from store_listing.orchestration.context_seeds import get_upcoming_events
 from store_listing.orchestration.copy_modes import (
     CAPTION,
@@ -159,6 +161,7 @@ def system_prompt(enabled: Sequence[str] | None = None) -> str:
         "signals into actionable design briefs that a graphic designer can immediately "
         "execute.\n\n"
         f"{catalog}\n"
+        f"{content_scope_rules()}\n"
         "For each brief:\n"
         "- concept: A specific, design-ready phrase or visual idea (not a category)\n"
         f"- product_type: exactly one of {product_types}\n"
@@ -464,6 +467,29 @@ def _positive_mention(text: str, phrase: str) -> bool:
     return False
 
 
+def _text_field(raw: dict[str, Any], key: str) -> str | None:
+    value = raw.get(key)
+    return value if isinstance(value, str) else None
+
+
+def merchandise_rejection(raw: dict[str, Any]) -> str | None:
+    """Why a brief answer is outside the theme library, or None when it is in it.
+
+    The raw answer is screened before a no-text design clears its lines, so a
+    theme that lived only in a headline is still dropped.
+    """
+    return content_rejection(
+        ("concept", _text_field(raw, "concept")),
+        ("headline", _text_field(raw, "headline_text")),
+        ("tagline", _text_field(raw, "tagline_text")),
+        ("kicker", _text_field(raw, "kicker_text")),
+        ("subtitle", _text_field(raw, "subtitle_text")),
+        ("footer", _text_field(raw, "footer_text")),
+        ("scene", _text_field(raw, "scene_description")),
+        ("audience", _text_field(raw, "audience")),
+    )
+
+
 def screen_scene(scene: str | None) -> str | None:
     """Why a scene looks like a product mockup, or None when it is artwork."""
     if not scene:
@@ -637,6 +663,13 @@ def _brief_from(
     """The brief in one answer object, or None when it is not usable."""
     concept = b.get("concept", "")
     if not concept:
+        return None
+
+    scope_reason = merchandise_rejection(b)
+    if scope_reason is not None:
+        logger.warning("Skipping brief %r: %s", concept, scope_reason)
+        if rejections is not None:
+            rejections.append(scope_reason)
         return None
 
     product_type = b.get("product_type", "")

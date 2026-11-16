@@ -23,6 +23,11 @@ from store_listing.orchestration.chroma_key import (
     magenta_share,
 )
 from store_listing.orchestration.comfyui_client import ComfyUIClient, ComfyUIError
+from store_listing.orchestration.content_scope import (
+    EXCLUDED_IMAGE_TERMS,
+    PERSON_CONSTRAINT,
+    content_rejection,
+)
 from store_listing.orchestration.copy_modes import (
     NO_TEXT,
     isolated_motif_scene,
@@ -232,6 +237,19 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     asks for a scene, a pattern, a tower or a roundel, and says where the text
     goes. A design whose text is the whole design is not sent to the model.
     """
+    scope_reason = content_rejection(
+        ("concept", brief.concept),
+        ("headline", brief.headline_text),
+        ("tagline", brief.tagline_text),
+        ("kicker", brief.kicker_text),
+        ("subtitle", brief.subtitle_text),
+        ("footer", brief.footer_text),
+        ("scene", brief.scene_description),
+        ("audience", brief.audience),
+    )
+    if scope_reason is not None:
+        raise PromptBuildError(scope_reason)
+
     product_context = PRODUCT_TYPE_CONTEXT.get(brief.product_type, "print-ready design")
     background = BACKGROUND_INSTRUCTIONS.get(brief.product_type, "plain background")
     feedback = _feedback_section(brief)
@@ -267,6 +285,10 @@ def build_flux_prompt(brief: DesignBrief) -> str:
             "no collar, no sleeves, no mockup, no product photo."
         )
     parts.append(f"{DESIGN_ONLY}: {scene}.")
+    if silhouette is None:
+        # A flat graphic is told not to draw a person. A scene may include one,
+        # and then the person has to be specific.
+        parts.append(PERSON_CONSTRAINT)
     plates = getattr(brief, "label_plates", ())
     if plates:
         count = sum(len(plate.marks) for plate in plates)
@@ -411,7 +433,7 @@ def build_negative_prompt(brief: DesignBrief) -> str:
             negative += ", no hot pink, no magenta in the artwork"
         if is_dark_garment(brief.garment_color):
             negative += ", no large black fill, no black background"
-    return negative
+    return f"{negative}, {EXCLUDED_IMAGE_TERMS}"
 
 
 def generate_image(

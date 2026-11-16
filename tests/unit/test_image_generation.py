@@ -740,3 +740,32 @@ class TestTheTemplates:
 
         assert client.generate_image.call_args.kwargs["width"] == 1024
         assert client.generate_image.call_args.kwargs["height"] == 1024
+
+
+class TestMerchandiseScope:
+    def test_a_halloween_scene_is_sent_with_a_person_constraint(self) -> None:
+        prompt = build_flux_prompt(_make_brief(scene_description="a smiling witch on a broomstick"))
+
+        assert "witch" in prompt.lower()
+        assert "husband and wife" in prompt.lower()
+
+    def test_an_occult_scene_is_not_sent_to_the_model(self) -> None:
+        client = _client()
+        brief = _make_brief(scene_description="a tarot card spread on a table")
+
+        result = generate_image(brief, comfyui_client=client)
+
+        assert result.image_bytes is None
+        assert result.error is not None
+        assert "occult" in result.error
+        client.generate_image.assert_not_called()
+
+    def test_a_silhouette_is_not_asked_to_draw_a_person(self) -> None:
+        prompt = build_flux_prompt(
+            _make_brief(
+                silhouette="retro_badge",
+                scene_description="a smiling witch on a broomstick",
+            )
+        )
+
+        assert "husband and wife" not in prompt.lower()
