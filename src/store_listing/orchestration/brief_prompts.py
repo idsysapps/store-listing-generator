@@ -24,6 +24,7 @@ from typing import Final
 __all__ = [
     "ART_DIRECTION_RULES",
     "CONCEPT_FRESHNESS_RULES",
+    "CONTENT_SCOPE_RULES",
     "COPY_MODE_RULES",
     "DESIGN_ONLY_RULES",
     "DIVERSITY_RULES",
@@ -36,6 +37,7 @@ __all__ = [
     "VOICE_RULES",
     "art_direction_rules",
     "concept_freshness_rules",
+    "content_scope_rules",
     "copy_mode_rules",
     "dtf_rules",
     "layout_rules",
@@ -212,6 +214,30 @@ SELLABILITY_RULES: Final[str] = (
 def sellability_rules() -> str:
     """The design principles that make a line worth wearing."""
     return SELLABILITY_RULES
+
+
+# The store prints from one library. The examples stay off the calendar: a
+# seasonal word in a shared rule anchors every brief that uses the rule.
+CONTENT_SCOPE_RULES: Final[str] = (
+    "MERCHANDISE SCOPE - the only themes this store prints:\n"
+    "- Draw only from this library: Catholic and Christian themes, wholesome "
+    "family life, traditional marriage (a husband and a wife), hobbies, sports, "
+    "and seasonal observances.\n"
+    "- Do not depict or promote sexual or explicit content, occult or esoteric "
+    "practices, blasphemy, abortion or contraception advocacy, or LGBTQ+ themes.\n"
+    "- A seasonal costume is allow-listed, including the costume subjects of "
+    "that observance. A design that promotes an occult or esoteric practice "
+    "is not, and the costume does not carry one in.\n"
+    "- Do not soften an excluded idea into a brief. Leave it out.\n"
+    "- When a person appears, they are a man, a woman, a boy, or a girl in "
+    "modest everyday clothes. A couple is a husband and wife. A family is "
+    "parents and their children.\n"
+)
+
+
+def content_scope_rules() -> str:
+    """The theme library, for every prompt that writes a design or a listing."""
+    return CONTENT_SCOPE_RULES
 
 
 DTF_RULES: Final[str] = (

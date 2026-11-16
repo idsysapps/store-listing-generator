@@ -114,6 +114,8 @@ class TestBuildCurationPrompt:
         assert "PROMOTE" in system
         assert "PIVOT" in system
         assert "REJECT" in system
+        assert "allow-listed" in system
+        assert "Do not PIVOT" in system
 
     def test_user_message_includes_output_format(self) -> None:
         messages = build_curation_prompt(
@@ -329,6 +331,55 @@ class TestCurateSeeds:
             query="dad jokes shirt", promotion_score=5000, candidate_id=42, origin="trend"
         )
         db.promote_candidate.assert_called_with(42)
+
+    def test_an_excluded_trend_is_rejected_instead_of_promoted(self) -> None:
+        candidates = [_candidate(42, "tarot reading shirt")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            _eval_response(
+                [
+                    {
+                        "id": 42,
+                        "action": "PROMOTE",
+                        "reasoning": "visual hook",
+                        "product_tags": ["dtf_apparel"],
+                    },
+                ]
+            )
+        )
+
+        result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["promoted"] == 0
+        assert result["rejected"] == 1
+        db.insert_active_seed.assert_not_called()
+        db.reject_candidate.assert_called_with(42)
+
+    def test_a_halloween_trend_can_be_promoted(self) -> None:
+        candidates = [_candidate(42, "witch humor shirt")]
+        db = self._mock_db(candidates=candidates)
+        llm = self._mock_llm(
+            _eval_response(
+                [
+                    {
+                        "id": 42,
+                        "action": "PROMOTE",
+                        "reasoning": "seasonal costume",
+                        "product_tags": ["dtf_apparel"],
+                    },
+                ]
+            )
+        )
+
+        result = curate_seeds(db, llm, "test-model", today=date(2026, 10, 1))
+
+        assert result["promoted"] == 1
+        db.insert_active_seed.assert_any_call(
+            query="witch humor shirt",
+            promotion_score=5000,
+            candidate_id=42,
+            origin="trend",
+        )
 
     def test_a_promoted_discovery_keeps_its_origin(self) -> None:
         # A discovery came from outside the pool, so it must not be expanded

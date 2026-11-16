@@ -83,5 +83,9 @@ class TestIsCandidateNoise:
 
     def test_valid_product_concept_passes(self) -> None:
         assert _is_candidate_noise("skeleton coffee mug") is False
+        assert _is_candidate_noise("witch humor shirt") is False
+
+    def test_an_excluded_theme_is_noise(self) -> None:
+        assert _is_candidate_noise("tarot reading shirt") is True
         assert _is_candidate_noise("funny dad hoodie") is False
         assert _is_candidate_noise("halloween cat sticker") is False

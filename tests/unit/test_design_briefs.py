@@ -2024,6 +2024,11 @@ class TestTheVoiceOfThePrompt:
         )
         return messages[0]["content"]
 
+    def test_the_prompt_allow_lists_a_seasonal_costume(self) -> None:
+        prompt = self._prompt().lower()
+        assert "allow-listed" in prompt
+        assert "occult" in prompt
+
     def test_the_prompt_asks_for_a_voice(self) -> None:
         # The store sells three voices and the operator curates afterwards,
         # so every brief has to name the one it is written in (issue #225).
@@ -2079,6 +2084,19 @@ class TestTheTextGate:
     def test_a_headline_that_names_a_brand_is_dropped(self) -> None:
         # The design that started this (issue #225).
         result = parse_brief_response(self._brief("Thanksgiving in the Magic Kingdom"))
+        assert result == []
+
+    def test_a_halloween_costume_is_kept(self) -> None:
+        result = parse_brief_response(
+            self._brief(
+                "Witch Humor",
+                scene_description="a smiling witch on a broomstick",
+            )
+        )
+        assert len(result) == 1
+
+    def test_an_occult_practice_is_dropped(self) -> None:
+        result = parse_brief_response(self._brief("Tarot Night"))
         assert result == []
 
     def test_a_noun_list_is_dropped(self) -> None:

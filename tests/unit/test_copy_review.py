@@ -262,6 +262,32 @@ class TestApplyCopyReviews:
 
         assert result[0].headline_text == "PAPER CRANE"
 
+    def test_a_rewrite_into_an_excluded_theme_is_dropped(self) -> None:
+        brief = _brief(headline="Paper to Flight")
+        review = CopyReview(
+            index=1,
+            design_stands_alone=False,
+            headline=CopyBlockReview("rewrite", rewrite="Tarot Night"),
+            kicker=CopyBlockReview("keep"),
+            tagline=CopyBlockReview("drop"),
+        )
+
+        assert apply_copy_reviews([brief], [review]) == []
+
+    def test_a_halloween_rewrite_is_kept(self) -> None:
+        brief = _brief(headline="Paper to Flight")
+        review = CopyReview(
+            index=1,
+            design_stands_alone=False,
+            headline=CopyBlockReview("rewrite", rewrite="Witch Humor"),
+            kicker=CopyBlockReview("keep"),
+            tagline=CopyBlockReview("drop"),
+        )
+
+        result = apply_copy_reviews([brief], [review])
+
+        assert result[0].headline_text == "Witch Humor"
+
     def test_a_dropped_headline_makes_the_design_art_only(self) -> None:
         brief = _brief()
         review = CopyReview(

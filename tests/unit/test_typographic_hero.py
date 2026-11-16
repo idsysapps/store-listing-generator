@@ -449,3 +449,26 @@ class TestHeroSelection:
     ) -> None:
         monkeypatch.setenv("TYPOGRAPHIC_HERO_CANDIDATES", value)
         assert hero_candidate_count() == expected
+
+
+class TestHeroMerchandiseScope:
+    def test_a_halloween_subject_names_who_a_person_is(self) -> None:
+        prompt = build_typographic_hero_prompt(HeroCopy(hero="BOO", subject="a smiling witch"))
+
+        assert "witch" in prompt.lower()
+        assert "husband and wife" in prompt.lower()
+
+    def test_an_occult_subject_is_not_sent_to_the_model(self) -> None:
+        comfy = _FakeComfy([])
+        generator = TypographicHeroGenerator(
+            comfyui_client=comfy,
+            validator=_FakeValidator([]),
+            candidates=1,
+        )
+
+        result = generator.generate(HeroCopy(hero="CARDS", subject="a tarot spread"))
+
+        assert result.image_bytes is None
+        assert result.error is not None
+        assert "occult" in result.error
+        assert comfy.calls == []

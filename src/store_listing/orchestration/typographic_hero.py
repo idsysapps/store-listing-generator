@@ -27,6 +27,11 @@ from store_listing.orchestration.comfyui_client import (
     ComfyUIError,
     ComfyUIResult,
 )
+from store_listing.orchestration.content_scope import (
+    EXCLUDED_IMAGE_TERMS,
+    PERSON_CONSTRAINT,
+    excluded_theme,
+)
 from store_listing.orchestration.copy_modes import (
     HERO_LAYOUT_TYPES,
     NO_TEXT,
@@ -219,6 +224,7 @@ def build_typographic_hero_prompt(copy: HeroCopy) -> str:
         "the words are printed plain with no quotation marks and no extra "
         "punctuation, no other text."
     )
+    parts.append(PERSON_CONSTRAINT)
     return " ".join(parts)
 
 
@@ -268,12 +274,29 @@ class TypographicHeroGenerator:
         self._candidates = candidates
 
     def generate(self, copy: HeroCopy, *, seed: int | None = None) -> HeroResult:
+        theme = (
+            excluded_theme(copy.subject)
+            or excluded_theme(copy.hero)
+            or excluded_theme(copy.kicker)
+            or excluded_theme(copy.descriptor)
+        )
+        if theme is not None:
+            return HeroResult(
+                image_bytes=None,
+                prompt="",
+                copy=copy,
+                seed=seed,
+                attempts=0,
+                error=f"the design depicts {theme}",
+            )
+
         prompt = build_typographic_hero_prompt(copy)
-        negative = (
+        border = (
             ""
             if copy.sticker
-            else "white sticker border, die-cut outline, background, backdrop, offset shadow"
+            else "white sticker border, die-cut outline, background, backdrop, offset shadow, "
         )
+        negative = f"{border}{EXCLUDED_IMAGE_TERMS}"
         base_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
         errors: list[str] = []
         last_validation: StrictTextResult | None = None
