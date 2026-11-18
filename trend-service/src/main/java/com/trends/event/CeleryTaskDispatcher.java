@@ -124,6 +124,69 @@ public class CeleryTaskDispatcher {
                 .onFailure().invoke(e -> LOG.errorf(e, "Failed to dispatch custom brief task"));
     }
 
+    public Uni<String> dispatchRegenerateListingDescription(int briefId, String guidance) {
+        String taskName = "store_listing.orchestration.tasks.regenerate_listing_description_task";
+        String taskId = UUID.randomUUID().toString();
+        String correlationId = UUID.randomUUID().toString();
+
+        String guidanceEscaped = jsonString(guidance);
+        String bodyJson = "[[" + briefId + ", \"" + guidanceEscaped
+                + "\"], {}, {\"callbacks\": null, \"errbacks\": null, \"chain\": null, \"chord\": null}]";
+        String bodyEncoded = Base64.getEncoder().encodeToString(bodyJson.getBytes());
+
+        String message = """
+            {
+              "body": "%s",
+              "content-encoding": "utf-8",
+              "content-type": "application/json",
+              "headers": {
+                "lang": "py",
+                "task": "%s",
+                "id": "%s",
+                "shadow": null,
+                "eta": null,
+                "expires": null,
+                "group": null,
+                "group_index": null,
+                "retries": 0,
+                "timelimit": [null, null],
+                "root_id": "%s",
+                "parent_id": null,
+                "argsrepr": "(%d, '%s')",
+                "kwargsrepr": "{}",
+                "origin": "trend-service"
+              },
+              "properties": {
+                "correlation_id": "%s",
+                "reply_to": "",
+                "delivery_mode": 2,
+                "delivery_info": {
+                  "exchange": "",
+                  "routing_key": "celery"
+                },
+                "priority": 0,
+                "body_encoding": "base64",
+                "delivery_tag": "%s"
+              }
+            }
+            """.formatted(bodyEncoded, taskName, taskId, taskId, briefId, guidanceEscaped, correlationId, taskId);
+
+        LOG.infof("Dispatching Celery task %s for briefId=%d (taskId=%s)", taskName, briefId, taskId);
+
+        return redis.execute("LPUSH", CELERY_QUEUE, message)
+                .replaceWith(taskId)
+                .onFailure().invoke(e -> LOG.errorf(e, "Failed to dispatch listing rewrite for briefId=%d", briefId));
+    }
+
+    private static String jsonString(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+                .replace("\t", "\\t");
+    }
+
     public Uni<Void> dispatchGenerateSingleBriefImage(int briefId) {
         String taskName = "store_listing.orchestration.tasks.generate_single_brief_image_task";
         String taskId = UUID.randomUUID().toString();

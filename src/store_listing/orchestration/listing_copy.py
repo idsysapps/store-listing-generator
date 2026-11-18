@@ -31,9 +31,11 @@ __all__ = [
     "ListingCopy",
     "build_listing_copy_entries",
     "build_listing_copy_prompt",
+    "build_listing_rewrite_prompt",
     "fallback_listing_description",
     "listing_copy_enabled",
     "parse_listing_copy_response",
+    "regenerate_stored_listing",
     "write_batch_listing_copy",
 ]
 
@@ -171,6 +173,30 @@ def build_listing_copy_prompt(entries: Sequence[dict[str, Any]]) -> list[dict[st
     ]
 
 
+_REWRITE_NOTE: Final[str] = """
+The operator is revising one existing description. Follow the guidance.
+The current description is context. Do not copy a garment-colour opening from it.
+"""
+
+
+def build_listing_rewrite_prompt(
+    brief: DesignBrief,
+    *,
+    guidance: str,
+    current: str | None,
+) -> list[dict[str, str]]:
+    """The messages that ask the model to revise one stored description."""
+    payload = {
+        "briefs": build_listing_copy_entries([brief]),
+        "current_description": current,
+        "guidance": guidance.strip(),
+    }
+    return [
+        {"role": "system", "content": _SYSTEM_PROMPT + "\n" + _REWRITE_NOTE},
+        {"role": "user", "content": json.dumps(payload, indent=2)},
+    ]
+
+
 def _clean_description(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -237,10 +263,14 @@ def _request_listing_copy(
     entries: Sequence[dict[str, Any]],
     *,
     attempts: int = 2,
+    messages: Sequence[dict[str, str]] | None = None,
 ) -> tuple[dict[int, ListingCopy], list[str]]:
     if not entries:
         return {}, []
-    messages = build_listing_copy_prompt(entries)
+    if messages is None:
+        messages = build_listing_copy_prompt(entries)
+    else:
+        messages = list(messages)
     expected = {int(entry["index"]) for entry in entries}
     last: list[str] = []
 
@@ -408,3 +438,104 @@ def write_batch_listing_copy(
             )
         )
     return result, []
+
+
+def brief_from_listing_row(row: dict[str, Any]) -> DesignBrief:
+    """The stored fields the listing writer needs for one brief."""
+    products = row.get("specific_products") or []
+    if isinstance(products, str):
+        products = [products]
+    materials = row.get("recommended_materials")
+    if isinstance(materials, str):
+        materials = json.loads(materials)
+    return DesignBrief(
+        concept=str(row.get("concept") or ""),
+        product_type=str(row.get("product_type") or "dtf_apparel"),
+        specific_products=[str(item) for item in products if item],
+        audience=str(row.get("audience") or ""),
+        visual_style=str(row.get("visual_style") or ""),
+        confidence=0,
+        reasoning="",
+        source_seed_ids=[],
+        headline_text=row.get("headline_text"),
+        tagline_text=row.get("tagline_text"),
+        kicker_text=row.get("kicker_text"),
+        recommended_materials=materials if isinstance(materials, list) else None,
+        listing_description=row.get("listing_description"),
+    )
+
+
+def rewrite_listing_description(
+    llm_completions: Any,
+    model: str,
+    brief: DesignBrief,
+    *,
+    guidance: str,
+    current: str | None,
+) -> tuple[str, list[str]]:
+    """A revised description. A failed call keeps the description already stored."""
+    current_text = (current or "").strip()
+    kept = (
+        current_text
+        if len(current_text) >= MIN_DESCRIPTION_CHARS
+        else fallback_listing_description(brief)
+    )
+    messages = build_listing_rewrite_prompt(brief, guidance=guidance, current=current_text or None)
+    copies, issues = _request_listing_copy(
+        llm_completions,
+        model,
+        build_listing_copy_entries([brief]),
+        messages=messages,
+    )
+    copy = copies.get(1)
+    if issues or copy is None:
+        return kept, issues or ["listing copy was incomplete"]
+    return _buyer_description(copy.description, kept, brief), []
+
+
+def regenerate_stored_listing(
+    db: Any,
+    llm_completions: Any,
+    model: str,
+    brief_id: int,
+    guidance: str,
+) -> dict[str, Any]:
+    """Rewrite one stored listing description from an operator's guidance."""
+    row = db.get_listing_brief(brief_id)
+    if row is None:
+        return {"status": "not_found", "brief_id": brief_id}
+
+    guidance_text = guidance.strip()
+    if not guidance_text:
+        return {"status": "error", "reason": "guidance is required", "brief_id": brief_id}
+    if excluded_theme(guidance_text):
+        return {
+            "status": "rejected",
+            "reason": "guidance is outside the theme library",
+            "brief_id": brief_id,
+        }
+
+    brief = brief_from_listing_row(row)
+    current = row.get("listing_description")
+    description, issues = rewrite_listing_description(
+        llm_completions,
+        model,
+        brief,
+        guidance=guidance_text,
+        current=current if isinstance(current, str) else None,
+    )
+    if description == (current or "").strip():
+        return {
+            "status": "unchanged",
+            "brief_id": brief_id,
+            "listing_description": description,
+            "issues": issues,
+        }
+
+    db.update_brief_listing_description(brief_id, description)
+    return {
+        "status": "success",
+        "brief_id": brief_id,
+        "listing_description": description,
+        "issues": issues,
+    }

@@ -327,12 +327,15 @@ make test-e2e
    - If no issue exists, create one first
    - The issue will be closed by your PR
 
-2. **Create a feature branch:**
+2. **Create a new feature branch from current master:**
    ```bash
+   git checkout master && git pull
    git checkout -b feat/your-feature-name
    # OR for bug fixes:
    git checkout -b fix/your-bug-fix
    ```
+   - Each piece of work gets its own branch, cut from current `master`. Do not branch off another feature branch, and do not add new commits to a branch whose pull request is already merged.
+   - A squash merge does not put the feature branch's commits on `master`. The next change starts again at this step. Reuse of the old branch makes the next pull request repeat work that is already merged.
 
 3. **Make changes following TDD:**
    - RED: Write failing tests first
@@ -350,10 +353,11 @@ make test-e2e
    gh pr create --title "feat: your feature" --body "Closes #issue-number"
    ```
 
-6. **After PR merged, delete the branch:**
+6. **After the PR is merged, delete the branch and return to master:**
    ```bash
    git checkout master && git pull && git branch -d feat/your-feature-name
    ```
+   The next piece of work starts at step 2 on a new branch.
 
 ### Branch Naming Convention
 
