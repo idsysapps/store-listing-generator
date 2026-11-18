@@ -314,6 +314,46 @@ class TestDatabaseClient:
             42,
         )
 
+    def test_get_listing_brief_returns_the_copy_and_the_product(self) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (
+            7,
+            "Powered by Coffee",
+            "dtf_apparel",
+            ["t-shirt"],
+            "coffee lovers",
+            "warm",
+            "POWERED BY COFFEE",
+            None,
+            None,
+            [{"external_id": "shirt", "color": "Dark Heather"}],
+            "A Dark Heather t-shirt for coffee lovers.",
+        )
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            row = DatabaseClient().get_listing_brief(7)
+
+        assert row is not None
+        assert row["specific_products"] == ["t-shirt"]
+        assert row["listing_description"].startswith("A Dark Heather")
+        assert row["recommended_materials"][0]["color"] == "Dark Heather"
+
+    def test_update_brief_listing_description_stores_the_new_copy(self) -> None:
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            DatabaseClient().update_brief_listing_description(7, "For coffee lovers on Sunday.")
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "listing_description = %s" in sql
+        assert mock_cursor.execute.call_args[0][1] == ("For coffee lovers on Sunday.", 7)
+
     def test_update_brief_scene_stores_the_rewritten_scene(self) -> None:
         mock_cursor = MagicMock()
         mock_conn = MagicMock()
