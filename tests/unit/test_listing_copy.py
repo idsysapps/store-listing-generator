@@ -87,7 +87,7 @@ class TestEntries:
 
         assert entries[0]["index"] == 1
         assert entries[0]["headline"] == "POWERED BY COFFEE"
-        assert entries[0]["primary_material"]["color"] == "White"
+        assert "color" not in (entries[0]["primary_material"] or {})
         assert entries[0]["specific_products"] == ["t-shirt"]
 
     def test_the_entry_does_not_carry_the_scene_prompt(self) -> None:
@@ -110,6 +110,11 @@ class TestPrompt:
         assert "price" in system
         assert "do not invent" in system
         assert "html" in system
+        assert "garment colour" in system
+        assert "photos already show" in system
+        assert "use the primary material's colour" not in system
+        assert "a white t-shirt" not in system
+        assert "a dark heather t-shirt" in system
 
     def test_the_prompt_has_a_plain_text_output_shape(self) -> None:
         prompt = build_listing_copy_prompt(build_listing_copy_entries([_brief()]))
@@ -206,7 +211,7 @@ class TestFallback:
         description = fallback_listing_description(_brief())
 
         assert "POWERED BY COFFEE" in description or "Powered by Coffee" in description
-        assert "white" in description.lower()
+        assert "white" not in description.lower()
         assert "t-shirt" in description.lower()
         assert "coffee lovers" in description.lower()
         assert "steaming mug" not in description.lower()
@@ -235,9 +240,9 @@ class TestWriteBatch:
                 "listings": [
                     {
                         "index": 1,
-                        "description": "A white t-shirt for coffee lovers, featuring "
-                        "a warm coffee-inspired design. Wear it on slow mornings or "
-                        "give it to the friend who runs on espresso.",
+                        "description": "For coffee lovers, a warm coffee-inspired design. "
+                        "Wear it on slow mornings or give it to the friend who runs "
+                        "on espresso.",
                     }
                 ]
             }
@@ -248,7 +253,74 @@ class TestWriteBatch:
         assert issues == []
         description = briefs[0].listing_description
         assert description is not None
-        assert description.startswith("A white t-shirt")
+        assert description.startswith("For coffee lovers")
+
+    def test_a_shirt_colour_opener_is_removed(self) -> None:
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = _raw(
+            {
+                "listings": [
+                    {
+                        "index": 1,
+                        "description": "A Dark Heather t-shirt for coffee lovers, featuring "
+                        "a warm coffee-inspired design. Wear it on slow mornings or "
+                        "give it to the friend who runs on espresso.",
+                    }
+                ]
+            }
+        )
+        brief = _brief(
+            materials=[
+                {
+                    "external_id": "bc3001-dark-heather",
+                    "name": "Bella Canvas 3001",
+                    "color": "Dark Heather",
+                    "substrate_type": "t-shirt",
+                    "unit_cost": 4.50,
+                    "sizes": ["S", "M", "L"],
+                }
+            ]
+        )
+
+        briefs, issues = write_batch_listing_copy(llm, "test-model", [brief], enabled=True)
+
+        assert issues == []
+        description = briefs[0].listing_description or ""
+        assert description.startswith("For coffee lovers")
+        assert "dark heather" not in description.lower()
+        assert not description.lower().startswith("a ")
+
+    def test_a_jet_black_shirt_opener_is_removed(self) -> None:
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = _raw(
+            {
+                "listings": [
+                    {
+                        "index": 1,
+                        "description": "A jet black t-shirt featuring a small cross and a "
+                        "short verse. Wear it on Sunday or give it to a friend.",
+                    }
+                ]
+            }
+        )
+        brief = _brief(
+            materials=[
+                {
+                    "external_id": "shirt-jet-black-m",
+                    "name": "Bella Canvas 3001",
+                    "color": "Jet Black",
+                    "substrate_type": "t-shirt",
+                    "unit_cost": 4.50,
+                    "sizes": ["S", "M", "L"],
+                }
+            ]
+        )
+
+        briefs, _issues = write_batch_listing_copy(llm, "test-model", [brief], enabled=True)
+
+        description = briefs[0].listing_description or ""
+        assert description.startswith("Featuring a small cross")
+        assert "jet black" not in description.lower()
 
     def test_an_excluded_description_falls_back(self) -> None:
         llm = MagicMock()
