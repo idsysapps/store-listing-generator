@@ -205,6 +205,25 @@ public class DesignBriefResolver {
         return toSummary(brief);
     }
 
+    @Mutation("regenerateListingDescription")
+    public DesignBriefSummary regenerateListingDescription(int briefId, String guidance)
+            throws GraphQLException {
+        requireAuthentication();
+        if (guidance == null || guidance.isBlank()) {
+            throw new GraphQLException("Guidance is required");
+        }
+        DesignBrief brief = designBriefRepository.findById((long) briefId);
+        if (brief == null) {
+            return null;
+        }
+
+        String taskId = celeryTaskDispatcher
+                .dispatchRegenerateListingDescription(briefId, guidance.trim())
+                .await().indefinitely();
+        LOG.infof("Dispatched listing rewrite for briefId=%d (taskId=%s)", briefId, taskId);
+        return toSummary(brief);
+    }
+
     private void requireAuthentication() throws GraphQLException {
         if (securityIdentity == null || securityIdentity.isAnonymous()) {
             throw new GraphQLException("Authentication required");

@@ -617,6 +617,29 @@ def create_custom_brief_task(
 
 
 @celery_app.task
+def regenerate_listing_description_task(brief_id: int, guidance: str) -> dict:
+    """Rewrite one stored product-page description from operator guidance."""
+    from store_listing.orchestration.listing_copy import regenerate_stored_listing
+    from store_listing.orchestration.llm_client import configured, get_llm_client, get_llm_model
+
+    if not configured():
+        return {"status": "skipped", "reason": "LLM_API_KEY not set", "brief_id": brief_id}
+
+    client = get_llm_client()
+    model = get_llm_model()
+    _check_llm_model(client, model)
+    result = regenerate_stored_listing(
+        DatabaseClient(),
+        client.chat.completions,
+        model,
+        brief_id,
+        guidance,
+    )
+    result["llm_model"] = model
+    return result
+
+
+@celery_app.task
 def generate_design_briefs_task() -> dict:
     """LLM-driven design brief generation from curated trend signals."""
     from store_listing.orchestration.design_briefs import generate_design_briefs

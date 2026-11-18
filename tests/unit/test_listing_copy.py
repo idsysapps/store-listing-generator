@@ -18,9 +18,11 @@ from store_listing.orchestration.listing_copy import (
     ListingCopy,
     build_listing_copy_entries,
     build_listing_copy_prompt,
+    build_listing_rewrite_prompt,
     fallback_listing_description,
     listing_copy_enabled,
     parse_listing_copy_response,
+    regenerate_stored_listing,
     write_batch_listing_copy,
 )
 
@@ -373,6 +375,121 @@ class TestWriteBatch:
         assert issues
         assert briefs[0].listing_description
         assert "Printed on" in (briefs[0].listing_description or "")
+
+
+class TestRewrite:
+    def test_the_prompt_carries_the_guidance_and_the_current_copy(self) -> None:
+        prompt = build_listing_rewrite_prompt(
+            _brief(),
+            guidance="Mention Sunday mornings.",
+            current="A Dark Heather t-shirt for coffee lovers, featuring a warm design.",
+        )
+        user = prompt[1]["content"].lower()
+        system = prompt[0]["content"].lower()
+
+        assert "mention sunday mornings." in user
+        assert "dark heather" in user
+        assert "garment colour" in system
+        assert "guidance" in system
+
+    def test_guidance_rewrites_the_description_and_drops_the_shirt_opener(self) -> None:
+        db = MagicMock()
+        db.get_listing_brief.return_value = {
+            "id": 7,
+            "concept": "Powered by Coffee",
+            "product_type": "dtf_apparel",
+            "specific_products": ["t-shirt"],
+            "audience": "coffee lovers",
+            "visual_style": "warm cream and brown palette",
+            "headline_text": "POWERED BY COFFEE",
+            "tagline_text": None,
+            "kicker_text": None,
+            "recommended_materials": [
+                {
+                    "external_id": "bc3001-dark-heather",
+                    "name": "Bella Canvas 3001",
+                    "color": "Dark Heather",
+                    "substrate_type": "t-shirt",
+                }
+            ],
+            "listing_description": (
+                "A Dark Heather t-shirt for coffee lovers, featuring a warm design. "
+                "Wear it on slow mornings."
+            ),
+        }
+        llm = MagicMock()
+        llm.with_raw_response.create.return_value = _raw(
+            {
+                "listings": [
+                    {
+                        "index": 1,
+                        "description": (
+                            "A Dark Heather t-shirt for coffee lovers on Sunday mornings, "
+                            "featuring a warm design. Wear it after Mass or give it to the "
+                            "friend who runs on espresso."
+                        ),
+                    }
+                ]
+            }
+        )
+
+        result = regenerate_stored_listing(
+            db,
+            llm,
+            "test-model",
+            7,
+            "Mention Sunday mornings.",
+        )
+
+        description = result["listing_description"]
+        assert result["status"] == "success"
+        assert description.startswith("For coffee lovers on Sunday mornings")
+        assert "dark heather" not in description.lower()
+        db.update_brief_listing_description.assert_called_once_with(7, description)
+
+    def test_excluded_guidance_is_not_sent_to_the_model(self) -> None:
+        db = MagicMock()
+        db.get_listing_brief.return_value = {
+            "id": 7,
+            "concept": "Powered by Coffee",
+            "product_type": "dtf_apparel",
+            "specific_products": ["t-shirt"],
+            "audience": "coffee lovers",
+            "visual_style": "warm",
+            "headline_text": "POWERED BY COFFEE",
+            "recommended_materials": [_material()],
+            "listing_description": "For coffee lovers, a warm design for slow mornings.",
+        }
+        llm = MagicMock()
+
+        result = regenerate_stored_listing(db, llm, "test-model", 7, "Make it a tarot shirt.")
+
+        assert result["status"] == "rejected"
+        llm.with_raw_response.create.assert_not_called()
+        db.update_brief_listing_description.assert_not_called()
+
+    def test_a_failed_rewrite_keeps_the_stored_description(self) -> None:
+        current = "For coffee lovers, a warm design for slow mornings and espresso."
+        db = MagicMock()
+        db.get_listing_brief.return_value = {
+            "id": 7,
+            "concept": "Powered by Coffee",
+            "product_type": "dtf_apparel",
+            "specific_products": ["t-shirt"],
+            "audience": "coffee lovers",
+            "visual_style": "warm",
+            "headline_text": "POWERED BY COFFEE",
+            "recommended_materials": [_material()],
+            "listing_description": current,
+        }
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = RuntimeError("API down")
+
+        result = regenerate_stored_listing(db, llm, "test-model", 7, "Make it shorter.")
+
+        assert result["status"] == "unchanged"
+        assert result["listing_description"] == current
+        db.update_brief_listing_description.assert_not_called()
 
 
 def test_listing_copy_dataclass_holds_the_index_and_text() -> None:

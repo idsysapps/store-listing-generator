@@ -60,6 +60,8 @@ class DesignBriefResolverTest {
         MockitoAnnotations.openMocks(this);
         when(celeryTaskDispatcher.dispatchGenerateSingleBriefImage(anyInt()))
                 .thenReturn(Uni.createFrom().voidItem());
+        when(celeryTaskDispatcher.dispatchRegenerateListingDescription(anyInt(), anyString()))
+                .thenReturn(Uni.createFrom().item("task-id"));
         when(securityIdentity.isAnonymous()).thenReturn(false);
         when(materialRecommendationReader.read(any()))
                 .thenReturn(List.of());
@@ -760,6 +762,49 @@ class DesignBriefResolverTest {
 
         GraphQLException ex = assertThrows(GraphQLException.class,
                 () -> queryBriefs(null, null, 10));
+        assertEquals("Authentication required", ex.getMessage());
+    }
+
+    @Test
+    void testRegenerateListingDescription_DispatchesTheBriefAndTheGuidance() throws GraphQLException {
+        DesignBrief brief = makeBrief(7, "Powered by Coffee", "dtf_apparel");
+        brief.listingDescription = "A Dark Heather t-shirt for coffee lovers.";
+        when(designBriefRepository.findById(7L)).thenReturn(brief);
+
+        DesignBriefSummary result = designBriefResolver.regenerateListingDescription(
+                7, "  Mention Sunday mornings.  ");
+
+        assertNotNull(result);
+        assertEquals(brief.listingDescription, result.getListingDescription());
+        verify(celeryTaskDispatcher).dispatchRegenerateListingDescription(7, "Mention Sunday mornings.");
+    }
+
+    @Test
+    void testRegenerateListingDescription_ReturnsNullForMissingBrief() throws GraphQLException {
+        when(designBriefRepository.findById(999L)).thenReturn(null);
+
+        DesignBriefSummary result = designBriefResolver.regenerateListingDescription(
+                999, "Mention Sunday mornings.");
+
+        assertNull(result);
+        verify(celeryTaskDispatcher, never()).dispatchRegenerateListingDescription(anyInt(), anyString());
+    }
+
+    @Test
+    void testRegenerateListingDescription_RequiresGuidance() {
+        GraphQLException ex = assertThrows(GraphQLException.class,
+                () -> designBriefResolver.regenerateListingDescription(7, "   "));
+
+        assertEquals("Guidance is required", ex.getMessage());
+        verify(celeryTaskDispatcher, never()).dispatchRegenerateListingDescription(anyInt(), anyString());
+    }
+
+    @Test
+    void testRegenerateListingDescription_ThrowsAuthenticationRequired_WhenAnonymous() {
+        when(securityIdentity.isAnonymous()).thenReturn(true);
+
+        GraphQLException ex = assertThrows(GraphQLException.class,
+                () -> designBriefResolver.regenerateListingDescription(7, "Mention Sunday mornings."));
         assertEquals("Authentication required", ex.getMessage());
     }
 
