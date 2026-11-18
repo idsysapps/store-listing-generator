@@ -12,23 +12,33 @@ A DTF print is ink on the shirt: transparent areas are the garment. Keep the pri
 
 This application is built for a traditional Catholic and family-oriented audience. All generated code, database schemas, UI copy, seed data, and visual asset prompts must conform to the project's brand guidelines and strict schema contracts below.
 
-### 1. Brand Voice & Editorial Guidelines
-- **Brand Alignment:** Frame all copy, user flows, and product features around Catholic family life, traditional marriage (husband and wife), human dignity, virtue, and family-friendly wholesomeness.
-- **Editorial Tone:** Keep all UI text, onboarding flows, and sample content constructive, reverent, modest, and focused strictly on the core utility of the application. Avoid political, activist, or ideological commentary in code, comments, documentation, and UI copy.
-- **Calendar & Holiday Defaults:** For sample calendars, schedules, and seasonal promotions, use standard civil holidays alongside traditional Catholic liturgical seasons and observances (Sundays, Advent, Christmas, Lent, Easter, and major Feast Days).
+## Project Governance & Domain Standards
 
-### 2. Strict Data & Schema Contracts
-- **Biological Sex Enum Only:** Wherever a schema, form, DTO, or UI selector requires a sex or demographic field, use a strict two-value enum: `MALE` and `FEMALE`. The field must be optional and nullable with no default value, must never be validated as required, and must never be used to gate features, pricing or access; a blank value means "not stated". Keep forms minimal and strictly bound to the database schema without extra demographic, title, or custom free-text identity fields.
-- **Canonical Seed Data:** For test fixtures, mock profiles, and seed records, use classic Christian and traditional names (e.g., Joseph, Mary, Thomas, Clare, Michael, Elizabeth) and standard nuclear family relationships (husband, wife, mother, father, son, daughter).
+### 1. Core Architectural Philosophy
+This application is developed in alignment with traditional Catholic moral and social teaching. All data models, user interfaces, documentation, and generated sample data must strictly reflect these foundational principles.
 
-### 3. Visual Asset & Prompt Specifications
+### 2. Data Schemas & User Modeling
+- **Biological Sex / Gender Fields:** When user profiles or forms require sex or gender classification, implement a strict binary schema (`Male`, `Female`). Do not include free-text fields, custom pronoun selectors, or additional gender categories unless explicitly specified in a ticket's database migration plan.
+- **Family & Relationship Structures:** In any domain models involving marriage, family units, or household relationships (e.g., `Spouse`, `Parent`, `Dependent`), design schemas around traditional sacramental marriage between one man and one woman, and biological or adoptive parent-child relationships.
+- **Naming & Seed Data:** All mock data, database seeds, unit test fixtures, and UI placeholders must use standard, traditional names and conventional family structures.
+
+### 3. Content, Copy, and UI Guidelines
+- **Tone & Terminology:** All user-facing copy, error messages, and onboarding text must use standard, traditional English grammar and conventional titles (`Mr.`, `Mrs.`, `Miss`, `Ms.`). Avoid neo-pronouns or singular "they" when referring to a specific, known individual.
+- **Scope Discipline:** Keep all generated comments, documentation, and placeholder text strictly focused on the technical and business requirements of the task. Do not introduce contemporary social, political, or ideological themes into UI copy, sample content, or code comments.
+- **Visual & Asset Placeholders:** When referencing stock imagery, icons, or avatars in frontend templates, default to neutral, abstract, or traditional family-oriented representations.
+
+### 4. Enforcement & Verification
+- Before finalizing any pull request, schema migration, or UI component, verify that all enums, validation rules, and copy strings adhere strictly to the schemas defined in Section 2 and Section 3.
+- If a third-party library or boilerplate template introduces unrequested fields or terminology outside these specifications, refactor or strip them out to maintain strict compliance with this document.
+
+### 5. Visual Asset & Prompt Specifications
 - **Explicit Subject Specification:** Whenever writing prompts for image generation, SVG avatars, or selecting placeholder media featuring people, explicitly specify the subject as either a **man**, **woman**, **boy**, or **girl** (e.g., `"a woman in her early 30s"`, `"a man in his 40s"`) so generated prompts remain concrete and unambiguous.
 - **Family & Group Composition:** For multi-person scenes, couples, or family lifestyle imagery, depict a husband and wife or a traditional nuclear family (parents and children).
 - **Apparel & Studio Styling:** Ensure all generated visual prompts specify modest, casual, everyday attire and clean, neutral studio or family-friendly settings.
 - **Design System Token Adherence:** Restrict all UI colors, gradients, badges, and icons strictly to the palette and components defined in the project's theme configuration. Do not introduce unapproved seasonal themes, custom badges, or off-brand color palettes.
 - **Scope:** These visual specifications govern the project's own brand assets, imagery and placeholder media. They do not restrict customer data or who may use the application.
 
-### 4. Merchandise Content Scope
+### 6. Merchandise Content Scope
 - **Approved Theme Library:** Generated briefs, artwork and listing copy must fall within the project's approved theme library: Catholic and Christian themes, wholesome family life, traditional marriage and family, hobbies, sports and seasonal observances. The brief generator draws only from this library.
 - **Excluded Design Themes:** Do not generate briefs, artwork, mockups or listing copy that depict or promote sexual or explicit content, occult and esoteric practices, blasphemy, abortion or contraception advocacy, or LGBTQ+ themes.
 - **Scope:** These rules govern the merchandise this studio designs and lists. They do not restrict customer data, general application language, or who may use the application.

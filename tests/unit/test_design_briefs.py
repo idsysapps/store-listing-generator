@@ -1804,7 +1804,8 @@ class TestGenerateDesignBriefs:
         generate_design_briefs(db, llm, "test-model", today=date(2026, 10, 1))
 
         description = db.insert_design_brief.call_args.kwargs["listing_description"]
-        assert description.startswith("A white t-shirt")
+        assert description.startswith("For coffee lovers")
+        assert not description.lower().startswith("a white t-shirt")
         assert llm.with_raw_response.create.call_count == 2
 
 

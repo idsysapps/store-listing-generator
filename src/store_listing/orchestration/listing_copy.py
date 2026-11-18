@@ -75,20 +75,22 @@ product, not describe the picture that will be printed.
 
 RULES
 - Write 2-4 sentences of plain text. No HTML, markdown, bullet points or emojis.
-- Start with the product and the design or headline.
-- Say who the design is for and when to wear or give it.
+- Start with who the design is for, or with the design or headline.
+- Say when to wear or give it.
+- Do not name the garment colour. Do not open with the shirt, such as
+  "A Dark Heather t-shirt" or "a jet black t-shirt". The photos already show
+  the colour and the garment.
 - Do not describe the scene, illustration, artwork, mockup, design file or prompt.
 - Do not invent material, size, price, shipping, discounts, warranties or claims
   such as "best seller" or "perfect gift".
-- Use the primary material's colour and substrate when it is given.
 - Do not name a brand, franchise, team or trademark.
 - Do not wrap the whole description in quotation marks.
 - A seasonal costume is allow-listed. Do not depict or promote an excluded theme.
 
-BAD: "A skeleton doing yoga on a beach towel in a retro palette." This describes
-the picture.
-GOOD: "A white t-shirt for yoga lovers, featuring a skeleton in a beachside yoga
-pose. Wear it to class or give it to the friend who never misses a flow."
+BAD: "A jet black t-shirt with a skeleton doing yoga on a beach towel." The
+photos already show the shirt, and the sentence describes the picture.
+GOOD: "For yoga lovers: a skeleton in a beachside yoga pose. Wear it to class
+or give it to the friend who never misses a flow."
 
 Return ONLY valid JSON with this shape:
 {"listings":[{"index":1,"description":"..."}]}
@@ -148,7 +150,6 @@ def _entry(index: int, brief: DesignBrief) -> dict[str, Any]:
         "primary_material": (
             {
                 "name": material.get("name"),
-                "color": material.get("color"),
                 "substrate_type": material.get("substrate_type"),
             }
             if material
@@ -266,10 +267,63 @@ def _request_listing_copy(
     return {}, last
 
 
+def _garment_terms(product: str) -> list[str]:
+    """Product names a description might use for the shirt the buyer can see."""
+    cleaned = product.strip()
+    terms = [
+        "t-shirts",
+        "t-shirt",
+        "tees",
+        "tee",
+        "tshirt",
+        "shirts",
+        "shirt",
+        "hoodies",
+        "hoodie",
+        "sweatshirts",
+        "sweatshirt",
+    ]
+    if cleaned:
+        terms.append(cleaned)
+        if cleaned.endswith("s") and len(cleaned) > 1:
+            terms.append(cleaned[:-1])
+        else:
+            terms.append(f"{cleaned}s")
+    unique: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        key = term.lower()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(term)
+    unique.sort(key=len, reverse=True)
+    return unique
+
+
+def _strip_garment_opener(text: str, brief: DesignBrief) -> str:
+    """Drop a leading "A Dark Heather t-shirt" clause. The photos show the shirt."""
+    garment = (
+        "(?:" + "|".join(re.escape(term) for term in _garment_terms(_product_name(brief))) + ")"
+    )
+    colour = (brief.garment_color or "").strip()
+    patterns = [rf"^(?:a|an)\s+{garment}\b"]
+    if colour:
+        patterns.insert(0, rf"^(?:a|an)\s+{re.escape(colour)}\s+{garment}\b")
+    for pattern in patterns:
+        match = re.match(pattern, text, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        rest = text[match.end() :].lstrip(" \t,;:-–—.")
+        if not rest or len(rest) < MIN_DESCRIPTION_CHARS:
+            return text
+        if rest[0].islower():
+            rest = rest[0].upper() + rest[1:]
+        return rest
+    return text
+
+
 def fallback_listing_description(brief: DesignBrief) -> str:
     """A plain, marketplace-safe description when the model is unavailable."""
-    material = _primary_material(brief) or {}
-    colour = str(material.get("color") or "").strip()
     product = _product_name(brief)
     headline = (brief.headline_text or "").strip().rstrip(".!? ")
     if not headline:
@@ -277,9 +331,8 @@ def fallback_listing_description(brief: DesignBrief) -> str:
         # not turn it back into one, so it stays deliberately generic.
         headline = "An original design"
 
-    printed_on = f"{colour + ' ' if colour else ''}{product}".strip()
-    if printed_on:
-        first = f"{headline}. Printed on {printed_on}."
+    if product:
+        first = f"{headline}. Printed on {product}."
     else:
         first = f"{headline}. A printed apparel design."
 
@@ -300,6 +353,11 @@ def _publishable_description(candidate: str, fallback: str) -> str:
     if excluded_theme(candidate):
         return _SAFE_LISTING
     return candidate
+
+
+def _buyer_description(candidate: str, fallback: str, brief: DesignBrief) -> str:
+    """The description a buyer reads, without a shirt-colour opening."""
+    return _strip_garment_opener(_publishable_description(candidate, fallback), brief)
 
 
 def write_batch_listing_copy(
@@ -323,7 +381,7 @@ def write_batch_listing_copy(
         return [
             replace(
                 brief,
-                listing_description=_publishable_description(fallback[index], fallback[index]),
+                listing_description=_buyer_description(fallback[index], fallback[index], brief),
             )
             for index, brief in enumerate(original, start=1)
         ], []
@@ -334,7 +392,7 @@ def write_batch_listing_copy(
         return [
             replace(
                 brief,
-                listing_description=_publishable_description(fallback[index], fallback[index]),
+                listing_description=_buyer_description(fallback[index], fallback[index], brief),
             )
             for index, brief in enumerate(original, start=1)
         ], issues
@@ -346,7 +404,7 @@ def write_batch_listing_copy(
         result.append(
             replace(
                 brief,
-                listing_description=_publishable_description(description, fallback[index]),
+                listing_description=_buyer_description(description, fallback[index], brief),
             )
         )
     return result, []
