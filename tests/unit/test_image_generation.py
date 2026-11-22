@@ -578,6 +578,26 @@ class TestTheLookOfTheDesign:
         assert "no halftone dots" in prompt.lower()
         assert "no dot screen" in prompt.lower()
 
+    def test_a_personal_lifelike_brief_is_drawn_as_written(self) -> None:
+        brief = _make_brief(
+            personal_use=True,
+            style_preset="kawaii_flat",
+            silhouette="flat_icon",
+            concept="lifelike Disney Zootopia characters",
+            headline_text="lifelike Disney Zootopia characters",
+            scene_description="lifelike Disney Zootopia characters",
+        )
+
+        prompt = build_flux_prompt(brief)
+        negative = build_negative_prompt(brief)
+
+        assert "Draw exactly what the customer described" in prompt
+        assert "lifelike Disney Zootopia characters" in prompt
+        assert "kawaii" not in prompt.lower()
+        assert "spot colours, no photo" not in prompt.lower()
+        assert "no face" not in prompt.lower()
+        assert "realistic" not in negative.lower()
+
     def test_the_free_style_of_the_brief_does_not_fight_the_look(self) -> None:
         # Free text made every design come out as the same flat vector
         # clip-art (issue #227).

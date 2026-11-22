@@ -117,13 +117,12 @@ class TestBuildCustomBriefPrompt:
         assert "no_text" in system
         assert "kicker_text" in system
 
-    def test_system_prompt_asks_for_sellable_copy(self) -> None:
+    def test_system_prompt_keeps_the_customers_words(self) -> None:
         messages = build_custom_brief_prompt("a groovy ghost", "dtf_apparel")
 
         system = messages[0]["content"]
-        assert "would a stranger wear" in system.lower()
-        assert "Through A Kitchen" in system
-        assert "Kitchen Commute" in system
+        assert "copied exactly" in system
+        assert "Do not rewrite it." in messages[1]["content"]
 
     def test_returns_system_and_user_messages(self) -> None:
         messages = build_custom_brief_prompt("test", "dtf_apparel")
@@ -375,8 +374,12 @@ class TestCreateCustomBrief:
         result = create_custom_brief(db, llm, "model-x", "gnome train", "dtf_apparel")
 
         assert result["status"] == "success"
-        assert db.insert_design_brief.call_args.kwargs["tagline_text"] is None
-        assert llm.with_raw_response.create.call_count == 2
+        stored = db.insert_design_brief.call_args.kwargs
+        assert stored["concept"] == "gnome train"
+        assert stored["headline_text"] == "gnome train"
+        assert stored["scene_description"] == "gnome train"
+        assert stored["tagline_text"] is None
+        assert stored["kicker_text"] is None
 
     def test_passes_correct_fields_to_db(self) -> None:
         db = self._mock_db()
@@ -392,10 +395,10 @@ class TestCreateCustomBrief:
         )
         create_custom_brief(db, llm, "model-x", "baseball shirt", "dtf_apparel")
         call_kwargs = db.insert_design_brief.call_args
-        assert call_kwargs.kwargs["concept"] == "Baseball Tee"
+        assert call_kwargs.kwargs["concept"] == "baseball shirt"
         assert call_kwargs.kwargs["audience"] == "Parents"
-        assert call_kwargs.kwargs["headline_text"] == "Game Day!"
-        assert call_kwargs.kwargs["scene_description"] == "child with bat"
+        assert call_kwargs.kwargs["headline_text"] == "baseball shirt"
+        assert call_kwargs.kwargs["scene_description"] == "baseball shirt"
         assert call_kwargs.kwargs["llm_model"] == "model-x"
         assert call_kwargs.kwargs["batch_id"] == "custom"
         assert call_kwargs.kwargs["copy_mode"] == "caption"
@@ -418,7 +421,8 @@ class TestCreateCustomBrief:
 
         call_kwargs = db.insert_design_brief.call_args.kwargs
         assert call_kwargs["copy_mode"] == "type_hero"
-        assert call_kwargs["kicker_text"] == "IN MY SPOOKY ERA"
+        assert call_kwargs["headline_text"] == "groovy ghost"
+        assert call_kwargs["kicker_text"] is None
 
     def test_a_sellable_custom_brief_gets_a_listing_description(self) -> None:
         db = self._mock_db()
@@ -588,8 +592,9 @@ class TestPersonalUsePrompt:
             "disney princess shirt", "dtf_apparel", personal_use=True
         )
         system_msg = messages[0]["content"]
-        assert "PERSONAL USE ONLY" in system_msg
-        assert "MAY reference" in system_msg
+        assert "PERSONAL ITEM" in system_msg
+        assert "Keep every name the customer wrote" in system_msg
+        assert "Do not use licensed IP" not in system_msg
 
     def test_personal_use_prompt_does_not_forbid_ip(self) -> None:
         messages = build_custom_brief_prompt(
@@ -778,7 +783,9 @@ class TestACutAnswer:
         assert result["status"] == "success"
         assert result["brief_id"] == 42
         call_kwargs = db.insert_design_brief.call_args.kwargs
-        assert call_kwargs["concept"] == "Thanksgiving in Disney World"
+        assert call_kwargs["concept"] == "thanksgiving disney shirt"
+        assert call_kwargs["headline_text"] == "thanksgiving disney shirt"
+        assert call_kwargs["scene_description"] == "thanksgiving disney shirt"
         assert call_kwargs["voice"] == "loud"
         assert call_kwargs["style_preset"] == "distressed_band_tee"
 
@@ -802,8 +809,11 @@ class TestACutAnswer:
         )
 
         assert result["status"] == "error"
-        assert "licensed brand" in result["error"]
+        assert "licensed name" in result["error"]
+        assert "Disney" not in result["error"]
+        assert "disney" not in result["error"]
         db.insert_design_brief.assert_not_called()
+        llm.with_raw_response.create.assert_not_called()
 
     def test_an_answer_without_json_says_it_could_not_be_read(self) -> None:
         db = MagicMock()
@@ -847,3 +857,54 @@ class TestACutAnswer:
             )
 
         assert "finish=length" in caplog.text
+
+
+class TestLiteralCustomWords:
+    def test_a_personal_item_keeps_a_franchise_exactly(self) -> None:
+        db = MagicMock()
+        db.insert_design_brief.return_value = 42
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response(
+            concept="Cute forest friends",
+            headline_text="Forest Friends",
+            scene_description="five cute animals standing in a row",
+        )
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+        words = "lifelike Disney Zootopia characters"
+
+        result = create_custom_brief(db, llm, "model-x", words, "dtf_apparel", personal_use=True)
+
+        assert result["status"] == "success"
+        stored = db.insert_design_brief.call_args.kwargs
+        assert stored["concept"] == words
+        assert stored["headline_text"] == words
+        assert stored["scene_description"] == words
+        assert stored["personal_use"] is True
+
+    def test_a_sellable_model_answer_that_names_a_brand_is_rejected_generically(self) -> None:
+        db = MagicMock()
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response(headline_text="A Weekend At The Magic Kingdom")
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        result = create_custom_brief(db, llm, "model-x", "family vacation shirt", "dtf_apparel")
+
+        assert result["status"] == "error"
+        assert "licensed name" in result["error"]
+        assert "Magic Kingdom" not in result["error"]
+        assert "Disney" not in result["error"]
+        db.insert_design_brief.assert_not_called()

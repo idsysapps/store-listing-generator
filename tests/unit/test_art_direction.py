@@ -11,6 +11,7 @@ from store_listing.orchestration.art_direction import (
     PRESET_IDS,
     PRESETS,
     family_for,
+    forbids_lifelike,
     negative_for,
     preset_for,
     prompt_for,
@@ -56,6 +57,9 @@ class TestTheVocabulary:
         # The image model can draw a dot screen under any look; a 5 x 5
         # median removes it before the type goes on.
         assert all(preset.despeckle for preset in PRESETS.values())
+
+    def test_a_flat_look_forbids_a_lifelike_picture(self) -> None:
+        assert forbids_lifelike(preset_for("kawaii_flat")) is True
 
     def test_a_look_that_is_not_sold_is_not_found(self) -> None:
         assert preset_for("cubism") is None

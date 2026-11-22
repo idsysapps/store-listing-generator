@@ -51,7 +51,8 @@ class TestScreenText:
             voice="cozy",
         )
         assert reason is not None
-        assert "brand" in reason.lower()
+        assert "licensed name" in reason
+        assert "Magic Kingdom" not in reason
 
     def test_a_noun_list_is_rejected(self) -> None:
         reason = screen_text(

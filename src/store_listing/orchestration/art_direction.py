@@ -188,6 +188,21 @@ def prompt_for(preset: Preset | None) -> str:
     return preset.prompt if preset else ""
 
 
+def forbids_lifelike(preset: Preset | None) -> bool:
+    """Whether this look tells the image model not to draw a lifelike picture.
+
+    A personal brief that asks for a lifelike subject cannot wear a look whose
+    prompt or negative forbids one.
+    """
+    if preset is None:
+        return False
+    text = f"{preset.prompt} {preset.negative}".lower()
+    return any(
+        phrase in text
+        for phrase in ("realistic", "photorealistic", "flat colour", "flat color", "flat spot")
+    )
+
+
 PALETTE_NAMES: Final[dict[str, str]] = {
     "#F2E8D5": "cream",
     "#C1502E": "rust",

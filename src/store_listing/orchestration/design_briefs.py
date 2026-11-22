@@ -330,6 +330,8 @@ class DesignBrief:
     # Short labels drawn onto blank controls after the picture is generated.
     # The strings are exact; the boxes are measured from the picture.
     label_plates: tuple[LabelPlate, ...] = ()
+    # A personal item keeps the customer's words, including a franchise name.
+    personal_use: bool = False
 
     @property
     def garment_material(self) -> dict[str, Any] | None:
