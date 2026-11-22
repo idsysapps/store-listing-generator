@@ -240,6 +240,7 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         subtitle_text=subtitle_text,
         footer_text=footer_text,
         label_plates=plates_from_value(brief_row.get("label_plates")),
+        personal_use=bool(brief_row.get("personal_use")),
     )
 
 

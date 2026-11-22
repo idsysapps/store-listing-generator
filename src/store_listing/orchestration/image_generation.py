@@ -7,9 +7,11 @@ calls were removed in #111: the self-hosted DGX is the only generation path.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from store_listing.orchestration.art_direction import (
+    forbids_lifelike,
     negative_for,
     palette_allows_magenta,
     palette_phrase,
@@ -226,6 +228,33 @@ def font_colour(brief: DesignBrief) -> str:
     return colour
 
 
+_LIFELIKE = re.compile(
+    r"\b(?:lifelike|realistic|photorealistic|photo-realistic|real life)\b",
+    re.IGNORECASE,
+)
+
+
+def _asks_for_lifelike(brief: DesignBrief) -> bool:
+    text = " ".join(
+        part
+        for part in (brief.concept, brief.headline_text, brief.scene_description)
+        if isinstance(part, str) and part.strip()
+    )
+    return _LIFELIKE.search(text) is not None
+
+
+def _picture_preset(brief: DesignBrief):
+    """The look sent to the image model.
+
+    A personal item that asks for a lifelike picture does not wear a look that
+    forbids one.
+    """
+    preset = preset_for(brief.style_preset)
+    if brief.personal_use and _asks_for_lifelike(brief) and forbids_lifelike(preset):
+        return None
+    return preset
+
+
 def build_flux_prompt(brief: DesignBrief) -> str:
     """Build the Flux prompt for a brief, folding the template in.
 
@@ -264,7 +293,12 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     scene = _scene_for_prompt(brief)
     if not scene:
         raise PromptBuildError("the brief has no scene_description")
-    if brief.product_type == "dtf_apparel" and scene_fills_print_area(scene):
+    lifelike = brief.personal_use and _asks_for_lifelike(brief)
+    if (
+        brief.product_type == "dtf_apparel"
+        and scene_fills_print_area(scene)
+        and not brief.personal_use
+    ):
         scene = isolated_motif_scene(scene)
 
     if template_id == "full_bleed" and brief.headline_text:
@@ -275,7 +309,7 @@ def build_flux_prompt(brief: DesignBrief) -> str:
 
     parts: list[str] = []
 
-    if silhouette is not None:
+    if silhouette is not None and not lifelike:
         # Flux Schnell ignores the negative prompt at cfg 1, and "on the garment"
         # makes it draw a person wearing the graphic. The positive prompt has
         # to say the picture is a flat graphic on magenta.
@@ -284,6 +318,8 @@ def build_flux_prompt(brief: DesignBrief) -> str:
             "No person, no body, no face, no hands, no clothing, no fabric, "
             "no collar, no sleeves, no mockup, no product photo."
         )
+    if brief.personal_use:
+        parts.append(f"Draw exactly what the customer described: {scene}.")
     parts.append(f"{DESIGN_ONLY}: {scene}.")
     if silhouette is None:
         # A flat graphic is told not to draw a person. A scene may include one,
@@ -300,7 +336,7 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     # text made every design come out as the same flat vector clip-art
     # (issue #227). A brief that was written before the presets existed keeps
     # its own style.
-    preset = preset_for(brief.style_preset)
+    preset = _picture_preset(brief)
     look_parts = [text for text in (prompt_for(preset), palette_phrase(preset)) if text]
     if preset is None and brief.visual_style:
         # The free style is only for briefs written before the presets. A
@@ -308,7 +344,7 @@ def build_flux_prompt(brief: DesignBrief) -> str:
         # design the same flat clip-art (issue #227).
         look_parts.append(brief.visual_style)
     look = ", ".join(look_parts)
-    if silhouette is not None:
+    if silhouette is not None and not lifelike:
         context = "flat vector graphic, spot colours, no photo"
     else:
         context = product_context
@@ -421,7 +457,7 @@ def build_negative_prompt(brief: DesignBrief) -> str:
     (issue #246).
     """
     allow_surface = brief.text_plan is not None and brief.text_plan.needs_carrier
-    preset = preset_for(brief.style_preset)
+    preset = _picture_preset(brief)
     negative = negative_for(preset, allow_surface=allow_surface)
     if brief.product_type == "dtf_apparel":
         negative += (

@@ -85,13 +85,11 @@ def screen_text(
     text = headline.strip()
 
     if not allow_brands:
-        brand = licensed_brand(text)
-        if brand:
-            return f"the headline names a licensed brand: {brand}"
+        if licensed_brand(text):
+            return "the headline names a licensed name"
 
-        tagline_brand = licensed_brand(tagline)
-        if tagline_brand:
-            return f"the tagline names a licensed brand: {tagline_brand}"
+        if licensed_brand(tagline):
+            return "the tagline names a licensed name"
 
     words = text.split()
     if len(words) > MAX_HEADLINE_WORDS:

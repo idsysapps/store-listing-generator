@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
 from store_listing.orchestration.art_direction import family_for, preset_for
+from store_listing.orchestration.brand_guard import licensed_brand
 from store_listing.orchestration.brief_prompts import (
     DESIGN_ONLY_RULES,
     art_direction_rules,
@@ -16,8 +18,6 @@ from store_listing.orchestration.brief_prompts import (
     layout_rules,
     product_belongs_to,
     product_catalog,
-    sellability_rules,
-    voice_rules,
 )
 from store_listing.orchestration.content_scope import content_rejection
 from store_listing.orchestration.copy_modes import (
@@ -35,7 +35,6 @@ from store_listing.orchestration.design_briefs import (
     assign_batch_templates,
     headline_for_text_only,
     merchandise_rejection,
-    plan_batch_text_integration,
 )
 from store_listing.orchestration.headline_voice import normalise_voice, screen_text
 from store_listing.orchestration.idea_devices import device_for, idea_device_rules
@@ -52,6 +51,14 @@ from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_res
 logger = logging.getLogger(__name__)
 
 
+def _licensed_name_rejection(*parts: tuple[str, str | None]) -> str | None:
+    """Why one of these texts names a licence, without quoting the name."""
+    for label, text in parts:
+        if licensed_brand(text):
+            return f"the {label} names a licensed name"
+    return None
+
+
 def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
     """The prompt for a custom brief, offering only what is in production.
 
@@ -61,31 +68,35 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
     types = list(enabled) if enabled else sorted(PRODUCT_TAGS)
     product_types = ", ".join(f"'{t}'" for t in types)
 
+    literal_rules = (
+        "LITERAL WORDS: concept, headline_text, and scene_description are the customer's "
+        "words, copied exactly. Do not invent a slogan, a joke, a new identity, or a "
+        "substitute subject. Do not drop a word the customer wrote.\n\n"
+    )
     personal_use_rules = ""
     introduction = (
-        "You are a print-on-demand design strategist. A customer has described a design "
-        "idea. Turn it into one actionable design brief that a graphic designer can "
-        "immediately execute.\n\n"
+        "You fill in the production fields of one design brief. The customer already "
+        "wrote the design.\n\n"
     )
     ip_rules = (
         "IMPORTANT: Do not use licensed IP (movie characters, team logos, brand names). "
-        "Create original concepts. Respond ONLY with valid JSON."
+        "Respond ONLY with valid JSON."
     )
     if personal_use:
         introduction = (
-            "You are a print-on-demand design strategist. A customer has described a design "
-            "idea for PERSONAL USE ONLY (not for resale). Turn it into one actionable design "
-            "brief that a graphic designer can immediately execute.\n\n"
+            "You fill in the production fields of one design brief for a PERSONAL ITEM "
+            "(not for resale). The customer already wrote the design.\n\n"
         )
         personal_use_rules = (
-            "Since this is for personal use only, you MAY reference specific franchises, "
-            "characters, brands, team logos, or other IP in the design concept. The customer "
-            "wants a design inspired by or featuring these elements for their own private use.\n\n"
+            "This is a personal item. Keep every name the customer wrote, including a "
+            "franchise, a character, a brand, or a place. The picture is drawn from those "
+            "words. When the customer asks for a lifelike picture, draw it lifelike.\n\n"
         )
         ip_rules = "Respond ONLY with valid JSON."
 
     return (
         f"{introduction}"
+        f"{literal_rules}"
         f"{personal_use_rules}"
         f"{product_catalog(types)}\n"
         f"{content_scope_rules()}\n"
@@ -116,8 +127,6 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         "}}\n\n"
         f"{layout_rules(types)}\n"
         f"{copy_mode_rules()}\n"
-        f"{sellability_rules()}\n"
-        f"{voice_rules()}\n"
         f"{art_direction_rules()}\n"
         f"{idea_device_rules()}\n"
         f"{DESIGN_ONLY_RULES}\n"
@@ -138,7 +147,7 @@ def build_custom_brief_prompt(
         f"Today's date: {today}\n"
         f"Design idea: {description}\n"
         f"Requested product type: {product_type}\n\n"
-        "Create one design brief for this idea."
+        "Copy the design idea into the concept, the headline, and the scene. Do not rewrite it."
     )
     return [
         {"role": "system", "content": prompt},
@@ -275,17 +284,32 @@ def _read_brief(
     # has to be good. A brief for personal use may name a franchise on
     # purpose, so the brand is not screened there (issue #225). A no-text
     # design has no text to screen.
-    if copy_mode != NO_TEXT:
+    if copy_mode != NO_TEXT and not personal_use:
         reason = screen_text(
             headline_text,
             tagline=tagline_text,
             scene=scene_description,
             voice=voice,
-            allow_brands=personal_use,
         )
         if reason is not None:
             logger.warning("Skipping the custom brief %r: %s", concept, reason)
             return None, reason
+
+    if not personal_use:
+        licensed = _licensed_name_rejection(
+            ("concept", concept if isinstance(concept, str) else None),
+            ("scene", raw_scene if isinstance(raw_scene, str) else None),
+            ("audience", b.get("audience") if isinstance(b.get("audience"), str) else None),
+            (
+                "visual style",
+                b.get("visual_style") if isinstance(b.get("visual_style"), str) else None,
+            ),
+            ("reasoning", b.get("reasoning") if isinstance(b.get("reasoning"), str) else None),
+            ("kicker", kicker_text),
+        )
+        if licensed is not None:
+            logger.warning("Skipping the custom brief %r: %s", concept, licensed)
+            return None, licensed
 
     return (
         DesignBrief(
@@ -374,8 +398,13 @@ def create_custom_brief(
 ) -> dict[str, Any]:
     scope_reason = content_rejection(("description", description))
     if scope_reason is not None:
-        # Personal use waives the trademark ban. It does not waive the library.
+        # A personal item waives the trademark check. It does not waive the library.
         return {"status": "error", "error": f"The brief was not created: {scope_reason}"}
+
+    if not personal_use:
+        licensed = _licensed_name_rejection(("description", description))
+        if licensed is not None:
+            return {"status": "error", "error": f"The brief was not created: {licensed}"}
 
     if enabled and product_type not in enabled:
         if len(enabled) > 1:
@@ -422,35 +451,23 @@ def create_custom_brief(
         logger.error("The LLM custom brief was dropped: %s", reason)
         return {"status": "error", "error": f"The brief was not created: {reason}"}
 
+    words = description.strip()
+    brief = replace(
+        brief,
+        concept=words,
+        headline_text=words,
+        scene_description=words,
+        tagline_text=None,
+        kicker_text=None,
+        personal_use=personal_use,
+    )
+
     # A single brief still gets a template, so the custom path does not always
     # come back as the same centred emblem (issue #238).
     brief = assign_batch_templates([brief], f"custom:{brief.concept}")[0]
     if brief.idea_device is None:
         # The model named no device we use; give the brief one anyway.
         brief = assign_batch_devices([brief], f"custom:{brief.concept}")[0]
-
-    # The copy editor is the taste-maker for the text. It may drop a tagline
-    # when the design stands alone, or rewrite one that only describes the
-    # scene (issue #266).
-    from store_listing.orchestration.copy_review import (
-        copy_review_enabled,
-        review_batch_copy,
-    )
-
-    if copy_review_enabled():
-        reviewed, copy_issues = review_batch_copy(llm_completions, model, [brief])
-        if copy_issues:
-            logger.info("Copy review: %s", "; ".join(copy_issues))
-        if not reviewed:
-            return {
-                "status": "error",
-                "error": "The brief was rejected by the copy review",
-            }
-        brief = reviewed[0]
-
-    # The template is known now, so the model can choose how the words live
-    # in it. A failed pass leaves the brief on the flat treatment.
-    brief = plan_batch_text_integration(llm_completions, model, [brief])[0]
 
     # A personal-use design is not going on a marketplace, so it gets no
     # storefront copy. A sellable custom brief gets the same listing pass as

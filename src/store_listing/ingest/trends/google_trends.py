@@ -724,7 +724,7 @@ class DatabaseClient:
                        regeneration_feedback, scene_description, recommended_materials,
                        voice, font_family, style_preset, text_plan,
                        copy_mode, kicker_text, silhouette, subtitle_text, footer_text,
-                       label_plates
+                       label_plates, personal_use
                 FROM design_briefs
                 WHERE id = %s
                 """,
@@ -758,6 +758,7 @@ class DatabaseClient:
                 "subtitle_text": row[19],
                 "footer_text": row[20],
                 "label_plates": (_json.loads(row[21]) if isinstance(row[21], str) else row[21]),
+                "personal_use": bool(row[22]),
             }
 
     def list_briefs_by_batch(self, batch_id: str) -> list[dict[str, Any]]:
