@@ -983,6 +983,54 @@ class DatabaseClient:
                 (image_key_raw, image_key_transparent, brief_id),
             )
 
+    def get_listing_brief(self, brief_id: int) -> dict[str, Any] | None:
+        """The stored fields needed to rewrite one product-page description."""
+        import json as _json
+
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, concept, product_type, specific_products, audience, visual_style,
+                       headline_text, tagline_text, kicker_text, recommended_materials,
+                       listing_description
+                FROM design_briefs
+                WHERE id = %s
+                """,
+                (brief_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            materials = row[9]
+            if isinstance(materials, str):
+                materials = _json.loads(materials)
+            products = row[3] or []
+            return {
+                "id": row[0],
+                "concept": row[1],
+                "product_type": row[2],
+                "specific_products": list(products),
+                "audience": row[4],
+                "visual_style": row[5],
+                "headline_text": row[6],
+                "tagline_text": row[7],
+                "kicker_text": row[8],
+                "recommended_materials": materials,
+                "listing_description": row[10],
+            }
+
+    def update_brief_listing_description(self, brief_id: int, listing_description: str) -> None:
+        """Store a revised product-page description."""
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE design_briefs
+                SET listing_description = %s
+                WHERE id = %s
+                """,
+                (listing_description, brief_id),
+            )
+
     def update_brief_scene(self, brief_id: int, scene_description: str) -> None:
         """Store a scene rewritten after the illustration came back with lettering."""
         with self.connect() as conn, conn.cursor() as cur:
