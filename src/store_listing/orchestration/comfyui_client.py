@@ -16,6 +16,7 @@ import logging
 import random
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Self
 
@@ -244,6 +245,7 @@ class ComfyUIClient:
         clip_name1: str | None = None,
         clip_name2: str | None = None,
         vae_name: str | None = None,
+        on_tick: Callable[[], None] | None = None,
     ) -> ComfyUIResult:
         """Queue a Flux Schnell text-to-image workflow and block until it is ready.
 
@@ -267,7 +269,7 @@ class ComfyUIClient:
             clip_name2=clip_name2 or self._clip_name2,
             vae_name=vae_name or self._vae_name,
         )
-        return self._run_graph(graph, seed=actual_seed)
+        return self._run_graph(graph, seed=actual_seed, on_tick=on_tick)
 
     def generate_flux2_image(
         self,
@@ -278,6 +280,7 @@ class ComfyUIClient:
         width: int = FLUX2_WIDTH,
         height: int = FLUX2_HEIGHT,
         steps: int = FLUX2_STEPS,
+        on_tick: Callable[[], None] | None = None,
     ) -> ComfyUIResult:
         """Draw a personal graphic with FLUX.2 dev and its reference photos.
 
@@ -300,7 +303,7 @@ class ComfyUIClient:
             clip_name=FLUX2_CLIP_NAME,
             vae_name=FLUX2_VAE_NAME,
         )
-        return self._run_graph(graph, seed=actual_seed, timeout_seconds=600)
+        return self._run_graph(graph, seed=actual_seed, timeout_seconds=600, on_tick=on_tick)
 
     def generate_qwen_image(
         self,
@@ -350,6 +353,7 @@ class ComfyUIClient:
         image_bytes: bytes,
         *,
         bg_model_name: str | None = None,
+        on_tick: Callable[[], None] | None = None,
     ) -> ComfyUIResult:
         """Upload the image to ComfyUI, run BiRefNet, return a transparent RGBA PNG."""
         model_name = bg_model_name or self._bg_model_name or self._discover_bg_model()
@@ -359,7 +363,7 @@ class ComfyUIClient:
             image_name=uploaded["name"],
             bg_model_name=model_name,
         )
-        result = self._run_graph(graph)
+        result = self._run_graph(graph, on_tick=on_tick)
         if result.image_bytes is None:
             return result
 
@@ -456,11 +460,14 @@ class ComfyUIClient:
         *,
         seed: int | None = None,
         timeout_seconds: float | None = None,
+        on_tick: Callable[[], None] | None = None,
     ) -> ComfyUIResult:
         save_node_id = self._find_save_node(graph)
         prompt_id = self._queue(graph)
         logger.info("Queued ComfyUI workflow %s (save node %s)", prompt_id, save_node_id)
-        descriptor = self._await_image(prompt_id, save_node_id, timeout_seconds=timeout_seconds)
+        descriptor = self._await_image(
+            prompt_id, save_node_id, timeout_seconds=timeout_seconds, on_tick=on_tick
+        )
         image_bytes = self._fetch_image(descriptor)
         return ComfyUIResult(image_bytes=image_bytes, prompt_id=prompt_id, seed=seed)
 
@@ -494,10 +501,13 @@ class ComfyUIClient:
         save_node_id: str,
         *,
         timeout_seconds: float | None = None,
+        on_tick: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
         deadline = time.monotonic() + timeout
         while True:
+            if on_tick is not None:
+                on_tick()
             try:
                 response = self._http.get(f"{self.base_url}/history/{prompt_id}")
             except httpx.HTTPError as exc:

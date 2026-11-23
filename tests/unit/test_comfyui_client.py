@@ -68,9 +68,11 @@ class TestGenerateImage:
                 return httpx.Response(200, content=png)
             return httpx.Response(404)
 
+        ticks: list[int] = []
         client = _client(handler)
-        result = client.generate_image(prompt="a red bicycle")
+        result = client.generate_image(prompt="a red bicycle", on_tick=lambda: ticks.append(1))
 
+        assert ticks == [1]
         assert result.error is None
         assert result.image_bytes == png
         assert result.prompt_id == "prompt-123"
