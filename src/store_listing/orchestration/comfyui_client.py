@@ -76,6 +76,11 @@ QWEN_SIZE = 1328
 # default is too tight, so the Qwen path gets its own deadline.
 QWEN_TIMEOUT_SECONDS = 900.0
 
+# A five-reference FLUX.2 dev render was still the only running prompt, with
+# nothing queued behind it, after the client gave up at 600s. Thirty minutes
+# covers that render. The wait still starts when the prompt is queued.
+FLUX2_TIMEOUT_SECONDS = 1800.0
+
 # Alpha cleanup applied to the background removal result.
 ALPHA_BLACK_POINT = 24
 ALPHA_WHITE_POINT = 240
@@ -163,6 +168,20 @@ def _clean_alpha(
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _prompt_ids(entries: Any) -> set[str]:
+    """Prompt ids from a ComfyUI queue list.
+
+    Each entry is ``[number, prompt_id, prompt, extra, outputs]``.
+    """
+    found: set[str] = set()
+    if not isinstance(entries, list):
+        return found
+    for entry in entries:
+        if isinstance(entry, list) and len(entry) >= 2:
+            found.add(str(entry[1]))
+    return found
 
 
 class ComfyUIError(Exception):
@@ -284,8 +303,9 @@ class ComfyUIClient:
     ) -> ComfyUIResult:
         """Draw a personal graphic with FLUX.2 dev and its reference photos.
 
-        A referenced 20-step image takes about four minutes on the DGX, so the
-        wait is longer than a Flux Schnell render.
+        A referenced 20-step image takes about four minutes when the model is
+        already loaded. A five-reference render was still the only running
+        prompt after ten minutes, so this path waits half an hour.
         """
         actual_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
         names: list[str] = []
@@ -303,7 +323,9 @@ class ComfyUIClient:
             clip_name=FLUX2_CLIP_NAME,
             vae_name=FLUX2_VAE_NAME,
         )
-        return self._run_graph(graph, seed=actual_seed, timeout_seconds=600, on_tick=on_tick)
+        return self._run_graph(
+            graph, seed=actual_seed, timeout_seconds=FLUX2_TIMEOUT_SECONDS, on_tick=on_tick
+        )
 
     def generate_qwen_image(
         self,
@@ -533,8 +555,45 @@ class ComfyUIClient:
                     )
 
             if time.monotonic() >= deadline:
+                self._release_prompt(prompt_id)
                 raise ComfyUIError(f"ComfyUI workflow {prompt_id} timed out after {timeout}s")
             time.sleep(self.poll_interval_seconds)
+
+    def _release_prompt(self, prompt_id: str) -> None:
+        """Take a prompt this client has stopped waiting for off the GPU.
+
+        ComfyUI runs one workflow at a time. A prompt left in ``queue_running``
+        blocks every later brief, and interrupting whatever is running would
+        cancel a different job. Pending prompts are deleted. Only the running
+        prompt is interrupted.
+        """
+        try:
+            response = self._http.get(f"{self.base_url}/queue")
+        except httpx.HTTPError as exc:
+            logger.warning("Could not read the ComfyUI queue to release %s: %s", prompt_id, exc)
+            return
+        if response.status_code != 200:
+            logger.warning(
+                "ComfyUI queue returned HTTP %s while releasing %s",
+                response.status_code,
+                prompt_id,
+            )
+            return
+        try:
+            body = response.json()
+        except ValueError:
+            logger.warning("ComfyUI queue was not JSON while releasing %s", prompt_id)
+            return
+
+        running = _prompt_ids(body.get("queue_running"))
+        pending = _prompt_ids(body.get("queue_pending"))
+        try:
+            if prompt_id in running:
+                self._http.post(f"{self.base_url}/interrupt")
+            elif prompt_id in pending:
+                self._http.post(f"{self.base_url}/queue", json={"delete": [prompt_id]})
+        except httpx.HTTPError as exc:
+            logger.warning("Could not release ComfyUI prompt %s: %s", prompt_id, exc)
 
     def _fetch_image(self, descriptor: dict[str, Any]) -> bytes:
         filename = str(descriptor.get("filename", ""))

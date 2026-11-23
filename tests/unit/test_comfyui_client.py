@@ -741,3 +741,125 @@ class TestGenerateQwenImage:
 
         with pytest.raises(ComfyUIError):
             _client(handler).generate_qwen_image(prompt="a ghost")
+
+
+def _queue(running: list[str], pending: list[str]) -> httpx.Response:
+    def entry(prompt_id: str, number: int) -> list[object]:
+        return [number, prompt_id, {}, {}, []]
+
+    return httpx.Response(
+        200,
+        json={
+            "queue_running": [entry(prompt_id, index) for index, prompt_id in enumerate(running)],
+            "queue_pending": [entry(prompt_id, index) for index, prompt_id in enumerate(pending)],
+        },
+    )
+
+
+def _install_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = {"now": 0.0}
+
+    def monotonic() -> float:
+        return clock["now"]
+
+    def sleep(seconds: float) -> None:
+        clock["now"] += seconds
+
+    monkeypatch.setattr("store_listing.orchestration.comfyui_client.time.monotonic", monotonic)
+    monkeypatch.setattr("store_listing.orchestration.comfyui_client.time.sleep", sleep)
+
+
+class TestReleaseOnTimeout:
+    """A timed-out prompt has to leave the GPU, or the next brief waits behind it."""
+
+    def test_flux2_keeps_polling_past_ten_minutes_then_interrupts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_clock(monkeypatch)
+        calls: list[tuple[str, str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            calls.append((request.method, path))
+            if path == "/upload/image":
+                return httpx.Response(
+                    200, json={"name": "ref.png", "subfolder": "", "type": "input"}
+                )
+            if path == "/prompt":
+                return _prompt_ok("flux2-prompt")
+            if path == "/queue":
+                return _queue(running=["flux2-prompt"], pending=[])
+            if path == "/interrupt":
+                return httpx.Response(200, json={})
+            return httpx.Response(200, json={})
+
+        with pytest.raises(ComfyUIError) as excinfo:
+            _client(handler, timeout_seconds=1, poll_interval_seconds=100).generate_flux2_image(
+                prompt="a saint",
+                reference_images=[_png_bytes()],
+                seed=7,
+            )
+
+        assert "timed out after 1800" in str(excinfo.value)
+        assert ("POST", "/interrupt") in calls
+        assert ("POST", "/queue") not in calls
+        history_polls = [
+            path for method, path in calls if method == "GET" and path.startswith("/history/")
+        ]
+        # One poll per 100s through the 1800s deadline, which is past the old 600s cap.
+        assert len(history_polls) > 6
+
+    def test_a_pending_prompt_is_removed_without_interrupting_the_running_job(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_clock(monkeypatch)
+        deletes: list[object] = []
+        interrupted = False
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal interrupted
+            path = request.url.path
+            if path == "/prompt":
+                return _prompt_ok("waiting-prompt")
+            if path == "/queue" and request.method == "GET":
+                return _queue(running=["someone-else"], pending=["waiting-prompt"])
+            if path == "/queue" and request.method == "POST":
+                import json
+
+                deletes.append(json.loads(request.content))
+                return httpx.Response(200, json={})
+            if path == "/interrupt":
+                interrupted = True
+                return httpx.Response(200, json={})
+            return httpx.Response(200, json={})
+
+        with pytest.raises(ComfyUIError):
+            _client(handler, timeout_seconds=50, poll_interval_seconds=25).generate_image(
+                prompt="a red bicycle"
+            )
+
+        assert deletes == [{"delete": ["waiting-prompt"]}]
+        assert interrupted is False
+
+    def test_a_timeout_does_not_interrupt_a_different_running_prompt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _install_clock(monkeypatch)
+        calls: list[tuple[str, str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            calls.append((request.method, path))
+            if path == "/prompt":
+                return _prompt_ok("missing-prompt")
+            if path == "/queue":
+                return _queue(running=["someone-else"], pending=[])
+            return httpx.Response(200, json={})
+
+        with pytest.raises(ComfyUIError):
+            _client(handler, timeout_seconds=50, poll_interval_seconds=25).generate_image(
+                prompt="a red bicycle"
+            )
+
+        assert ("POST", "/interrupt") not in calls
+        assert ("POST", "/queue") not in calls
