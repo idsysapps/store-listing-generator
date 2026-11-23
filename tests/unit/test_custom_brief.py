@@ -46,9 +46,30 @@ def _phases(client: _MemoryRedis) -> list[str]:
 @pytest.fixture(autouse=True)
 def _no_live_search(monkeypatch: pytest.MonkeyPatch) -> None:
     """Personal research must not call Wikipedia from a unit test."""
+    from store_listing.orchestration.personal_design import PhotoLook, SearchNote
+
+    def fake_search(query: str) -> list[SearchNote]:
+        title = " ".join(str(query).split()[:4]) or "subject"
+        return [
+            SearchNote(
+                query=query,
+                title=title,
+                text="Research notes about this subject for the shirt graphic.",
+                image_url="https://example.com/ref.jpg",
+            )
+        ]
+
     monkeypatch.setattr(
         "store_listing.orchestration.custom_brief.search_personal",
-        lambda _query: [],
+        fake_search,
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.custom_brief.look_at_reference",
+        lambda _image, **_kwargs: PhotoLook("the subject", keep=True),
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.fetch_reference",
+        lambda _url, **_kwargs: b"img",
     )
 
 
@@ -911,7 +932,7 @@ class TestACutAnswer:
         assert "solid pure magenta" in call_kwargs["scene_description"]
         assert call_kwargs["copy_mode"] == "no_text"
         assert call_kwargs["voice"] == "loud"
-        assert call_kwargs["style_preset"] == "distressed_band_tee"
+        assert call_kwargs["style_preset"] == "2d"
 
     def test_a_brief_that_was_rejected_says_why(self) -> None:
         # The brief was read and dropped, which is not the same as an answer
@@ -1019,6 +1040,104 @@ class TestLiteralCustomWords:
         assert stored["text_plan"]["customer_lettering"] is False
         assert stored["text_plan"]["image_model"] == "qwen_image_2.1"
         assert result["image_model"] == "qwen_image_2.1"
+
+    def test_empty_personal_research_is_abandoned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "store_listing.orchestration.custom_brief.search_personal",
+            lambda _query: [],
+        )
+        db = MagicMock()
+        db.insert_design_brief.return_value = 344
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response()
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        result = create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "Thanksgiving-themed Magic Kingdom",
+            "dtf_apparel",
+            personal_use=True,
+        )
+
+        assert result["status"] == "error"
+        assert "no sources" in result["error"].lower()
+        _assert_abandoned(db)
+
+    def test_personal_brief_defaults_style_to_2d(self) -> None:
+        db = MagicMock()
+        db.insert_design_brief.return_value = 45
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response()
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        result = create_custom_brief(
+            db, llm, "model-x", "a park shirt", "dtf_apparel", personal_use=True
+        )
+
+        assert result["status"] == "success"
+        assert result["style_preset"] == "2d"
+        assert db.update_design_brief.call_args.kwargs["style_preset"] == "2d"
+
+    def test_personal_brief_can_choose_a_style_preset(self) -> None:
+        db = MagicMock()
+        db.insert_design_brief.return_value = 46
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response()
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        result = create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "a park shirt",
+            "dtf_apparel",
+            personal_use=True,
+            style_preset="photorealistic",
+        )
+
+        assert result["status"] == "success"
+        assert result["style_preset"] == "photorealistic"
+
+    def test_unknown_style_preset_is_rejected(self) -> None:
+        db = MagicMock()
+        llm = MagicMock()
+
+        result = create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "a park shirt",
+            "dtf_apparel",
+            personal_use=True,
+            style_preset="cubism",
+        )
+
+        assert result["status"] == "error"
+        assert "Unknown style preset" in result["error"]
+        db.insert_design_brief.assert_not_called()
 
     def test_a_personal_brief_can_choose_flux2_dev(self) -> None:
         db = MagicMock()

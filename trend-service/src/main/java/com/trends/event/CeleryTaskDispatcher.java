@@ -71,6 +71,15 @@ public class CeleryTaskDispatcher {
 
     public Uni<String> dispatchCreateCustomBrief(
             String description, String productType, boolean personalUse, String imageModel) {
+        return dispatchCreateCustomBrief(description, productType, personalUse, imageModel, null);
+    }
+
+    public Uni<String> dispatchCreateCustomBrief(
+            String description,
+            String productType,
+            boolean personalUse,
+            String imageModel,
+            String stylePreset) {
         String taskName = "store_listing.orchestration.tasks.create_custom_brief_task";
         String taskId = UUID.randomUUID().toString();
         String correlationId = UUID.randomUUID().toString();
@@ -80,8 +89,16 @@ public class CeleryTaskDispatcher {
         String personalUseStr = personalUse ? "true" : "false";
         String model = (imageModel == null || imageModel.isBlank()) ? "qwen_image_2.1" : imageModel.trim();
         String modelEscaped = model.replace("\\", "\\\\").replace("\"", "\\\"");
+        String styleJson = "null";
+        String styleRepr = "None";
+        if (stylePreset != null && !stylePreset.isBlank()) {
+            String styleEscaped = stylePreset.trim().replace("\\", "\\\\").replace("\"", "\\\"");
+            styleJson = "\"" + styleEscaped + "\"";
+            styleRepr = "'" + styleEscaped + "'";
+        }
         String bodyJson = "[[\"" + descEscaped + "\", \"" + ptEscaped + "\", " + personalUseStr
-                + ", \"" + modelEscaped + "\"], {}, {\"callbacks\": null, \"errbacks\": null, \"chain\": null, \"chord\": null}]";
+                + ", \"" + modelEscaped + "\", " + styleJson
+                + "], {}, {\"callbacks\": null, \"errbacks\": null, \"chain\": null, \"chord\": null}]";
         String bodyEncoded = Base64.getEncoder().encodeToString(bodyJson.getBytes());
 
         String message = """
@@ -102,7 +119,7 @@ public class CeleryTaskDispatcher {
                 "timelimit": [null, null],
                 "root_id": "%s",
                 "parent_id": null,
-                "argsrepr": "('%s', '%s', %s, '%s')",
+                "argsrepr": "('%s', '%s', %s, '%s', %s)",
                 "kwargsrepr": "{}",
                 "origin": "trend-service"
               },
@@ -121,11 +138,11 @@ public class CeleryTaskDispatcher {
             }
             """.formatted(
                 bodyEncoded, taskName, taskId, taskId, descEscaped, ptEscaped, personalUseStr,
-                modelEscaped, correlationId, taskId);
+                modelEscaped, styleRepr, correlationId, taskId);
 
         LOG.infof(
-                "Dispatching Celery task %s (taskId=%s, personalUse=%s, imageModel=%s)",
-                taskName, taskId, personalUse, model);
+                "Dispatching Celery task %s (taskId=%s, personalUse=%s, imageModel=%s, stylePreset=%s)",
+                taskName, taskId, personalUse, model, stylePreset);
 
         return redis.execute("LPUSH", CELERY_QUEUE, message)
                 .replaceWith(taskId)

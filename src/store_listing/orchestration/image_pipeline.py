@@ -46,6 +46,8 @@ from store_listing.orchestration.copy_modes import (
 )
 from store_listing.orchestration.design_briefs import DesignBrief
 from store_listing.orchestration.design_quality import (
+    MAX_MAGENTA_FRACTION,
+    MAX_NEAR_WHITE_BORDER,
     Candidate,
     QualityMetrics,
     choose_best,
@@ -933,6 +935,16 @@ def _generate_model_text_brief(
     return False, last_error
 
 
+def _personal_print_failures(metrics: QualityMetrics) -> list[str]:
+    """Hard DTF defects that must not upload for a personal custom brief."""
+    issues: list[str] = []
+    if metrics.magenta_fraction > MAX_MAGENTA_FRACTION:
+        issues.append(f"{metrics.magenta_fraction:.1%} of the ink is magenta")
+    if metrics.near_white_border > MAX_NEAR_WHITE_BORDER:
+        issues.append(f"{metrics.near_white_border:.0%} of the edge is a white border")
+    return issues
+
+
 def _needs_attention(
     db_client: Any,
     brief_id: int,
@@ -1467,6 +1479,13 @@ def _generate_best_candidate(
             "Brief %d: best candidate still has QA issues: %s",
             brief_id,
             "; ".join(best.metrics.issues),
+        )
+    personal = bool(brief_row.get("personal_use"))
+    hard_failures = _personal_print_failures(best.metrics) if personal else []
+    if hard_failures:
+        return finish(
+            False,
+            "Personal print gate failed: " + "; ".join(hard_failures),
         )
     _log_dtf_coverage(brief_id, best.transparent_bytes)
     keys = storage.upload_design(

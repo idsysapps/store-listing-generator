@@ -565,6 +565,24 @@ class TestPersonalImageModel:
         assert "Jar Jar speaks in a Gungan voice." in call["prompt"]
         assert call["reference_images"] == [b"ref-bytes"]
 
+    def test_a_personal_style_preset_is_in_the_qwen_prompt(self) -> None:
+        client = _client()
+        client.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="q")
+        brief = _make_brief(
+            personal_use=True,
+            product_type="sublimation",
+            style_preset="photorealistic",
+            design_subjects="Mickey Mouse",
+            design_facts=("Magic Kingdom is known for Mickey Mouse.",),
+        )
+
+        generate_image(brief, comfyui_client=client, seed=1)
+
+        prompt = client.generate_qwen_image.call_args.kwargs["prompt"]
+        assert "solid pure magenta" in prompt
+        assert "lifelike photographic" in prompt
+        assert "Mickey Mouse" in prompt
+
     def test_a_personal_brief_can_choose_flux2_dev(self) -> None:
         client = _client()
         client.generate_flux2_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="f")

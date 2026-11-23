@@ -21,8 +21,8 @@ from store_listing.orchestration.typography import FONTS
 
 
 class TestTheVocabulary:
-    def test_there_are_eight_looks(self) -> None:
-        assert len(PRESETS) == 8
+    def test_there_are_twelve_looks(self) -> None:
+        assert len(PRESETS) == 12
 
     def test_the_looks_are_the_ones_we_chose(self) -> None:
         assert set(PRESET_IDS) == {
@@ -34,7 +34,22 @@ class TestTheVocabulary:
             "kawaii_flat",
             "art_nouveau",
             "distressed_band_tee",
+            "photorealistic",
+            "3d",
+            "2d",
+            "flat_3d",
         }
+
+    def test_the_catalog_lists_every_look(self) -> None:
+        from store_listing.orchestration.art_direction import preset_catalog
+
+        catalog = preset_catalog()
+        assert len(catalog) == len(PRESETS)
+        assert {row["id"] for row in catalog} == set(PRESET_IDS)
+
+    def test_photorealistic_does_not_forbid_lifelike(self) -> None:
+        assert forbids_lifelike(preset_for("photorealistic")) is False
+        assert forbids_lifelike(preset_for("2d")) is True
 
     def test_every_look_has_a_prompt_and_a_negative(self) -> None:
         for preset in PRESETS.values():

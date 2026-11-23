@@ -19,6 +19,8 @@ import numpy as np
 from PIL import Image
 
 __all__ = [
+    "MAX_MAGENTA_FRACTION",
+    "MAX_NEAR_WHITE_BORDER",
     "Candidate",
     "QualityMetrics",
     "choose_best",
