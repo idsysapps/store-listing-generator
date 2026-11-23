@@ -69,6 +69,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "store-listing.fullname" . }}-secrets
                   key: APIFY_API_TOKEN
+            - name: BRAVE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: BRAVE_API_KEY
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "store-listing.fullname" . }}-secrets
+                  key: GEMINI_API_KEY
             - name: APIFY_ACTOR_TIKTOK_HASHTAG
               value: {{ .Values.config.tiktokActorId | default "" | quote }}
             - name: APIFY_ACTOR_PINTEREST
