@@ -9,12 +9,15 @@ import pytest
 
 from store_listing.orchestration.personal_design import (
     PersonalDesign,
+    PhotoLook,
     SearchNote,
     arrangement_line,
     character_from_notes,
     character_role,
     fetch_reference,
     graphic_prompt,
+    look_at_reference,
+    photo_look_from_answer,
     quoted_lettering,
     rearrange,
     research_personal_design,
@@ -538,3 +541,126 @@ def test_a_reference_download_retries_a_rate_limit_and_rejects_a_logo(
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         assert fetch_reference("https://example.com/logo.svg", client=client) is None
         assert fetch_reference("https://example.com/park.jpg", client=client) == jpeg
+
+
+def test_a_logo_answer_is_not_a_subject() -> None:
+    logo = photo_look_from_answer('{"look": "a studio logo", "kind": "logo"}')
+    mountain = photo_look_from_answer('{"look": "a snowy mountain", "kind": "subject"}')
+    unread = photo_look_from_answer("not json")
+
+    assert logo == PhotoLook("a studio logo", keep=False)
+    assert mountain == PhotoLook("a snowy mountain", keep=True)
+    assert unread == PhotoLook("", keep=True)
+
+
+def test_a_vision_failure_is_an_empty_look() -> None:
+    class _Completions:
+        def create(self, **_kwargs: object) -> object:
+            raise RuntimeError("vision is down")
+
+    class _Chat:
+        completions = _Completions()
+
+    class _Client:
+        chat = _Chat()
+
+    assert look_at_reference(b"img", client=_Client(), model="qwen_vl_ocr") == PhotoLook(
+        "", keep=True
+    )
+
+
+def test_a_photo_look_fills_the_gaps_and_does_not_rename_the_mountain() -> None:
+    sentence = "Animal Kingdom, Expedition Everest, Zootopia zoogether sleuth"
+    answers = iter(
+        [
+            json.dumps({"queries": ["expedition everest"]}),
+            json.dumps(
+                {
+                    "customer_line": sentence,
+                    "voice_found": True,
+                    "lettering": "Get there eventually",
+                    "subjects": "a roller coaster train",
+                    "additions": "a rabbit detective",
+                    "references": [
+                        {"url": "https://example.com/mountain.jpg", "keep": True},
+                        {"url": "https://example.com/logo.jpg", "keep": True},
+                    ],
+                }
+            ),
+        ]
+    )
+    seen: list[list[dict[str, str]]] = []
+
+    def complete(messages: list[dict[str, str]]) -> str:
+        seen.append(messages)
+        return next(answers)
+
+    def look(image: bytes) -> PhotoLook:
+        if image == b"logo":
+            return PhotoLook("a studio logo", keep=False)
+        return PhotoLook("a snowy mountain", keep=True)
+
+    design = research_personal_design(
+        sentence,
+        complete=complete,
+        search=lambda _query: [
+            SearchNote(
+                "expedition everest",
+                "Expedition Everest",
+                "Expedition Everest is a steel roller coaster.",
+                "https://example.com/mountain.jpg",
+            ),
+            SearchNote("logo", "Logo", "A studio logo.", "https://example.com/logo.jpg"),
+        ],
+        seed=1,
+        look=look,
+        fetch=lambda url: b"logo" if url.endswith("logo.jpg") else b"mountain",
+    )
+
+    instructions = " ".join(message["content"] for messages in seen for message in messages)
+    assert "Fill the gaps" in instructions
+    assert "Photo shows: a snowy mountain" in instructions
+    assert "a snowy mountain" in design.prompt
+    assert "a rabbit detective" in design.prompt
+    assert "roller" not in design.prompt
+    assert "train" not in design.prompt
+    assert design.lettering == "Get there eventually"
+    assert design.prompt.count("Get there eventually") == 1
+    assert "zoogether sleuth" not in design.prompt
+    assert design.reference_urls == ("https://example.com/mountain.jpg",)
+
+
+def test_a_failed_look_stays_on_the_article() -> None:
+    answers = iter(
+        [
+            json.dumps({"queries": ["expedition everest"]}),
+            json.dumps(
+                {
+                    "customer_line": None,
+                    "voice_found": False,
+                    "lettering": None,
+                    "subjects": "a roller coaster train",
+                    "references": [{"url": "https://example.com/mountain.jpg", "keep": True}],
+                }
+            ),
+        ]
+    )
+
+    design = research_personal_design(
+        "Expedition Everest",
+        complete=lambda _messages: next(answers),
+        search=lambda _query: [
+            SearchNote(
+                "expedition everest",
+                "Expedition Everest",
+                "Expedition Everest is a steel roller coaster.",
+                "https://example.com/mountain.jpg",
+            )
+        ],
+        seed=1,
+        look=lambda _image: PhotoLook("", keep=True),
+        fetch=lambda _url: b"mountain",
+    )
+
+    assert "roller coaster train" in design.prompt
+    assert "steel roller coaster" in design.prompt

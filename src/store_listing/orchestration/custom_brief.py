@@ -42,10 +42,16 @@ from store_listing.orchestration.json_response import extract_json_objects, repa
 from store_listing.orchestration.label_plates import plates_to_value
 from store_listing.orchestration.llm_client import (
     create_answer,
+    get_vision_client,
+    get_vision_model,
     is_model_missing_error,
     model_error_message,
 )
-from store_listing.orchestration.personal_design import research_personal_design, search_personal
+from store_listing.orchestration.personal_design import (
+    look_at_reference,
+    research_personal_design,
+    search_personal,
+)
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
@@ -505,6 +511,9 @@ def create_custom_brief(
             complete=lambda messages: _personal_answer(llm_completions, model, messages),
             search=search_personal,
             seed=_arrangement_seed(words),
+            look=lambda image: look_at_reference(
+                image, client=get_vision_client(), model=get_vision_model()
+            ),
         )
         brief = replace(
             brief,

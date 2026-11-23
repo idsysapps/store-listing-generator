@@ -957,10 +957,17 @@ class TestLiteralCustomWords:
         raw_response.headers = {}
         llm.with_raw_response.create.return_value = raw_response
 
+        looked: list[bytes] = []
+        monkeypatch.setattr(
+            "store_listing.orchestration.custom_brief.look_at_reference",
+            lambda image, **_kwargs: looked.append(image),
+        )
+
         result = create_custom_brief(db, llm, "model-x", "a groovy ghost", "dtf_apparel")
 
         assert result["status"] == "success"
         assert calls == []
+        assert looked == []
         assert llm.with_raw_response.create.call_count == 1
 
     def test_a_sellable_model_answer_that_names_a_brand_is_rejected_generically(self) -> None:

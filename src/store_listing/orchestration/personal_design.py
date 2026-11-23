@@ -46,16 +46,37 @@ _QUERY_SYSTEM = (
 _DESIGN_SYSTEM = (
     "You turn search notes into one DTF shirt graphic. Return JSON only with "
     "customer_line (the phrase inside double quotes, copied exactly, or null; "
-    "the picture description is not a line), "
+    "a list of names is not a line), "
     "voice_found (true only when the notes show how the subject speaks), "
-    "lettering (one new line in that voice for this sentence, or null), "
-    "subjects (how the named places, rides, characters, and objects look; "
-    "keep a character the customer named, in those words), and "
-    'references (up to six objects {"url", "keep"} for a clear photo of the '
-    "subject or the place). A logo, a poster, a map, a costume crowd, a tight "
-    "crop, or a photo full of unrelated people is keep false. Do not invent a "
-    "line when voice_found is false. Do not replace words the customer wrote."
+    "lettering (one short line that completes the idea in that voice, or null), "
+    "subjects (what the photos show; the article does not rename the photo; "
+    "keep a character the customer named, in those words), "
+    "additions (what the sentence asks for that the photos do not show, or null), "
+    'and references (up to six objects {"url", "keep"}). '
+    "Fill the gaps. A role such as sleuth is a character in the picture, not a "
+    "word on the shirt. Name the shirt subject from the photo. Do not replace "
+    "the photo with the article's object. A logo, a poster, a map, a costume "
+    "crowd, a tight crop, or a photo full of unrelated people is keep false. "
+    "Do not invent a line when voice_found is false. Do not print the customer's "
+    "sentence. Do not replace words the customer wrote when they asked for those "
+    "words on the shirt."
 )
+
+_LOOK_PROMPT = (
+    "Describe this one reference photo for a shirt graphic. Return JSON only: "
+    '{"look": "the main thing in the frame, then the rest", '
+    '"kind": "subject" or "logo" or "poster" or "crowd" or "unrelated"}. '
+    "kind is logo for a logo or a wordmark, poster for a poster or a title card, "
+    "crowd when the frame is full of people, and unrelated when it is not the subject."
+)
+
+
+@dataclass(frozen=True)
+class PhotoLook:
+    """What one reference photo actually shows."""
+
+    description: str
+    keep: bool = True
 
 
 @dataclass(frozen=True)
@@ -66,6 +87,8 @@ class SearchNote:
     title: str
     text: str
     image_url: str | None = None
+    look: str | None = None
+    look_keep: bool = True
 
 
 @dataclass(frozen=True)
@@ -333,11 +356,14 @@ def research_personal_design(
     complete: Callable[[list[dict[str, str]]], str],
     search: Callable[[str], list[SearchNote]],
     seed: int,
+    look: Callable[[bytes], PhotoLook] | None = None,
+    fetch: Callable[[str], bytes | None] | None = None,
 ) -> PersonalDesign:
-    """Search the sentence and turn the notes into one graphic.
+    """Search the sentence, look at the photos, and turn them into one graphic.
 
-    ``complete`` is one Qwen call. ``search`` is one query. Both are injected
-    so a test never touches the network.
+    ``complete`` is one Qwen call. ``search`` is one query. ``look`` describes
+    one downloaded photo. All three are injected so a test never touches the
+    network. A missing look keeps the text-only path.
     """
     named = list(specified_characters(sentence))
     role = character_role(sentence)
@@ -379,6 +405,8 @@ def research_personal_design(
             for note in role_notes
             if resolved.lower() in _title_text(note.title) or resolved.lower() in note.text.lower()
         )
+    if look is not None:
+        notes = _attach_looks(notes, look, fetch or fetch_reference)
 
     facts = tuple(_fact(note) for note in notes if _fact(note))
     design = _read_design(complete, sentence, notes)
@@ -404,28 +432,31 @@ def research_personal_design(
         quotes
         if quotes
         else resolve_lettering(
-            customer_line=design["customer_line"],
+            customer_line=_requested_line(design["customer_line"], sentence),
             proposed_line=design["lettering"],
             voice_found=bool(design["voice_found"]),
         )
     )
-    subjects = lock_characters(
-        _without_quotes(design["subjects"]).strip() or picture,
-        characters,
-    )
     urls = _merged_urls(character_notes, _reference_urls(design["references"], notes))
+    subject, from_photos = _drawn_subject(
+        _without_quotes(design["subjects"]).strip() or picture,
+        design["additions"],
+        _kept_looks(notes, urls),
+    )
+    subject = lock_characters(subject, characters)
+    image_facts = () if from_photos else facts
     return PersonalDesign(
         prompt=graphic_prompt(
-            subjects=subjects,
+            subjects=subject,
             lettering=None if quotes else lettering,
             arrangement=arrangement_line(seed),
-            facts=facts,
+            facts=image_facts,
             leave_text_blank=quotes is not None,
         ),
         lettering=lettering,
         reference_urls=urls,
-        facts=facts,
-        subjects=subjects,
+        facts=image_facts,
+        subjects=subject,
         customer_lettering=quotes is not None,
     )
 
@@ -626,6 +657,111 @@ def fetch_reference(url: str, *, client: httpx.Client | None = None) -> bytes | 
             http.close()
 
 
+def photo_look_from_answer(text: str) -> PhotoLook:
+    """The photo description in a vision answer. An unreadable answer is empty."""
+    parsed = _first_object(text)
+    if not isinstance(parsed, dict):
+        return PhotoLook("", keep=True)
+    look = parsed.get("look")
+    description = look.strip() if isinstance(look, str) else ""
+    kind = str(parsed.get("kind") or "subject").strip().lower()
+    return PhotoLook(description, keep=kind == "subject")
+
+
+def look_at_reference(image: bytes, *, client: Any, model: str) -> PhotoLook:
+    """What one reference photo shows. A failure is an empty look.
+
+    The brief still continues. An empty look leaves that photo on the text path.
+    """
+    from store_listing.orchestration.text_validation import encode_image_for_vision
+
+    try:
+        data_url = encode_image_for_vision(image)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": _LOOK_PROMPT},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+        )
+        content = response.choices[0].message.content or ""
+    except Exception:  # noqa: BLE001
+        logger.warning("The reference photo could not be described")
+        return PhotoLook("", keep=True)
+    return photo_look_from_answer(content)
+
+
+def _attach_looks(
+    notes: Sequence[SearchNote],
+    look: Callable[[bytes], PhotoLook],
+    fetch: Callable[[str], bytes | None],
+) -> list[SearchNote]:
+    """Describe up to six photos. A failed look leaves the note unchanged."""
+    described = 0
+    updated: list[SearchNote] = []
+    for note in notes:
+        if described >= MAX_REFERENCES or not note.image_url:
+            updated.append(note)
+            continue
+        described += 1
+        try:
+            data = fetch(note.image_url)
+        except Exception:  # noqa: BLE001
+            logger.warning("Reference image could not be fetched")
+            updated.append(note)
+            continue
+        if not data:
+            updated.append(note)
+            continue
+        try:
+            photo = look(data)
+        except Exception:  # noqa: BLE001
+            logger.warning("The reference photo could not be described")
+            updated.append(note)
+            continue
+        description = photo.description.strip()
+        if not description and photo.keep:
+            updated.append(note)
+            continue
+        updated.append(
+            replace(note, look=description or None, look_keep=bool(description and photo.keep))
+        )
+    return updated
+
+
+def _requested_line(customer_line: str | None, sentence: str) -> str | None:
+    """A list of topics is the request, not the words on the shirt."""
+    written = (customer_line or "").strip()
+    if not written:
+        return None
+    if "," in sentence and written.casefold() == sentence.strip().casefold():
+        return None
+    return written
+
+
+def _kept_looks(notes: Sequence[SearchNote], urls: Sequence[str]) -> tuple[str, ...]:
+    by_url = {note.image_url: note.look for note in notes if note.image_url and note.look}
+    return tuple(by_url[url] for url in urls if url in by_url)
+
+
+def _drawn_subject(
+    model_subjects: str, additions: str | None, looks: Sequence[str]
+) -> tuple[str, bool]:
+    """The shirt subject. A photo look wins over the article's name for it."""
+    shown = [item.strip().rstrip(".") for item in looks if item and item.strip()]
+    if not shown:
+        return model_subjects.strip(), False
+    extra = (additions or "").strip().rstrip(".")
+    if extra:
+        shown.append(extra)
+    return ". ".join(shown) + ".", True
+
+
 def _queries(complete: Callable[[list[dict[str, str]]], str], sentence: str) -> list[str]:
     raw = complete(
         [
@@ -646,10 +782,7 @@ def _read_design(
     sentence: str,
     notes: Sequence[SearchNote],
 ) -> dict[str, Any] | None:
-    note_text = "\n".join(
-        f"- {note.title}: {note.text}" + (f" image: {note.image_url}" if note.image_url else "")
-        for note in notes
-    )
+    note_text = "\n".join(_note_line(note) for note in notes)
     raw = complete(
         [
             {"role": "system", "content": _DESIGN_SYSTEM},
@@ -665,25 +798,43 @@ def _read_design(
     customer_line = parsed.get("customer_line")
     proposed = parsed.get("lettering")
     references = parsed.get("references")
+    additions = parsed.get("additions")
     return {
         "customer_line": customer_line if isinstance(customer_line, str) else None,
         "voice_found": bool(parsed.get("voice_found")),
         "lettering": proposed if isinstance(proposed, str) else None,
         "subjects": subjects,
+        "additions": additions if isinstance(additions, str) else None,
         "references": references if isinstance(references, list) else [],
     }
 
 
+def _note_line(note: SearchNote) -> str:
+    line = f"- {note.title}: {note.text}"
+    if note.look:
+        return f"{line} Photo shows: {note.look}"
+    if note.image_url:
+        return f"{line} image: {note.image_url}"
+    return line
+
+
 def _reference_urls(references: list[Any], notes: Sequence[SearchNote]) -> tuple[str, ...]:
+    rejected = {note.image_url for note in notes if note.image_url and not note.look_keep}
     chosen: list[Any] = references
     if not chosen:
-        chosen = [{"url": note.image_url, "keep": True} for note in notes if note.image_url]
+        chosen = [
+            {"url": note.image_url, "keep": True}
+            for note in notes
+            if note.image_url and note.image_url not in rejected
+        ]
     urls: list[str] = []
     for entry in chosen:
         if not isinstance(entry, dict) or entry.get("keep") is False:
             continue
         url = entry.get("url")
-        if isinstance(url, str) and url.strip() and url.strip() not in urls:
+        if not isinstance(url, str) or not url.strip() or url.strip() in rejected:
+            continue
+        if url.strip() not in urls:
             urls.append(url.strip())
     return tuple(urls[:MAX_REFERENCES])
 
