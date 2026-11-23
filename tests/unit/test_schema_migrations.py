@@ -121,6 +121,24 @@ class TestLabelPlatesMigration:
         assert "ADD COLUMN IF NOT EXISTS label_plates JSONB" in _migration_sql()
 
 
+class TestDesignReviewMigration:
+    def test_the_fresh_schema_carries_the_review_mark(self) -> None:
+        schema = FRESH_SCHEMA.read_text()
+        assert "review_status VARCHAR(20)" in schema
+        assert "rejection_reason TEXT" in schema
+        assert "rejected_at TIMESTAMP WITH TIME ZONE" in schema
+
+    def test_the_configured_schema_carries_the_review_mark(self) -> None:
+        schema = _schema_sql()
+        migration = _migration_sql()
+        assert "review_status VARCHAR(20)" in schema
+        assert "rejection_reason TEXT" in schema
+        assert "rejected_at TIMESTAMP WITH TIME ZONE" in schema
+        assert "ADD COLUMN IF NOT EXISTS review_status VARCHAR(20)" in migration
+        assert "ADD COLUMN IF NOT EXISTS rejection_reason TEXT" in migration
+        assert "ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP WITH TIME ZONE" in migration
+
+
 class TestImageAttentionMigration:
     def test_the_fresh_schema_carries_the_image_status(self) -> None:
         schema = FRESH_SCHEMA.read_text()

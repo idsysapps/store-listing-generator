@@ -9,6 +9,7 @@ import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefConnection;
 import com.trends.dto.DesignBriefOrderBy;
 import com.trends.dto.DesignBriefSummary;
+import com.trends.dto.DesignReviewFilter;
 import com.trends.dto.PageInfo;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
@@ -23,6 +24,8 @@ import org.eclipse.microprofile.graphql.Mutation;
 import org.eclipse.microprofile.graphql.Query;
 import org.jboss.logging.Logger;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -65,7 +68,7 @@ public class DesignBriefResolver {
             @DefaultValue("CREATED_AT_DESC") DesignBriefOrderBy orderBy) throws GraphQLException {
         return getDesignBriefs(
                 productType, batchId, startDate, endDate, minConfidence, maxConfidence,
-                sourceSeeds, specificProducts, audienceContains, null, limit, offset, orderBy);
+                sourceSeeds, specificProducts, audienceContains, null, null, limit, offset, orderBy);
     }
 
     @Query("designBriefs")
@@ -74,7 +77,9 @@ public class DesignBriefResolver {
             String startDate, String endDate,
             Integer minConfidence, Integer maxConfidence,
             List<String> sourceSeeds, List<String> specificProducts,
-            String audienceContains, String silhouette, int limit, @DefaultValue("0") int offset,
+            String audienceContains, String silhouette,
+            @DefaultValue("ALL") DesignReviewFilter reviewStatus,
+            int limit, @DefaultValue("0") int offset,
             @DefaultValue("CREATED_AT_DESC") DesignBriefOrderBy orderBy) throws GraphQLException {
         requireAuthentication();
 
@@ -89,11 +94,16 @@ public class DesignBriefResolver {
         String sil = nullIfEmpty(silhouette);
         List<String> ss = nullIfEmptyList(sourceSeeds);
         List<String> sp = nullIfEmptyList(specificProducts);
+        DesignReviewFilter review = reviewStatus == null ? DesignReviewFilter.ALL : reviewStatus;
+        boolean filtersByReview = review != DesignReviewFilter.ALL;
 
         LOG.debugf("Fetching design briefs: productType=%s, batchId=%s, limit=%d, offset=%d", pt, bi, effectiveLimit, effectiveOffset);
 
         if (effectiveLimit == 0) {
-            long totalCount = sil == null
+            long totalCount = filtersByReview
+                    ? designBriefRepository.countWithFilters(
+                            pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac, sil, review)
+                    : sil == null
                     ? designBriefRepository.countWithFilters(pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac)
                     : designBriefRepository.countWithFilters(pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac, sil);
             PageInfo pageInfo = new PageInfo(totalCount > 0, false, (int) totalCount);
@@ -112,19 +122,26 @@ public class DesignBriefResolver {
 
         DesignBriefOrderBy effectiveOrderBy = orderBy != null ? orderBy : DesignBriefOrderBy.CREATED_AT_DESC;
 
-        if (hasAdvancedFilters || (pt != null && bi != null) || pt != null || bi != null) {
-            briefs = sil == null
-                    ? designBriefRepository.findWithFilters(
-                            pt, bi, sd, ed, minConfidence, maxConfidence,
-                            ss, sp, ac, effectiveLimit, effectiveOffset, effectiveOrderBy)
-                    : designBriefRepository.findWithFilters(
-                            pt, bi, sd, ed, minConfidence, maxConfidence,
-                            ss, sp, ac, effectiveLimit, effectiveOffset, effectiveOrderBy, sil);
-            totalCount = sil == null
-                    ? designBriefRepository.countWithFilters(
-                            pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac)
-                    : designBriefRepository.countWithFilters(
-                            pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac, sil);
+        if (filtersByReview || hasAdvancedFilters || (pt != null && bi != null) || pt != null || bi != null) {
+            if (filtersByReview) {
+                briefs = designBriefRepository.findWithFilters(
+                        pt, bi, sd, ed, minConfidence, maxConfidence,
+                        ss, sp, ac, effectiveLimit, effectiveOffset, effectiveOrderBy, sil, review);
+                totalCount = designBriefRepository.countWithFilters(
+                        pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac, sil, review);
+            } else if (sil == null) {
+                briefs = designBriefRepository.findWithFilters(
+                        pt, bi, sd, ed, minConfidence, maxConfidence,
+                        ss, sp, ac, effectiveLimit, effectiveOffset, effectiveOrderBy);
+                totalCount = designBriefRepository.countWithFilters(
+                        pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac);
+            } else {
+                briefs = designBriefRepository.findWithFilters(
+                        pt, bi, sd, ed, minConfidence, maxConfidence,
+                        ss, sp, ac, effectiveLimit, effectiveOffset, effectiveOrderBy, sil);
+                totalCount = designBriefRepository.countWithFilters(
+                        pt, bi, sd, ed, minConfidence, maxConfidence, ss, ac, sil);
+            }
         } else {
             briefs = designBriefRepository.findRecentPaginated(effectiveLimit, effectiveOffset, effectiveOrderBy);
             totalCount = designBriefRepository.countAll();
@@ -205,6 +222,23 @@ public class DesignBriefResolver {
         return toSummary(brief);
     }
 
+    @Mutation("rejectDesign")
+    @Transactional
+    public DesignBriefSummary rejectDesign(int briefId, String reason) throws GraphQLException {
+        requireAuthentication();
+        DesignBrief brief = designBriefRepository.findById((long) briefId);
+        if (brief == null) {
+            return null;
+        }
+
+        String trimmed = reason == null ? "" : reason.trim();
+        brief.reviewStatus = "rejected";
+        brief.rejectionReason = trimmed.isEmpty() ? null : trimmed;
+        brief.rejectedAt = OffsetDateTime.now(ZoneOffset.UTC);
+        designBriefRepository.persist(brief);
+        return toSummary(brief);
+    }
+
     private void requireAuthentication() throws GraphQLException {
         if (securityIdentity == null || securityIdentity.isAnonymous()) {
             throw new GraphQLException("Authentication required");
@@ -238,6 +272,8 @@ public class DesignBriefResolver {
         summary.setListingDescription(brief.listingDescription);
         summary.setImageStatus(brief.imageStatus);
         summary.setImageError(brief.imageError);
+        summary.setReviewStatus(brief.reviewStatus);
+        summary.setRejectionReason(brief.rejectionReason);
         summary.setVoice(brief.voice);
         summary.setStylePreset(brief.stylePreset);
         summary.setFontFamily(brief.fontFamily);

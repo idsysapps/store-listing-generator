@@ -284,6 +284,34 @@ class TestDatabaseClient:
         sql = mock_cursor.execute.call_args[0][0]
         assert "needs_attention" in sql
 
+    def test_list_briefs_without_images_skips_a_rejected_design(self) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            DatabaseClient().list_briefs_without_images(product_types=["dtf_apparel"])
+            DatabaseClient().list_briefs_without_images()
+
+        for call in mock_cursor.execute.call_args_list:
+            sql = call[0][0]
+            assert "review_status IS NULL OR review_status <> 'rejected'" in sql
+
+    def test_list_briefs_for_reranking_skips_a_rejected_design(self) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = []
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        with patch.object(DatabaseClient, "connect", return_value=mock_conn):
+            DatabaseClient().list_briefs_for_reranking()
+
+        sql = mock_cursor.execute.call_args[0][0]
+        assert "review_status IS NULL OR review_status <> 'rejected'" in sql
+
     def test_update_brief_image_keys_marks_the_image_complete(self) -> None:
         mock_cursor = MagicMock()
         mock_conn = MagicMock()

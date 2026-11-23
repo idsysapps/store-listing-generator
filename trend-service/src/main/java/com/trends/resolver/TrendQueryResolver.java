@@ -196,6 +196,8 @@ public class TrendQueryResolver {
         summary.setSilhouette(brief.silhouette);
         summary.setImageStatus(brief.imageStatus);
         summary.setImageError(brief.imageError);
+        summary.setReviewStatus(brief.reviewStatus);
+        summary.setRejectionReason(brief.rejectionReason);
         summary.setRecommendedMaterials(
                 materialRecommendationReader.read(brief.recommendedMaterials));
         summary.setPreviewBackgroundColor(

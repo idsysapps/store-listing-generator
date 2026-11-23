@@ -197,6 +197,29 @@ class TrendQueryResolverTest {
     }
 
     @Test
+    void testGetTrendSummary_ExposesTheReviewMark() throws GraphQLException {
+        TrendQuery trendQuery = new TrendQuery("hoodie", "funny hoodie");
+        trendQuery.id = 1;
+        TrendScore score = new TrendScore(trendQuery, 75L, 10L, "US", "youtube");
+        DesignBrief brief = new DesignBrief();
+        brief.id = 1;
+        brief.concept = "Cool Hoodie Design";
+        brief.productType = "dtf_apparel";
+        brief.confidence = 80;
+        brief.reviewStatus = "rejected";
+        brief.rejectionReason = "the lettering is wrong";
+
+        when(trendQueryRepository.findByQuery("funny hoodie")).thenReturn(trendQuery);
+        when(trendQueryRepository.findLatestScoresByQueryId(1, 10)).thenReturn(List.of(score));
+        when(designBriefRepository.findBySeedKeyword("hoodie")).thenReturn(List.of(brief));
+
+        TrendSummary result = trendQueryResolver.getTrendSummary("funny hoodie");
+
+        assertEquals("rejected", result.getDesignBriefs().get(0).getReviewStatus());
+        assertEquals("the lettering is wrong", result.getDesignBriefs().get(0).getRejectionReason());
+    }
+
+    @Test
     void testGetTopTrends_HasDesignBriefsTrue_FiltersOnlyWithBriefs() throws GraphQLException {
         TrendQuery tq1 = new TrendQuery("hoodie", "cool hoodie");
         tq1.id = 1;

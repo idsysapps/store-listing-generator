@@ -79,6 +79,16 @@ public class DesignBrief extends PanacheEntityBase {
     @Column(name = "image_error", columnDefinition = "TEXT")
     public String imageError;
 
+    // An operator rejection. Null means the design is still in the working list.
+    @Column(name = "review_status", length = 20)
+    public String reviewStatus;
+
+    @Column(name = "rejection_reason", columnDefinition = "TEXT")
+    public String rejectionReason;
+
+    @Column(name = "rejected_at")
+    public OffsetDateTime rejectedAt;
+
     // The voice of the text of the design: 'deadpan', 'loud' or 'cozy'.
     @Column(name = "voice", length = 20)
     public String voice;

@@ -216,6 +216,10 @@ data:
         -- Whether the image is complete or needs operator attention.
         image_status VARCHAR(30),
         image_error TEXT,
+        -- An operator rejection. NULL means the design is still in the working list.
+        review_status VARCHAR(20),
+        rejection_reason TEXT,
+        rejected_at TIMESTAMP WITH TIME ZONE,
         -- How the design carries its words: 'type_hero', 'caption' or 'no_text'.
         copy_mode VARCHAR(20) DEFAULT 'caption',
         -- A short line above a typographic hero word.
@@ -535,6 +539,10 @@ data:
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS subtitle_text TEXT;
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS footer_text TEXT;
     ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS label_plates JSONB;
+    -- An operator rejection. NULL means the design is still in the working list.
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS review_status VARCHAR(20);
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+    ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP WITH TIME ZONE;
 
     -- Table: app_settings (the settings the operator can change without a
     -- redeploy, e.g. which product types the pipeline produces)

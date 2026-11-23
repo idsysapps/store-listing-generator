@@ -2,6 +2,7 @@ package com.trends.repository;
 
 import com.trends.domain.DesignBrief;
 import com.trends.dto.DesignBriefOrderBy;
+import com.trends.dto.DesignReviewFilter;
 import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -101,6 +102,19 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             List<String> sourceSeeds, List<String> specificProducts,
             String audienceContains, int limit, int offset,
             DesignBriefOrderBy orderBy, String silhouette) {
+        return findWithFilters(productType, batchId, startDate, endDate,
+                minConfidence, maxConfidence, sourceSeeds, specificProducts,
+                audienceContains, limit, offset, orderBy, silhouette, null);
+    }
+
+    public List<DesignBrief> findWithFilters(
+            String productType, String batchId,
+            String startDate, String endDate,
+            Integer minConfidence, Integer maxConfidence,
+            List<String> sourceSeeds, List<String> specificProducts,
+            String audienceContains, int limit, int offset,
+            DesignBriefOrderBy orderBy, String silhouette,
+            DesignReviewFilter reviewStatus) {
 
         boolean needsSourceJoin = sourceSeeds != null && !sourceSeeds.isEmpty();
 
@@ -152,6 +166,7 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             conditions.add("db.silhouette = :silhouette");
             params.put("silhouette", silhouette);
         }
+        addReviewCondition(conditions, reviewStatus);
 
         if (!conditions.isEmpty()) {
             jpql.append(" WHERE ");
@@ -194,6 +209,17 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             Integer minConfidence, Integer maxConfidence,
             List<String> sourceSeeds,
             String audienceContains, String silhouette) {
+        return countWithFilters(productType, batchId, startDate, endDate,
+                minConfidence, maxConfidence, sourceSeeds, audienceContains, silhouette, null);
+    }
+
+    public long countWithFilters(
+            String productType, String batchId,
+            String startDate, String endDate,
+            Integer minConfidence, Integer maxConfidence,
+            List<String> sourceSeeds,
+            String audienceContains, String silhouette,
+            DesignReviewFilter reviewStatus) {
 
         boolean needsSourceJoin = sourceSeeds != null && !sourceSeeds.isEmpty();
 
@@ -245,6 +271,7 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             conditions.add("db.silhouette = :silhouette");
             params.put("silhouette", silhouette);
         }
+        addReviewCondition(conditions, reviewStatus);
 
         if (!conditions.isEmpty()) {
             jpql.append(" WHERE ");
@@ -256,6 +283,14 @@ public class DesignBriefRepository implements PanacheRepository<DesignBrief> {
             query.setParameter(entry.getKey(), entry.getValue());
         }
         return query.getSingleResult();
+    }
+
+    private static void addReviewCondition(List<String> conditions, DesignReviewFilter reviewStatus) {
+        if (reviewStatus == DesignReviewFilter.ACTIVE) {
+            conditions.add("(db.reviewStatus IS NULL OR db.reviewStatus <> 'rejected')");
+        } else if (reviewStatus == DesignReviewFilter.REJECTED) {
+            conditions.add("db.reviewStatus = 'rejected'");
+        }
     }
 
     private boolean hasOverlap(String[] array, List<String> filter) {

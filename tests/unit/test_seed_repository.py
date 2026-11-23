@@ -320,6 +320,7 @@ def test_list_recent_brief_concepts_returns_the_stored_concepts() -> None:
     ]
     sql, params = cursor.executed_params[0]
     assert "design_briefs" in sql
+    assert "review_status" not in sql
     assert params == (30,)
 
 
