@@ -363,6 +363,29 @@ class TestGenerateImagesForBriefs:
         assert result["images_generated"] == 1
         assert result["errors"] == 1
 
+    def test_a_personal_dtf_brief_is_rendered_exactly_once_even_with_candidate_count_two(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("IMAGE_CANDIDATE_COUNT", "2")
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    product_type="dtf_apparel",
+                    personal_use=True,
+                    copy_mode="no_text",
+                    scene_description="Mickey Mouse beside Cinderella Castle.",
+                )
+            ]
+        )
+        comfyui = _comfyui_client(raw=_real_png(), transparent=_real_png())
+        comfyui.generate_qwen_image.return_value = ComfyUIResult(
+            image_bytes=_real_png(), prompt_id="q"
+        )
+
+        generate_images_for_briefs(db_client=db, comfyui_client=comfyui, s3_client=MagicMock())
+
+        assert comfyui.generate_qwen_image.call_count == 1
+
 
 class TestCaptionPlacement:
     def test_the_caption_is_moved_off_the_artwork_in_both_files(self) -> None:

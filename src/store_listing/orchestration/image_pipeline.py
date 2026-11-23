@@ -1421,6 +1421,7 @@ def _generate_best_candidate(
     rewritten_ids = rewritten_brief_ids if rewritten_brief_ids is not None else set()
     if (
         count <= 1
+        or brief.personal_use
         or brief.copy_mode == TYPE_HERO
         or template == "text_only"
         or not (brief.scene_description or "").strip()
