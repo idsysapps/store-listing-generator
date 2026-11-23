@@ -45,6 +45,7 @@ from store_listing.orchestration.llm_client import (
     is_model_missing_error,
     model_error_message,
 )
+from store_listing.orchestration.personal_design import research_personal_design, search_wikipedia
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
 
@@ -88,9 +89,15 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
             "(not for resale). The customer already wrote the design.\n\n"
         )
         personal_use_rules = (
-            "This is a personal item. Keep every name the customer wrote, including a "
-            "franchise, a character, a brand, or a place. The picture is drawn from those "
-            "words. When the customer asks for a lifelike picture, draw it lifelike.\n\n"
+            "This is a personal item, and it is a print-ready shirt graphic.\n"
+            "- concept and headline_text are the customer's words, copied exactly.\n"
+            "- scene_description is an isolated print of that same concept. Keep every "
+            "named character, place, and object. Do not swap one place for another and "
+            "do not replace a named character with a generic one.\n"
+            "- The garment is the background. No park, no sky, no ground, no backdrop, "
+            "and no full scene behind the subject.\n"
+            "- When the customer asks for a lifelike picture, the subject is lifelike "
+            "and still isolated.\n\n"
         )
         ip_rules = "Respond ONLY with valid JSON."
 
@@ -386,6 +393,44 @@ def parse_custom_brief_response(
     return brief
 
 
+def _arrangement_seed(words: str) -> int:
+    """A stable seed for the first arrangement of this sentence."""
+    return sum(ord(character) for character in words) or 1
+
+
+def _personal_answer(llm_completions: Any, model: str, messages: list[dict[str, str]]) -> str:
+    """One Qwen answer for the personal research step. A failure is empty."""
+    raw, error = create_answer(llm_completions, model, messages, "personal_design", temperature=0.7)
+    if error is not None or raw is None:
+        return ""
+    try:
+        response = raw.parse()
+    except Exception:  # noqa: BLE001
+        logger.warning("The personal design answer could not be read")
+        return ""
+    if not response.choices:
+        return ""
+    return response.choices[0].message.content or ""
+
+
+def _stored_text_plan(brief: DesignBrief, design: Any) -> dict[str, Any] | None:
+    """The text plan column. A personal graphic stores its research there.
+
+    There is no reference-image column. The urls, facts, and the one line ride
+    in the existing JSON so a later render can rearrange them.
+    """
+    if design is not None:
+        return {
+            "reference_urls": list(design.reference_urls),
+            "facts": list(design.facts),
+            "subjects": design.subjects,
+            "lettering": design.lettering,
+        }
+    if brief.text_plan is not None:
+        return brief.text_plan.to_dict()
+    return None
+
+
 def create_custom_brief(
     db_client: DesignBriefDBClient,
     llm_completions: Any,
@@ -452,15 +497,34 @@ def create_custom_brief(
         return {"status": "error", "error": f"The brief was not created: {reason}"}
 
     words = description.strip()
-    brief = replace(
-        brief,
-        concept=words,
-        headline_text=words,
-        scene_description=words,
-        tagline_text=None,
-        kicker_text=None,
-        personal_use=personal_use,
-    )
+    design = None
+    if personal_use:
+        design = research_personal_design(
+            words,
+            complete=lambda messages: _personal_answer(llm_completions, model, messages),
+            search=search_wikipedia,
+            seed=_arrangement_seed(words),
+        )
+        brief = replace(
+            brief,
+            concept=words,
+            headline_text=design.lettering,
+            scene_description=design.prompt,
+            tagline_text=None,
+            kicker_text=None,
+            copy_mode=NO_TEXT,
+            personal_use=True,
+        )
+    else:
+        brief = replace(
+            brief,
+            concept=words,
+            headline_text=words,
+            scene_description=words,
+            tagline_text=None,
+            kicker_text=None,
+            personal_use=False,
+        )
 
     # A single brief still gets a template, so the custom path does not always
     # come back as the same centred emblem (issue #238).
@@ -500,7 +564,7 @@ def create_custom_brief(
         voice=brief.voice,
         font_family=brief.font_family,
         style_preset=brief.style_preset,
-        text_plan=brief.text_plan.to_dict() if brief.text_plan else None,
+        text_plan=_stored_text_plan(brief, design),
         listing_description=brief.listing_description,
         label_plates=plates_to_value(brief.label_plates),
     )

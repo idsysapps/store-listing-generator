@@ -7,11 +7,9 @@ calls were removed in #111: the self-hosted DGX is the only generation path.
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 
 from store_listing.orchestration.art_direction import (
-    forbids_lifelike,
     negative_for,
     palette_allows_magenta,
     palette_phrase,
@@ -41,6 +39,11 @@ from store_listing.orchestration.design_templates import (
     canvas_size,
     composition_for,
     resolve_template,
+)
+from store_listing.orchestration.personal_design import (
+    arrangement_line,
+    fetch_reference,
+    graphic_prompt,
 )
 from store_listing.orchestration.scene_text import strip_lettering
 
@@ -228,31 +231,13 @@ def font_colour(brief: DesignBrief) -> str:
     return colour
 
 
-_LIFELIKE = re.compile(
-    r"\b(?:lifelike|realistic|photorealistic|photo-realistic|real life)\b",
-    re.IGNORECASE,
-)
-
-
-def _asks_for_lifelike(brief: DesignBrief) -> bool:
-    text = " ".join(
-        part
-        for part in (brief.concept, brief.headline_text, brief.scene_description)
-        if isinstance(part, str) and part.strip()
-    )
-    return _LIFELIKE.search(text) is not None
-
-
 def _picture_preset(brief: DesignBrief):
-    """The look sent to the image model.
-
-    A personal item that asks for a lifelike picture does not wear a look that
-    forbids one.
-    """
-    preset = preset_for(brief.style_preset)
-    if brief.personal_use and _asks_for_lifelike(brief) and forbids_lifelike(preset):
+    """The look sent to the image model."""
+    # A personal item keeps the concept the customer named. A style preset
+    # replaces that concept with a house look.
+    if brief.personal_use:
         return None
-    return preset
+    return preset_for(brief.style_preset)
 
 
 def build_flux_prompt(brief: DesignBrief) -> str:
@@ -293,7 +278,6 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     scene = _scene_for_prompt(brief)
     if not scene:
         raise PromptBuildError("the brief has no scene_description")
-    lifelike = brief.personal_use and _asks_for_lifelike(brief)
     if (
         brief.product_type == "dtf_apparel"
         and scene_fills_print_area(scene)
@@ -309,7 +293,14 @@ def build_flux_prompt(brief: DesignBrief) -> str:
 
     parts: list[str] = []
 
-    if silhouette is not None and not lifelike:
+    if brief.personal_use:
+        parts.append(
+            "Print-ready graphic of the subject only, isolated on a solid pure "
+            "magenta field. No park, no sky, no ground, no backdrop, no full scene. "
+            "The magenta is only the empty key."
+        )
+        parts.append(f"The concept stays intact: {scene}.")
+    elif silhouette is not None:
         # Flux Schnell ignores the negative prompt at cfg 1, and "on the garment"
         # makes it draw a person wearing the graphic. The positive prompt has
         # to say the picture is a flat graphic on magenta.
@@ -318,8 +309,6 @@ def build_flux_prompt(brief: DesignBrief) -> str:
             "No person, no body, no face, no hands, no clothing, no fabric, "
             "no collar, no sleeves, no mockup, no product photo."
         )
-    if brief.personal_use:
-        parts.append(f"Draw exactly what the customer described: {scene}.")
     parts.append(f"{DESIGN_ONLY}: {scene}.")
     if silhouette is None:
         # A flat graphic is told not to draw a person. A scene may include one,
@@ -338,13 +327,13 @@ def build_flux_prompt(brief: DesignBrief) -> str:
     # its own style.
     preset = _picture_preset(brief)
     look_parts = [text for text in (prompt_for(preset), palette_phrase(preset)) if text]
-    if preset is None and brief.visual_style:
+    if preset is None and brief.visual_style and not brief.personal_use:
         # The free style is only for briefs written before the presets. A
         # preset decides the look; letting the free text through made every
         # design the same flat clip-art (issue #227).
         look_parts.append(brief.visual_style)
     look = ", ".join(look_parts)
-    if silhouette is not None and not lifelike:
+    if silhouette is not None and not brief.personal_use:
         context = "flat vector graphic, spot colours, no photo"
     else:
         context = product_context
@@ -472,6 +461,27 @@ def build_negative_prompt(brief: DesignBrief) -> str:
     return f"{negative}, {EXCLUDED_IMAGE_TERMS}"
 
 
+def _personal_prompt(brief: DesignBrief, seed: int | None) -> str:
+    """The researched graphic, arranged again for this seed."""
+    if brief.design_subjects:
+        return graphic_prompt(
+            subjects=brief.design_subjects,
+            lettering=brief.design_lettering,
+            arrangement=arrangement_line(0 if seed is None else seed),
+            facts=brief.design_facts,
+        )
+    return (brief.scene_description or "").strip()
+
+
+def _reference_bytes(urls: tuple[str, ...]) -> list[bytes]:
+    images: list[bytes] = []
+    for url in urls[:6]:
+        data = fetch_reference(url)
+        if data is not None:
+            images.append(data)
+    return images
+
+
 def generate_image(
     brief: DesignBrief,
     *,
@@ -481,12 +491,20 @@ def generate_image(
 ) -> ImageResult:
     """Generate an image for a brief on the DGX.
 
+    A personal brief is drawn by FLUX.2 dev from the researched graphic and its
+    reference photos. Every other brief stays on Flux Schnell.
+
     ``dtf_apparel`` briefs get their background removed with BiRefNet on the DGX;
     the original render is kept in ``raw_bytes``. Failures never raise - they are
     reported through ``ImageResult.error``.
     """
     try:
-        prompt = build_flux_prompt(brief)
+        if brief.personal_use:
+            prompt = _personal_prompt(brief, seed)
+            if not prompt:
+                raise PromptBuildError("the brief has no scene_description")
+        else:
+            prompt = build_flux_prompt(brief)
     except PromptBuildError as error:
         logger.warning("Cannot build an image prompt for the brief: %s", error)
         return ImageResult(image_bytes=None, prompt="", error=str(error))
@@ -499,13 +517,20 @@ def generate_image(
     )
     width, height = canvas_size(template_id)
     try:
-        result = comfyui_client.generate_image(
-            prompt=prompt,
-            seed=seed,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-        )
+        if brief.personal_use:
+            result = comfyui_client.generate_flux2_image(
+                prompt=prompt,
+                reference_images=_reference_bytes(brief.reference_urls),
+                seed=seed,
+            )
+        else:
+            result = comfyui_client.generate_image(
+                prompt=prompt,
+                seed=seed,
+                negative_prompt=negative_prompt,
+                width=width,
+                height=height,
+            )
     except ComfyUIError as e:
         logger.warning("ComfyUI image generation failed: %s", e)
         return ImageResult(image_bytes=None, prompt=prompt, error=str(e))

@@ -178,11 +178,47 @@ def _recommended_materials(brief_row: dict[str, Any]) -> list[dict[str, Any]] | 
     return value if isinstance(value, list) else None
 
 
+def _personal_research(value: Any) -> dict[str, Any]:
+    """Reference urls, facts, subjects, and the one line stored on a personal brief."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(value, dict) or not isinstance(value.get("subjects"), str):
+        return {}
+    raw_urls = value.get("reference_urls")
+    urls = (
+        tuple(url.strip() for url in raw_urls if isinstance(url, str) and url.strip())
+        if isinstance(raw_urls, list)
+        else ()
+    )
+    raw_facts = value.get("facts")
+    facts = (
+        tuple(fact.strip() for fact in raw_facts if isinstance(fact, str) and fact.strip())
+        if isinstance(raw_facts, list)
+        else ()
+    )
+    lettering = value.get("lettering")
+    return {
+        "reference_urls": urls,
+        "facts": facts,
+        "subjects": value["subjects"].strip(),
+        "lettering": lettering.strip()
+        if isinstance(lettering, str) and lettering.strip()
+        else None,
+    }
+
+
 def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
-    # The scene is stripped of the words it asks the image model to spell: a
-    # scene that is only words leaves nothing to draw, and the design falls
-    # back to typography (issue #208).
-    scene = strip_lettering((brief_row.get("scene_description") or "").strip())
+    personal = bool(brief_row.get("personal_use"))
+    research = _personal_research(brief_row.get("text_plan")) if personal else {}
+    scene = (brief_row.get("scene_description") or "").strip()
+    if not personal:
+        # The scene is stripped of the words it asks the image model to spell: a
+        # scene that is only words leaves nothing to draw, and the design falls
+        # back to typography (issue #208). A personal graphic keeps its one line.
+        scene = strip_lettering(scene)
     voice = brief_row.get("voice") or DEFAULT_VOICE
     # The type follows the look, so a design that is rendered in another look
     # is drawn in the type of that look (issue #228).
@@ -240,7 +276,11 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         subtitle_text=subtitle_text,
         footer_text=footer_text,
         label_plates=plates_from_value(brief_row.get("label_plates")),
-        personal_use=bool(brief_row.get("personal_use")),
+        personal_use=personal,
+        reference_urls=research.get("reference_urls", ()),
+        design_facts=research.get("facts", ()),
+        design_subjects=research.get("subjects"),
+        design_lettering=research.get("lettering"),
     )
 
 
@@ -1110,7 +1150,7 @@ def _generate_single_brief(
         # (issue #208). A no-text design has no compositor pass, so the same
         # check is inverted: an explicit "no lettering" verdict is the only
         # pass, and lettering is the design failing (issue #258).
-        if artwork_text_validator is not None:
+        if artwork_text_validator is not None and not brief.personal_use:
             if copy_mode == NO_TEXT:
                 no_text = artwork_text_validator.validate_no_text(
                     result.raw_bytes or result.image_bytes,

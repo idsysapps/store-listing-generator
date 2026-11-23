@@ -332,6 +332,12 @@ class DesignBrief:
     label_plates: tuple[LabelPlate, ...] = ()
     # A personal item keeps the customer's words, including a franchise name.
     personal_use: bool = False
+    # Reference photos and the facts behind a personal graphic. They are not
+    # their own columns: they ride in the text_plan JSON and are read back here.
+    reference_urls: tuple[str, ...] = ()
+    design_facts: tuple[str, ...] = ()
+    design_subjects: str | None = None
+    design_lettering: str | None = None
 
     @property
     def garment_material(self) -> dict[str, Any] | None:

@@ -534,6 +534,46 @@ class TestGenerateImage:
         assert alpha.crop((20, 20, 21, 21)).tobytes()[0] > 200
         client.remove_background.assert_not_called()
 
+
+class TestPersonalFlux2:
+    def test_a_personal_brief_uses_flux2_and_not_schnell(self) -> None:
+        client = _client()
+        client.generate_flux2_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="f")
+        brief = _make_brief(
+            personal_use=True,
+            product_type="sublimation",
+            design_subjects="a tall Gungan beside a round freighter",
+            design_lettering="Mesa so very, very thankful!",
+            design_facts=("Jar Jar speaks in a Gungan voice.",),
+        )
+
+        generate_image(brief, comfyui_client=client, seed=2)
+
+        client.generate_image.assert_not_called()
+        call = client.generate_flux2_image.call_args.kwargs
+        assert call["seed"] == 2
+        assert "solid pure magenta" in call["prompt"]
+        assert call["prompt"].count("Mesa so very, very thankful!") == 1
+        assert "Jar Jar speaks in a Gungan voice." in call["prompt"]
+
+    def test_a_sellable_brief_stays_on_flux_schnell(self) -> None:
+        client = _client()
+
+        generate_image(_make_brief(), comfyui_client=client, seed=1)
+
+        client.generate_image.assert_called_once()
+        client.generate_flux2_image.assert_not_called()
+
+    def test_a_personal_dtf_graphic_is_cut_out(self) -> None:
+        client = _client()
+        client.generate_flux2_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="f")
+        brief = _make_brief(personal_use=True, scene_description="a tall Gungan on magenta")
+
+        result = generate_image(brief, comfyui_client=client)
+
+        client.remove_background.assert_called_once()
+        assert result.background_removed is True
+
     def test_the_seed_is_passed_through(self) -> None:
         client = _client()
         brief = _make_brief(layout_type="full_bleed", headline_text=None)
@@ -585,14 +625,19 @@ class TestTheLookOfTheDesign:
             silhouette="flat_icon",
             concept="lifelike Disney Zootopia characters",
             headline_text="lifelike Disney Zootopia characters",
-            scene_description="lifelike Disney Zootopia characters",
+            scene_description=(
+                "Isolated print artwork of lifelike Disney Zootopia characters. "
+                "Subject only: no park, no sky, no ground, no backdrop."
+            ),
         )
 
         prompt = build_flux_prompt(brief)
         negative = build_negative_prompt(brief)
 
-        assert "Draw exactly what the customer described" in prompt
+        assert "The concept stays intact" in prompt
         assert "lifelike Disney Zootopia characters" in prompt
+        assert "no backdrop" in prompt.lower()
+        assert "no park" in prompt.lower()
         assert "kawaii" not in prompt.lower()
         assert "spot colours, no photo" not in prompt.lower()
         assert "no face" not in prompt.lower()
