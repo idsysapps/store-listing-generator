@@ -467,9 +467,10 @@ def _personal_prompt(brief: DesignBrief, seed: int | None) -> str:
     if brief.design_subjects:
         return graphic_prompt(
             subjects=brief.design_subjects,
-            lettering=brief.design_lettering,
+            lettering=None if brief.customer_lettering else brief.design_lettering,
             arrangement=arrangement_line(0 if seed is None else seed),
             facts=brief.design_facts,
+            leave_text_blank=brief.customer_lettering,
         )
     return (brief.scene_description or "").strip()
 

@@ -208,6 +208,7 @@ def _personal_research(value: Any) -> dict[str, Any]:
         "lettering": lettering.strip()
         if isinstance(lettering, str) and lettering.strip()
         else None,
+        "customer_lettering": value.get("customer_lettering") is True,
     }
 
 
@@ -282,6 +283,7 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         design_facts=research.get("facts", ()),
         design_subjects=research.get("subjects"),
         design_lettering=research.get("lettering"),
+        customer_lettering=bool(research.get("customer_lettering")),
     )
 
 

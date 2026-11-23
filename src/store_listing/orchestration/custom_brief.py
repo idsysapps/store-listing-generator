@@ -50,7 +50,7 @@ from store_listing.orchestration.llm_client import (
 from store_listing.orchestration.personal_design import (
     look_at_reference,
     research_personal_design,
-    search_wikipedia,
+    search_personal,
 )
 from store_listing.orchestration.scene_text import strip_lettering
 from store_listing.orchestration.seed_curation import PRODUCT_TAGS, _log_llm_response
@@ -431,6 +431,7 @@ def _stored_text_plan(brief: DesignBrief, design: Any) -> dict[str, Any] | None:
             "facts": list(design.facts),
             "subjects": design.subjects,
             "lettering": design.lettering,
+            "customer_lettering": design.customer_lettering,
         }
     if brief.text_plan is not None:
         return brief.text_plan.to_dict()
@@ -508,7 +509,7 @@ def create_custom_brief(
         design = research_personal_design(
             words,
             complete=lambda messages: _personal_answer(llm_completions, model, messages),
-            search=search_wikipedia,
+            search=search_personal,
             seed=_arrangement_seed(words),
             look=lambda image: look_at_reference(
                 image, client=get_vision_client(), model=get_vision_model()
@@ -521,7 +522,7 @@ def create_custom_brief(
             scene_description=design.prompt,
             tagline_text=None,
             kicker_text=None,
-            copy_mode=NO_TEXT,
+            copy_mode=CAPTION if design.customer_lettering else NO_TEXT,
             personal_use=True,
         )
     else:
