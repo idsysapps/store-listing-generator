@@ -107,6 +107,7 @@ secrets:
   jwtSecretName: ""
   jwtIssuer: https://costbook.com
   apifyApiToken: ""
+  braveApiKey: ""
   githubToken: ""
   youtubeApiKey: ""
   etsyApiKey: ""
