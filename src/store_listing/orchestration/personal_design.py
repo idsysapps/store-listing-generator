@@ -22,7 +22,7 @@ from store_listing.orchestration.json_response import extract_json_objects
 logger = logging.getLogger(__name__)
 
 MAX_REFERENCES: int = 6
-MAX_QUERIES: int = 4
+MAX_QUERIES: int = 6
 _USER_AGENT = "store-listing-generator/1.0 (personal design research)"
 _QUOTED = re.compile(r"“([^”\n]{1,120})”|\"([^\"\n]{1,120})\"")
 _NAME = r"[A-Z][\w'.-]*"
@@ -55,10 +55,13 @@ _DESIGN_SYSTEM = (
     "a list of names is not a line), "
     "voice_found (true only when the notes show how the subject speaks), "
     "lettering (one short line that completes the idea in that voice, or null), "
-    "subjects (what the notes and photos show, blended with any holiday or season "
-    "the customer named; when the notes include a holiday search, weave its visual "
-    "imagery into subjects alongside the other subjects; the article does not rename "
-    "the photo; keep a character the customer named, in those words), "
+    "subjects (a cohesive scene description that integrates every named character, "
+    "ride, place, and element the customer listed into a unified composition; "
+    "describe how the elements appear together and interact in the scene — do not "
+    "list items separately; weave in any holiday or seasonal imagery so it feels "
+    "thematic, not added; every named element from the customer's list must appear "
+    "and be doing something in the scene; the article does not rename the photo; "
+    "keep a character the customer named in those words), "
     "additions (what the sentence asks for that the photos do not show, or null), "
     'and references (up to six objects {"url", "keep"}). '
     "Fill the gaps. A role such as sleuth is a character in the picture, not a "
@@ -443,6 +446,35 @@ def _missing_holidays(sentence: str, subjects: str) -> list[str]:
     ]
 
 
+def _missing_query_subjects(
+    queries: Sequence[str],
+    subjects: str,
+    characters: Sequence[str],
+    sentence: str,
+) -> list[str]:
+    """Named elements from searched queries absent from both subjects and the character lock.
+
+    Holiday terms are handled separately by _missing_holidays.
+    The sentence itself (when used as a fallback query) is never a missing element.
+    """
+    lower_subjects = subjects.lower()
+    char_keys = {c.lower() for c in characters}
+    sentence_lower = sentence.lower().strip()
+    missing: list[str] = []
+    for query in queries:
+        q_lower = query.lower().strip()
+        if not q_lower or q_lower == sentence_lower:
+            continue
+        if any(holiday in q_lower for holiday in _HOLIDAY_TERMS):
+            continue
+        if q_lower in char_keys:
+            continue
+        if q_lower in lower_subjects:
+            continue
+        missing.append(query)
+    return missing
+
+
 def arrangement_line(seed: int) -> str:
     """One arrangement of the same facts. A new seed is a new arrangement."""
     return _ARRANGEMENTS[seed % len(_ARRANGEMENTS)]
@@ -797,6 +829,10 @@ def research_personal_design(
         if missed:
             holiday_text = " and ".join(t.title() for t in missed)
             subjects = f"{subjects} The scene is {holiday_text}-themed."
+        missed_elements = _missing_query_subjects(queries, subjects, characters, sentence)
+        if missed_elements:
+            elements_text = ", ".join(missed_elements)
+            subjects = f"{subjects} Also weave in {elements_text}."
         return PersonalDesign(
             prompt=graphic_prompt(
                 subjects=subjects,
@@ -840,6 +876,12 @@ def research_personal_design(
     if missed:
         holiday_text = " and ".join(t.title() for t in missed)
         subject = f"{subject} The scene is {holiday_text}-themed."
+    # Fallback: if any named element the customer listed (and that was searched)
+    # is absent from subjects, weave it back in so the image model includes it.
+    missed_elements = _missing_query_subjects(queries, subject, characters, sentence)
+    if missed_elements:
+        elements_text = ", ".join(missed_elements)
+        subject = f"{subject} Also weave in {elements_text}."
     image_facts = () if from_photos else facts
     return PersonalDesign(
         prompt=graphic_prompt(
