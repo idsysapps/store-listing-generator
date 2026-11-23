@@ -15,6 +15,15 @@ from store_listing.orchestration.custom_brief import (
 from store_listing.orchestration.llm_client import LLM_MAX_TOKENS
 
 
+@pytest.fixture(autouse=True)
+def _no_live_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Personal research must not call Wikipedia from a unit test."""
+    monkeypatch.setattr(
+        "store_listing.orchestration.custom_brief.search_wikipedia",
+        lambda _query: [],
+    )
+
+
 class _ApiError(Exception):
     """An error that carries an HTTP status, like the OpenAI SDK raises."""
 
@@ -593,7 +602,8 @@ class TestPersonalUsePrompt:
         )
         system_msg = messages[0]["content"]
         assert "PERSONAL ITEM" in system_msg
-        assert "Keep every name the customer wrote" in system_msg
+        assert "copied exactly" in system_msg
+        assert "no backdrop" in system_msg
         assert "Do not use licensed IP" not in system_msg
 
     def test_personal_use_prompt_does_not_forbid_ip(self) -> None:
@@ -784,8 +794,11 @@ class TestACutAnswer:
         assert result["brief_id"] == 42
         call_kwargs = db.insert_design_brief.call_args.kwargs
         assert call_kwargs["concept"] == "thanksgiving disney shirt"
-        assert call_kwargs["headline_text"] == "thanksgiving disney shirt"
-        assert call_kwargs["scene_description"] == "thanksgiving disney shirt"
+        assert call_kwargs["headline_text"] is None
+        assert "thanksgiving disney shirt" in call_kwargs["scene_description"]
+        assert "no backdrop" in call_kwargs["scene_description"]
+        assert "solid pure magenta" in call_kwargs["scene_description"]
+        assert call_kwargs["copy_mode"] == "no_text"
         assert call_kwargs["voice"] == "loud"
         assert call_kwargs["style_preset"] == "distressed_band_tee"
 
@@ -884,9 +897,39 @@ class TestLiteralCustomWords:
         assert result["status"] == "success"
         stored = db.insert_design_brief.call_args.kwargs
         assert stored["concept"] == words
-        assert stored["headline_text"] == words
-        assert stored["scene_description"] == words
+        assert stored["headline_text"] is None
+        assert words in stored["scene_description"]
+        assert "no backdrop" in stored["scene_description"]
+        assert "solid pure magenta" in stored["scene_description"]
+        assert "five cute animals" not in stored["scene_description"]
+        assert stored["copy_mode"] == "no_text"
         assert stored["personal_use"] is True
+        assert stored["text_plan"]["subjects"] == words
+
+    def test_a_sellable_brief_does_not_research(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[str] = []
+        monkeypatch.setattr(
+            "store_listing.orchestration.custom_brief.search_wikipedia",
+            lambda query: calls.append(query) or [],
+        )
+        db = MagicMock()
+        db.insert_design_brief.return_value = 7
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response()
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        result = create_custom_brief(db, llm, "model-x", "a groovy ghost", "dtf_apparel")
+
+        assert result["status"] == "success"
+        assert calls == []
+        assert llm.with_raw_response.create.call_count == 1
 
     def test_a_sellable_model_answer_that_names_a_brand_is_rejected_generically(self) -> None:
         db = MagicMock()

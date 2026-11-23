@@ -6,6 +6,7 @@ from typing import Any
 
 from store_listing.orchestration.comfyui_workflows import (
     build_birefnet_background_graph,
+    build_flux2_dev_txt2img_graph,
     build_flux_txt2img_graph,
     build_qwen_image_txt2img_graph,
 )
@@ -276,3 +277,35 @@ class TestQwenImageTxt2ImgGraph:
 
     def test_is_deterministic(self) -> None:
         assert self._graph() == self._graph()
+
+
+class TestFlux2DevGraph:
+    def test_a_prompt_without_references_has_no_negative_and_no_reference(self) -> None:
+        graph = build_flux2_dev_txt2img_graph(prompt="a red apple", seed=7)
+
+        class_types = [node["class_type"] for node in graph.values()]
+        assert class_types.count("CLIPTextEncode") == 1
+        assert "ReferenceLatent" not in class_types
+        assert graph["1"]["inputs"]["unet_name"] == "flux2_dev_fp8mixed.safetensors"
+        assert graph["2"]["inputs"]["type"] == "flux2"
+        assert graph["2"]["inputs"]["clip_name"] == "mistral_3_small_flux2_fp8.safetensors"
+        assert graph["3"]["inputs"]["vae_name"] == "flux2-vae.safetensors"
+        guidance = next(node for node in graph.values() if node["class_type"] == "FluxGuidance")
+        assert guidance["inputs"]["guidance"] == 5.0
+        assert guidance["inputs"]["conditioning"] == ["4", 0]
+        scheduler = next(node for node in graph.values() if node["class_type"] == "Flux2Scheduler")
+        assert scheduler["inputs"]["steps"] == 20
+
+    def test_each_reference_is_chained(self) -> None:
+        graph = build_flux2_dev_txt2img_graph(
+            prompt="a gungan",
+            seed=7,
+            reference_images=("jar.jpg", "ship.jpg"),
+        )
+
+        references = [node for node in graph.values() if node["class_type"] == "ReferenceLatent"]
+        assert len(references) == 2
+        assert references[0]["inputs"]["conditioning"] == ["4", 0]
+        assert references[1]["inputs"]["conditioning"] == ["8", 0]
+        guidance = next(node for node in graph.values() if node["class_type"] == "FluxGuidance")
+        assert guidance["inputs"]["conditioning"] == ["12", 0]

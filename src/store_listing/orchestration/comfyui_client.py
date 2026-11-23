@@ -31,7 +31,14 @@ from store_listing.orchestration.chroma_key import (
     punch_out_key_colour,
 )
 from store_listing.orchestration.comfyui_workflows import (
+    FLUX2_CLIP_NAME,
+    FLUX2_HEIGHT,
+    FLUX2_STEPS,
+    FLUX2_UNET_NAME,
+    FLUX2_VAE_NAME,
+    FLUX2_WIDTH,
     build_birefnet_background_graph,
+    build_flux2_dev_txt2img_graph,
     build_flux_txt2img_graph,
     build_qwen_image_txt2img_graph,
 )
@@ -261,6 +268,39 @@ class ComfyUIClient:
             vae_name=vae_name or self._vae_name,
         )
         return self._run_graph(graph, seed=actual_seed)
+
+    def generate_flux2_image(
+        self,
+        *,
+        prompt: str,
+        reference_images: list[bytes] | None = None,
+        seed: int | None = None,
+        width: int = FLUX2_WIDTH,
+        height: int = FLUX2_HEIGHT,
+        steps: int = FLUX2_STEPS,
+    ) -> ComfyUIResult:
+        """Draw a personal graphic with FLUX.2 dev and its reference photos.
+
+        A referenced 20-step image takes about four minutes on the DGX, so the
+        wait is longer than a Flux Schnell render.
+        """
+        actual_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
+        names: list[str] = []
+        for image in reference_images or []:
+            uploaded = self._upload_image(image)
+            names.append(uploaded["name"])
+        graph = build_flux2_dev_txt2img_graph(
+            prompt=prompt,
+            seed=actual_seed,
+            reference_images=names,
+            width=width,
+            height=height,
+            steps=steps,
+            unet_name=FLUX2_UNET_NAME,
+            clip_name=FLUX2_CLIP_NAME,
+            vae_name=FLUX2_VAE_NAME,
+        )
+        return self._run_graph(graph, seed=actual_seed, timeout_seconds=600)
 
     def generate_qwen_image(
         self,

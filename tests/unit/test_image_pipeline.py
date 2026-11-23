@@ -244,6 +244,45 @@ class TestGenerateImagesForBriefs:
         call_kwargs = db.update_brief_image_keys.call_args.kwargs
         assert "transparent" in call_kwargs["image_key_transparent"]
 
+    def test_a_personal_brief_is_drawn_by_flux2_with_its_line(self) -> None:
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    product_type="dtf_apparel",
+                    personal_use=True,
+                    copy_mode="no_text",
+                    scene_description=(
+                        "Shirt print. One line of lettering, spelled exactly: "
+                        '"Mesa so very, very thankful!"'
+                    ),
+                    text_plan={
+                        "subjects": "a tall Gungan",
+                        "facts": ["Jar Jar speaks in a Gungan voice."],
+                        "lettering": "Mesa so very, very thankful!",
+                        "reference_urls": [],
+                    },
+                )
+            ]
+        )
+        comfyui = _comfyui_client()
+        comfyui.generate_flux2_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="f")
+        lettering = _artwork_text_validator(True)
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=MagicMock(),
+            bucket="test-bucket",
+            artwork_text_validator=lettering,
+        )
+
+        assert result["images_generated"] == 1
+        comfyui.generate_image.assert_not_called()
+        prompt = comfyui.generate_flux2_image.call_args.kwargs["prompt"]
+        assert prompt.count("Mesa so very, very thankful!") == 1
+        lettering.validate.assert_not_called()
+        lettering.validate_no_text.assert_not_called()
+
     def test_a_background_removal_failure_still_uploads_the_raw_image(self) -> None:
         db = _mock_db_client(briefs=[_brief(product_type="dtf_apparel")])
         comfyui = _comfyui_client()
