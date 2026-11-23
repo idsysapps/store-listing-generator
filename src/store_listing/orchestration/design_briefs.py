@@ -400,7 +400,42 @@ class DesignBriefDBClient(Protocol):
         subtitle_text: str | None = None,
         footer_text: str | None = None,
         label_plates: list[dict[str, Any]] | None = None,
+        image_status: str | None = None,
     ) -> int: ...
+
+    def update_design_brief(
+        self,
+        brief_id: int,
+        *,
+        concept: str,
+        product_type: str,
+        specific_products: list[str],
+        audience: str,
+        visual_style: str,
+        confidence: int,
+        reasoning: str,
+        llm_model: str,
+        batch_id: str,
+        layout_type: str = "full_bleed",
+        headline_text: str | None = None,
+        tagline_text: str | None = None,
+        copy_mode: str = CAPTION,
+        kicker_text: str | None = None,
+        font_color: str | None = None,
+        scene_description: str | None = None,
+        personal_use: bool = False,
+        voice: str = DEFAULT_VOICE,
+        font_family: str | None = None,
+        style_preset: str | None = None,
+        text_plan: dict[str, Any] | None = None,
+        listing_description: str | None = None,
+        label_plates: list[dict[str, Any]] | None = None,
+        image_status: str = "pending",
+    ) -> None: ...
+
+    def update_brief_image_status(
+        self, brief_id: int, status: str, error: str | None = None
+    ) -> None: ...
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None: ...
 

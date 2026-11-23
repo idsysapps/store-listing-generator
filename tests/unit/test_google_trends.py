@@ -283,6 +283,8 @@ class TestDatabaseClient:
 
         sql = mock_cursor.execute.call_args[0][0]
         assert "needs_attention" in sql
+        assert "preparing" in sql
+        assert "batch_id <> 'custom'" in sql
 
     def test_update_brief_image_keys_marks_the_image_complete(self) -> None:
         mock_cursor = MagicMock()

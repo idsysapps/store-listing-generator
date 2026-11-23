@@ -6,7 +6,9 @@ from store_listing.orchestration.image_progress import (
     ImageStatus,
     estimate,
     image_status,
+    publish_status,
     publishing,
+    status_key,
 )
 
 
@@ -82,6 +84,53 @@ def test_a_sellable_render_uses_the_short_budget() -> None:
     assert remaining == 60
 
 
+def test_a_personal_brief_starts_with_research_and_the_render() -> None:
+    total, remaining = estimate(elapsed=0, phase="writing", personal=True)
+
+    # writing 40, research 50, study 40, planning 30, sampling 240, cut 40
+    assert total == 440
+    assert remaining == 440
+
+
+def test_writing_counts_down_and_keeps_the_later_work() -> None:
+    total, remaining = estimate(elapsed=10, phase="writing", personal=True)
+
+    assert total == 440
+    assert remaining == 430
+
+
+def test_a_long_writing_phase_keeps_the_later_work_ahead() -> None:
+    total, remaining = estimate(elapsed=50, phase="writing", personal=True)
+
+    assert total == 450
+    assert remaining == 400
+
+
+def test_a_sellable_brief_skips_research_and_study() -> None:
+    total, remaining = estimate(elapsed=0, phase="writing", personal=False)
+
+    # writing 40, planning 35, sampling 20, cut 40
+    assert total == 135
+    assert remaining == 135
+
+
+def test_research_counts_the_searches_without_changing_the_budget() -> None:
+    status = image_status(
+        brief_id=7,
+        phase="researching",
+        elapsed=40,
+        personal=True,
+        step=2,
+        total_steps=4,
+        phase_elapsed=0,
+    )
+
+    assert status.step == 2
+    assert status.total_steps == 4
+    assert status.remaining_seconds == 400
+    assert status.estimated_total_seconds == 440
+
+
 def test_status_json_uses_the_names_the_subscription_reads() -> None:
     status = image_status(
         brief_id=12,
@@ -124,6 +173,62 @@ def test_the_watch_counts_from_the_start_and_freezes_sampling_at_the_cut() -> No
     assert published[1].remaining_seconds == 40
     assert published[2].estimated_total_seconds == 60
     assert published[2].remaining_seconds == 0
+
+
+class _MemoryRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.messages: list[tuple[str, str]] = []
+
+    def publish(self, channel: str, payload: str) -> None:
+        self.messages.append((channel, payload))
+
+    def set(self, key: str, value: str) -> None:
+        self.values[key] = value
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+
+def test_publish_keeps_the_latest_status_for_a_late_subscriber() -> None:
+    client = _MemoryRedis()
+    status = image_status(brief_id=12, phase="writing", elapsed=0, personal=True)
+
+    publish_status(client, status)
+
+    assert client.messages[0][0] == CHANNEL
+    stored = ImageStatus.from_json(client.values[status_key(12)])
+    assert stored.phase == "writing"
+    assert stored.remaining_seconds == 440
+
+
+def test_the_image_task_keeps_the_original_elapsed_time() -> None:
+    client = _MemoryRedis()
+    now = {"t": 1000.0}
+    published: list[ImageStatus] = []
+    first = GenerationWatch(
+        7,
+        personal=True,
+        publish=published.append,
+        clock=lambda: now["t"],
+        client=client,
+    )
+    first.phase("writing")
+
+    now["t"] = 1200.0
+    published.clear()
+    second = GenerationWatch(
+        7,
+        personal=True,
+        publish=published.append,
+        clock=lambda: now["t"],
+        client=client,
+    )
+    second.phase("sampling")
+
+    assert published[0].phase == "sampling"
+    assert published[0].elapsed_seconds == 200
+    assert published[0].remaining_seconds == 280
 
 
 def test_a_redis_outage_does_not_stop_the_render() -> None:
