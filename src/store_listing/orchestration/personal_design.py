@@ -43,7 +43,10 @@ _QUERY_SYSTEM = (
     "searched by that place name so the article can name the icons that belong "
     "there. A place or a ride is not a movie. Do not merge two names into one "
     "search. At most four queries. Do not guess a name. Search the role the "
-    "customer wrote, and do not search a character you are naming from memory."
+    "customer wrote, and do not search a character you are naming from memory. "
+    "If the sentence names a holiday or seasonal event such as Thanksgiving or "
+    "Christmas, give that holiday its own search query so its imagery appears "
+    "in the notes."
 )
 
 _DESIGN_SYSTEM = (
@@ -52,8 +55,10 @@ _DESIGN_SYSTEM = (
     "a list of names is not a line), "
     "voice_found (true only when the notes show how the subject speaks), "
     "lettering (one short line that completes the idea in that voice, or null), "
-    "subjects (what the photos show; the article does not rename the photo; "
-    "keep a character the customer named, in those words), "
+    "subjects (what the notes and photos show, blended with any holiday or season "
+    "the customer named; when the notes include a holiday search, weave its visual "
+    "imagery into subjects alongside the other subjects; the article does not rename "
+    "the photo; keep a character the customer named, in those words), "
     "additions (what the sentence asks for that the photos do not show, or null), "
     'and references (up to six objects {"url", "keep"}). '
     "Fill the gaps. A role such as sleuth is a character in the picture, not a "
@@ -399,6 +404,43 @@ def _add_query(queries: list[str], query: str) -> None:
     if any(cleaned.lower() == existing.lower() for existing in queries):
         return
     queries.append(cleaned)
+
+
+# Holiday and seasonal terms that may appear in a customer sentence.
+# Used only to detect when the LLM-generated subjects dropped the event name;
+# the search pipeline fetches the actual visual content, the LLM decides the design.
+_HOLIDAY_TERMS: frozenset[str] = frozenset(
+    {
+        "thanksgiving",
+        "christmas",
+        "easter",
+        "halloween",
+        "advent",
+        "lent",
+        "valentine",
+        "st. patrick",
+        "st patrick",
+        "independence day",
+        "fourth of july",
+        "new year",
+        "pentecost",
+        "epiphany",
+        "all saints",
+        "all souls",
+        "corpus christi",
+        "good friday",
+        "ash wednesday",
+    }
+)
+
+
+def _missing_holidays(sentence: str, subjects: str) -> list[str]:
+    """Holiday names the customer wrote that the LLM-generated subjects omit."""
+    lower_sentence = sentence.lower()
+    lower_subjects = subjects.lower()
+    return [
+        term for term in _HOLIDAY_TERMS if term in lower_sentence and term not in lower_subjects
+    ]
 
 
 def arrangement_line(seed: int) -> str:
@@ -751,6 +793,10 @@ def research_personal_design(
     }
     if design is None:
         subjects = lock_characters(picture, characters)
+        missed = _missing_holidays(sentence, subjects)
+        if missed:
+            holiday_text = " and ".join(t.title() for t in missed)
+            subjects = f"{subjects} The scene is {holiday_text}-themed."
         return PersonalDesign(
             prompt=graphic_prompt(
                 subjects=subjects,
@@ -787,6 +833,13 @@ def research_personal_design(
         # is the model choosing a character, so the customer's words stay.
         subject = picture
     subject = lock_characters(subject, characters)
+    # Fallback: if the LLM still dropped a holiday/season the customer named,
+    # append its name so the image model knows the thematic context.
+    # The search pipeline fetches the visual content; this only reinstates the name.
+    missed = _missing_holidays(sentence, subject)
+    if missed:
+        holiday_text = " and ".join(t.title() for t in missed)
+        subject = f"{subject} The scene is {holiday_text}-themed."
     image_facts = () if from_photos else facts
     return PersonalDesign(
         prompt=graphic_prompt(
@@ -1038,13 +1091,82 @@ def search_commons(query: str, *, client: httpx.Client | None = None) -> list[Se
     return notes
 
 
+def search_wikidata(query: str, *, client: httpx.Client | None = None) -> list[SearchNote]:
+    """Entity description and portrait from Wikidata. A failed call is an empty list."""
+    owns_client = client is None
+    http = client or httpx.Client(timeout=10.0)
+    try:
+        r = http.get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbsearchentities",
+                "search": query,
+                "language": "en",
+                "limit": "3",
+                "format": "json",
+            },
+            headers={"User-Agent": _USER_AGENT},
+        )
+        r.raise_for_status()
+        results = r.json().get("search") or []
+        if not isinstance(results, list):
+            return []
+        top = next(
+            (
+                item
+                for item in results
+                if isinstance(item, dict) and item.get("label") and item.get("description")
+            ),
+            None,
+        )
+        if top is None:
+            return []
+        qid = str(top.get("id") or "").strip()
+        label = " ".join(str(top.get("label") or "").split())
+        description = " ".join(str(top.get("description") or "").split())
+        if not qid or not label or not description:
+            return []
+
+        image_url: str | None = None
+        try:
+            r2 = http.get(
+                "https://www.wikidata.org/w/api.php",
+                params={
+                    "action": "wbgetentities",
+                    "ids": qid,
+                    "props": "claims",
+                    "format": "json",
+                },
+                headers={"User-Agent": _USER_AGENT},
+            )
+            r2.raise_for_status()
+            entity = (r2.json().get("entities") or {}).get(qid) or {}
+            p18 = (entity.get("claims") or {}).get("P18") or []
+            if isinstance(p18, list) and p18:
+                filename = p18[0]["mainsnak"]["datavalue"]["value"]
+                if isinstance(filename, str) and filename.strip():
+                    name = filename.strip().replace(" ", "_")
+                    if _is_raster_url(name):
+                        image_url = f"https://commons.wikimedia.org/wiki/Special:FilePath/{name}"
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+            pass
+
+        return [SearchNote(query=query, title=label, text=description, image_url=image_url)]
+    except (httpx.HTTPError, ValueError):
+        logger.warning("Wikidata search failed for %r", query)
+        return []
+    finally:
+        if owns_client:
+            http.close()
+
+
 def search_personal(query: str, *, client: httpx.Client | None = None) -> list[SearchNote]:
-    """Wikipedia, DuckDuckGo, and Commons notes for one query."""
+    """Wikipedia, DuckDuckGo, Commons, and Wikidata notes for one query."""
     owns_client = client is None
     http = client or httpx.Client(timeout=10.0)
     try:
         notes: list[SearchNote] = []
-        for search in (search_wikipedia, search_duckduckgo, search_commons):
+        for search in (search_wikipedia, search_duckduckgo, search_commons, search_wikidata):
             notes.extend(search(query, client=http))
         return notes
     finally:
