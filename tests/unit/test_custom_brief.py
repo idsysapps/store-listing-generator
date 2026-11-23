@@ -12,7 +12,35 @@ from store_listing.orchestration.custom_brief import (
     parse_custom_brief_response,
     read_custom_brief,
 )
+from store_listing.orchestration.image_progress import ImageStatus
 from store_listing.orchestration.llm_client import LLM_MAX_TOKENS
+
+
+def _assert_abandoned(db: MagicMock) -> None:
+    """The row was reserved, then marked so the page can stop waiting."""
+    db.insert_design_brief.assert_called_once()
+    assert db.insert_design_brief.call_args.kwargs["image_status"] == "preparing"
+    db.update_design_brief.assert_not_called()
+    assert db.update_brief_image_status.call_args.args[1] == "needs_attention"
+
+
+class _MemoryRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.messages: list[tuple[str, str]] = []
+
+    def publish(self, channel: str, payload: str) -> None:
+        self.messages.append((channel, payload))
+
+    def set(self, key: str, value: str) -> None:
+        self.values[key] = value
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+
+def _phases(client: _MemoryRedis) -> list[str]:
+    return [ImageStatus.from_json(payload).phase for _channel, payload in client.messages]
 
 
 @pytest.fixture(autouse=True)
@@ -330,6 +358,87 @@ class TestCreateCustomBrief:
         assert result["brief_id"] == 42
         db.insert_design_brief.assert_called_once()
 
+    def test_the_row_is_written_before_the_model_is_asked(self) -> None:
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response())
+        seen: dict[str, object] = {}
+
+        def insert(**kwargs: object) -> int:
+            seen["model_called"] = llm.with_raw_response.create.called
+            seen["status"] = kwargs["image_status"]
+            seen["concept"] = kwargs["concept"]
+            seen["confidence"] = kwargs["confidence"]
+            return 42
+
+        db.insert_design_brief.side_effect = insert
+
+        create_custom_brief(db, llm, "model-x", "shirt for baseball game", "dtf_apparel")
+
+        assert seen["model_called"] is False
+        assert seen["status"] == "preparing"
+        assert seen["concept"] == "shirt for baseball game"
+        assert seen["confidence"] == 0
+        assert db.update_design_brief.call_args.kwargs["image_status"] == "pending"
+
+    def test_a_sellable_brief_reports_writing_then_planning(self) -> None:
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response())
+        client = _MemoryRedis()
+
+        create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "shirt for baseball game",
+            "dtf_apparel",
+            progress_client=client,
+        )
+
+        assert _phases(client)[:2] == ["writing", "planning"]
+        assert "researching" not in _phases(client)
+        assert "failed" not in _phases(client)
+
+    def test_a_personal_brief_reports_the_research(self) -> None:
+        db = self._mock_db()
+        llm = self._mock_llm(_brief_response())
+        client = _MemoryRedis()
+
+        create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "a groovy ghost",
+            "dtf_apparel",
+            personal_use=True,
+            progress_client=client,
+        )
+
+        phases = _phases(client)
+        assert phases[0] == "writing"
+        assert "researching" in phases
+        assert phases.index("researching") < phases.index("planning")
+        assert "failed" not in phases
+
+    def test_a_failed_model_call_tells_the_page_it_stopped(self) -> None:
+        db = self._mock_db()
+        llm = MagicMock()
+        llm.with_raw_response.create.side_effect = RuntimeError("API down")
+        client = _MemoryRedis()
+
+        result = create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "test idea",
+            "dtf_apparel",
+            progress_client=client,
+        )
+
+        assert result["status"] == "error"
+        assert result["brief_id"] == 42
+        _assert_abandoned(db)
+        assert _phases(client) == ["writing", "failed"]
+
     def test_the_copy_review_drops_a_scene_tagline(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("LLM_COPY_REVIEW", "true")
         db = self._mock_db()
@@ -383,7 +492,7 @@ class TestCreateCustomBrief:
         result = create_custom_brief(db, llm, "model-x", "gnome train", "dtf_apparel")
 
         assert result["status"] == "success"
-        stored = db.insert_design_brief.call_args.kwargs
+        stored = db.update_design_brief.call_args.kwargs
         assert stored["concept"] == "gnome train"
         assert stored["headline_text"] == "gnome train"
         assert stored["scene_description"] == "gnome train"
@@ -403,7 +512,7 @@ class TestCreateCustomBrief:
             )
         )
         create_custom_brief(db, llm, "model-x", "baseball shirt", "dtf_apparel")
-        call_kwargs = db.insert_design_brief.call_args
+        call_kwargs = db.update_design_brief.call_args
         assert call_kwargs.kwargs["concept"] == "baseball shirt"
         assert call_kwargs.kwargs["audience"] == "Parents"
         assert call_kwargs.kwargs["headline_text"] == "baseball shirt"
@@ -428,7 +537,7 @@ class TestCreateCustomBrief:
 
         create_custom_brief(db, llm, "model-x", "groovy ghost", "dtf_apparel")
 
-        call_kwargs = db.insert_design_brief.call_args.kwargs
+        call_kwargs = db.update_design_brief.call_args.kwargs
         assert call_kwargs["copy_mode"] == "type_hero"
         assert call_kwargs["headline_text"] == "groovy ghost"
         assert call_kwargs["kicker_text"] is None
@@ -441,7 +550,7 @@ class TestCreateCustomBrief:
 
         create_custom_brief(db, llm, "model-x", "baseball shirt", "dtf_apparel")
 
-        description = db.insert_design_brief.call_args.kwargs["listing_description"]
+        description = db.update_design_brief.call_args.kwargs["listing_description"]
         assert description
         assert "holding a glove" not in description.lower()
         assert "t-shirts" in description.lower()
@@ -459,7 +568,7 @@ class TestCreateCustomBrief:
             personal_use=True,
         )
 
-        assert db.insert_design_brief.call_args.kwargs["listing_description"] is None
+        assert db.update_design_brief.call_args.kwargs["listing_description"] is None
 
     def test_returns_error_on_llm_failure(self) -> None:
         db = self._mock_db()
@@ -467,7 +576,7 @@ class TestCreateCustomBrief:
         llm.with_raw_response.create.side_effect = RuntimeError("API down")
         result = create_custom_brief(db, llm, "model-x", "test idea", "dtf_apparel")
         assert result["status"] == "error"
-        db.insert_design_brief.assert_not_called()
+        _assert_abandoned(db)
 
     def test_a_model_the_endpoint_does_not_serve_is_reported_clearly(self) -> None:
         # The cluster pointed at a model the DGX proxy does not serve, so
@@ -485,7 +594,7 @@ class TestCreateCustomBrief:
 
         assert result["status"] == "error"
         assert "qwen38_briefs" in result["error"]
-        db.insert_design_brief.assert_not_called()
+        _assert_abandoned(db)
 
     def test_reads_a_response_the_model_appended_something_to(self) -> None:
         # The model answered with the brief and then another object; the
@@ -514,7 +623,7 @@ class TestCreateCustomBrief:
         )
 
         assert result["status"] == "success"
-        assert db.insert_design_brief.call_args.kwargs["product_type"] == "dtf_apparel"
+        assert db.update_design_brief.call_args.kwargs["product_type"] == "dtf_apparel"
 
     def test_a_brief_of_a_type_that_is_not_in_production_is_refused(self) -> None:
         # With more than one type in production there is no single type to
@@ -561,7 +670,7 @@ class TestCreateCustomBrief:
         llm = self._mock_llm("not valid json")
         result = create_custom_brief(db, llm, "model-x", "test idea", "dtf_apparel")
         assert result["status"] == "error"
-        db.insert_design_brief.assert_not_called()
+        _assert_abandoned(db)
 
     def test_uses_temperature_zero(self) -> None:
         db = self._mock_db()
@@ -575,8 +684,10 @@ class TestCreateCustomBrief:
         llm = self._mock_llm(_brief_response())
         result = create_custom_brief(db, llm, "model-x", "test", "dtf_apparel")
         assert result["personal_use"] is False
-        call_kwargs = db.insert_design_brief.call_args.kwargs
+        call_kwargs = db.update_design_brief.call_args.kwargs
         assert call_kwargs["personal_use"] is False
+        assert db.insert_design_brief.call_args.kwargs["image_status"] == "preparing"
+        assert db.update_design_brief.call_args.kwargs["image_status"] == "pending"
 
     def test_personal_use_passed_to_db(self) -> None:
         db = self._mock_db()
@@ -586,7 +697,7 @@ class TestCreateCustomBrief:
         )
         assert result["status"] == "success"
         assert result["personal_use"] is True
-        call_kwargs = db.insert_design_brief.call_args.kwargs
+        call_kwargs = db.update_design_brief.call_args.kwargs
         assert call_kwargs["personal_use"] is True
 
 
@@ -792,7 +903,7 @@ class TestACutAnswer:
 
         assert result["status"] == "success"
         assert result["brief_id"] == 42
-        call_kwargs = db.insert_design_brief.call_args.kwargs
+        call_kwargs = db.update_design_brief.call_args.kwargs
         assert call_kwargs["concept"] == "thanksgiving disney shirt"
         assert call_kwargs["headline_text"] is None
         assert "thanksgiving disney shirt" in call_kwargs["scene_description"]
@@ -895,7 +1006,7 @@ class TestLiteralCustomWords:
         result = create_custom_brief(db, llm, "model-x", words, "dtf_apparel", personal_use=True)
 
         assert result["status"] == "success"
-        stored = db.insert_design_brief.call_args.kwargs
+        stored = db.update_design_brief.call_args.kwargs
         assert stored["concept"] == words
         assert stored["headline_text"] is None
         assert words in stored["scene_description"]
@@ -929,7 +1040,7 @@ class TestLiteralCustomWords:
         result = create_custom_brief(db, llm, "model-x", words, "dtf_apparel", personal_use=True)
 
         assert result["status"] == "success"
-        stored = db.insert_design_brief.call_args.kwargs
+        stored = db.update_design_brief.call_args.kwargs
         assert stored["headline_text"] == "Get There Eventually"
         assert stored["copy_mode"] == "caption"
         assert stored["layout_type"] != "full_bleed"
@@ -989,4 +1100,4 @@ class TestLiteralCustomWords:
         assert "licensed name" in result["error"]
         assert "Magic Kingdom" not in result["error"]
         assert "Disney" not in result["error"]
-        db.insert_design_brief.assert_not_called()
+        _assert_abandoned(db)

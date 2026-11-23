@@ -468,6 +468,7 @@ def generate_images_for_briefs(
     product_types: list[str] | None = None,
     brief_rewriter: BriefRewriter | None = None,
     status_publisher: Callable[[ImageStatus], None] | None = None,
+    progress_client: Any | None = None,
 ) -> dict[str, Any]:
     # A store that focuses on one production method does not spend GPU time
     # on the briefs of the others (issue #215).
@@ -494,6 +495,7 @@ def generate_images_for_briefs(
             brief_rewriter=brief_rewriter,
             rewritten_brief_ids=rewritten_brief_ids,
             status_publisher=status_publisher,
+            progress_client=progress_client,
         )
         if success:
             generated += 1
@@ -1363,6 +1365,7 @@ def _generate_best_candidate(
     brief_rewriter: BriefRewriter | None = None,
     rewritten_brief_ids: set[int] | None = None,
     status_publisher: Callable[[ImageStatus], None] | None = None,
+    progress_client: Any | None = None,
 ) -> tuple[bool, str | None]:
     """Render N candidates, upload the one the deterministic gate likes best.
 
@@ -1375,6 +1378,7 @@ def _generate_best_candidate(
             int(brief_row["id"]),
             personal=brief.personal_use,
             publish=status_publisher,
+            client=progress_client,
         )
         if status_publisher is not None
         else None
@@ -1488,6 +1492,7 @@ def generate_image_for_brief(
     hero_validator: StrictTextValidator | None = None,
     brief_rewriter: BriefRewriter | None = None,
     status_publisher: Callable[[ImageStatus], None] | None = None,
+    progress_client: Any | None = None,
 ) -> dict[str, Any]:
     brief_row = db_client.get_brief_by_id(brief_id)
     if brief_row is None:
@@ -1505,6 +1510,7 @@ def generate_image_for_brief(
         db_client=db_client,
         brief_rewriter=brief_rewriter,
         status_publisher=status_publisher,
+        progress_client=progress_client,
     )
     if success:
         return {"status": "success", "brief_id": brief_id}

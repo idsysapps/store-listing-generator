@@ -38,6 +38,7 @@ from store_listing.orchestration.design_briefs import (
 )
 from store_listing.orchestration.headline_voice import normalise_voice, screen_text
 from store_listing.orchestration.idea_devices import device_for, idea_device_rules
+from store_listing.orchestration.image_progress import GenerationWatch, publishing
 from store_listing.orchestration.json_response import extract_json_objects, repair_truncated_object
 from store_listing.orchestration.label_plates import plates_to_value
 from store_listing.orchestration.llm_client import (
@@ -48,6 +49,7 @@ from store_listing.orchestration.llm_client import (
     model_error_message,
 )
 from store_listing.orchestration.personal_design import (
+    MAX_QUERIES,
     look_at_reference,
     research_personal_design,
     search_personal,
@@ -438,6 +440,37 @@ def _stored_text_plan(brief: DesignBrief, design: Any) -> dict[str, Any] | None:
     return None
 
 
+def _watch_phase(
+    watch: GenerationWatch | None, phase: str, step: int = 0, total_steps: int = 0
+) -> None:
+    if watch is not None:
+        watch.phase(phase, step=step, total_steps=total_steps)
+
+
+def _open_watch(brief_id: int, personal_use: bool, client: Any | None) -> GenerationWatch | None:
+    """A clock for this brief, continued later by the image task."""
+    if client is None:
+        return None
+    return GenerationWatch(
+        brief_id,
+        personal=personal_use,
+        publish=publishing(client),
+        client=client,
+    )
+
+
+def _abandon(
+    db_client: DesignBriefDBClient,
+    brief_id: int,
+    watch: GenerationWatch | None,
+    error: str,
+) -> dict[str, Any]:
+    """The row is already visible. Say that this attempt stopped."""
+    db_client.update_brief_image_status(brief_id, "needs_attention", error)
+    _watch_phase(watch, "failed")
+    return {"status": "error", "error": error, "brief_id": brief_id}
+
+
 def create_custom_brief(
     db_client: DesignBriefDBClient,
     llm_completions: Any,
@@ -447,6 +480,7 @@ def create_custom_brief(
     *,
     personal_use: bool = False,
     enabled: Sequence[str] | None = None,
+    progress_client: Any | None = None,
 ) -> dict[str, Any]:
     scope_reason = content_rejection(("description", description))
     if scope_reason is not None:
@@ -468,20 +502,37 @@ def create_custom_brief(
             }
         product_type = enabled[0]
 
+    words = description.strip()
+    brief_id = db_client.insert_design_brief(
+        concept=words,
+        product_type=product_type,
+        specific_products=[],
+        audience="",
+        visual_style="",
+        confidence=0,
+        reasoning="",
+        llm_model=model,
+        batch_id="custom",
+        personal_use=personal_use,
+        image_status="preparing",
+    )
+    watch = _open_watch(brief_id, personal_use, progress_client)
+    _watch_phase(watch, "writing")
+
     messages = build_custom_brief_prompt(
         description, product_type, personal_use=personal_use, enabled=enabled
     )
 
     raw, error = create_answer(llm_completions, model, messages, "custom_brief", temperature=0)
     if error is not None:
-        return {"status": "error", "error": error}
+        return _abandon(db_client, brief_id, watch, error)
 
     try:
         headers = raw.headers
         response = raw.parse()
         _log_llm_response(response, headers, "custom_brief")
         if not response.choices:
-            return {"status": "error", "error": "LLM returned empty choices"}
+            return _abandon(db_client, brief_id, watch, "LLM returned empty choices")
         content = response.choices[0].message.content or ""
     except Exception as e:  # noqa: BLE001
         message = model_error_message(e, model)
@@ -489,7 +540,7 @@ def create_custom_brief(
             logger.error("Custom brief LLM call failed: %s", message)
         else:
             logger.warning("Custom brief LLM call failed: %s", e)
-        return {"status": "error", "error": message}
+        return _abandon(db_client, brief_id, watch, message)
 
     brief, reason = read_custom_brief(content, enabled, personal_use)
     if brief is None:
@@ -497,23 +548,19 @@ def create_custom_brief(
             # The raw answer is the only way to see what the model actually sent.
             logger.error("The LLM custom brief response could not be read")
             logger.error("Raw LLM custom brief response: %s", content)
-            return {"status": "error", "error": "Failed to parse LLM response"}
+            return _abandon(db_client, brief_id, watch, "Failed to parse LLM response")
         # The answer was read, and the brief was not usable. Saying so is
         # better than blaming the parser (issue #232).
         logger.error("The LLM custom brief was dropped: %s", reason)
-        return {"status": "error", "error": f"The brief was not created: {reason}"}
+        return _abandon(db_client, brief_id, watch, f"The brief was not created: {reason}")
 
-    words = description.strip()
     design = None
     if personal_use:
-        design = research_personal_design(
+        design = _research_personal(
             words,
-            complete=lambda messages: _personal_answer(llm_completions, model, messages),
-            search=search_personal,
-            seed=_arrangement_seed(words),
-            look=lambda image: look_at_reference(
-                image, client=get_vision_client(), model=get_vision_model()
-            ),
+            llm_completions=llm_completions,
+            model=model,
+            watch=watch,
         )
         brief = replace(
             brief,
@@ -536,6 +583,7 @@ def create_custom_brief(
             personal_use=False,
         )
 
+    _watch_phase(watch, "planning")
     # A single brief still gets a template, so the custom path does not always
     # come back as the same centred emblem (issue #238).
     brief = assign_batch_templates([brief], f"custom:{brief.concept}")[0]
@@ -553,7 +601,8 @@ def create_custom_brief(
         if listing_issues:
             logger.warning("Listing copy fell back: %s", "; ".join(listing_issues))
 
-    brief_id = db_client.insert_design_brief(
+    db_client.update_design_brief(
+        brief_id,
         concept=brief.concept,
         product_type=brief.product_type,
         specific_products=brief.specific_products,
@@ -577,6 +626,49 @@ def create_custom_brief(
         text_plan=_stored_text_plan(brief, design),
         listing_description=brief.listing_description,
         label_plates=plates_to_value(brief.label_plates),
+        image_status="pending",
     )
 
     return {"status": "success", "brief_id": brief_id, "personal_use": personal_use}
+
+
+def _research_personal(
+    words: str,
+    *,
+    llm_completions: Any,
+    model: str,
+    watch: GenerationWatch | None,
+) -> Any:
+    """Search, look, and plan. Each step is a progress phase."""
+    searches = {"count": 0}
+    reads = {"count": 0}
+
+    def search(query: str) -> list[Any]:
+        searches["count"] += 1
+        _watch_phase(
+            watch,
+            "researching",
+            searches["count"],
+            max(searches["count"], MAX_QUERIES),
+        )
+        return search_personal(query)
+
+    def complete(messages: list[dict[str, str]]) -> str:
+        reads["count"] += 1
+        if reads["count"] > 1:
+            _watch_phase(watch, "planning")
+        else:
+            _watch_phase(watch, "researching")
+        return _personal_answer(llm_completions, model, messages)
+
+    def look(image: bytes) -> Any:
+        _watch_phase(watch, "studying")
+        return look_at_reference(image, client=get_vision_client(), model=get_vision_model())
+
+    return research_personal_design(
+        words,
+        complete=complete,
+        search=search,
+        seed=_arrangement_seed(words),
+        look=look,
+    )
