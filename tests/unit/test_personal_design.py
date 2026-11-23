@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -27,6 +28,7 @@ from store_listing.orchestration.personal_design import (
     search_brave,
     search_commons,
     search_duckduckgo,
+    search_gemini,
     search_personal,
     search_wikidata,
     search_wikipedia,
@@ -738,11 +740,21 @@ def test_personal_search_asks_every_source(monkeypatch: pytest.MonkeyPatch) -> N
         "store_listing.orchestration.personal_design.search_brave",
         lambda query, client=None: note("brave"),
     )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_gemini",
+        lambda query: note("gemini"),
+    )
 
     notes = search_personal("Judy Hopps")
 
-    assert seen == ["wikipedia", "commons", "wikidata", "brave"]
-    assert [note.title for note in notes] == ["wikipedia", "commons", "wikidata", "brave"]
+    assert seen == ["wikipedia", "commons", "wikidata", "brave", "gemini"]
+    assert [note.title for note in notes] == [
+        "wikipedia",
+        "commons",
+        "wikidata",
+        "brave",
+        "gemini",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1494,3 +1506,103 @@ def test_guessed_names_fallback_still_locks_all_customer_named_elements() -> Non
     draw_portion = subjects_lower[subjects_lower.index("draw") :]
     assert "mickey mouse" in draw_portion
     assert "tron" in draw_portion
+
+
+# ---------------------------------------------------------------------------
+# Gemini text research source
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_returns_empty_without_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert search_gemini("Tron") == []
+
+
+def test_gemini_returns_visual_description_as_note() -> None:
+    class _FakeChunk:
+        class web:
+            title = "Tron (character) - Disney Wiki"
+
+    class _FakeGrounding:
+        grounding_chunks: ClassVar = [_FakeChunk()]
+
+    class _FakeCandidate:
+        grounding_metadata = _FakeGrounding()
+
+    class _FakeResponse:
+        text = "Tron wears a sleek black bodysuit with blue neon circuit lines and carries a glowing disc."
+        candidates: ClassVar = [_FakeCandidate()]
+
+    class _FakeModel:
+        def generate_content(self, model, contents, config):
+            return _FakeResponse()
+
+    class _FakeClient:
+        models = _FakeModel()
+
+    import os
+
+    os.environ["GEMINI_API_KEY"] = "test-key"
+    try:
+        notes = search_gemini("Tron", genai_client_cls=lambda api_key: _FakeClient())
+    finally:
+        del os.environ["GEMINI_API_KEY"]
+
+    assert len(notes) == 1
+    assert notes[0].title == "Tron (character) - Disney Wiki"
+    assert "blue neon" in notes[0].text
+    assert notes[0].image_url is None
+    assert notes[0].query == "Tron"
+
+
+def test_gemini_falls_back_to_query_as_title_when_no_grounding() -> None:
+    class _FakeGrounding:
+        grounding_chunks: ClassVar = []
+
+    class _FakeCandidate:
+        grounding_metadata = _FakeGrounding()
+
+    class _FakeResponse:
+        text = "Mickey Mouse is a cheerful cartoon mouse with round black ears."
+        candidates: ClassVar = [_FakeCandidate()]
+
+    class _FakeModel:
+        def generate_content(self, model, contents, config):
+            return _FakeResponse()
+
+    class _FakeClient:
+        models = _FakeModel()
+
+    import os
+
+    os.environ["GEMINI_API_KEY"] = "test-key"
+    try:
+        notes = search_gemini("Mickey Mouse", genai_client_cls=lambda api_key: _FakeClient())
+    finally:
+        del os.environ["GEMINI_API_KEY"]
+
+    assert notes[0].title == "Mickey Mouse"
+    assert "cartoon mouse" in notes[0].text
+
+
+def test_gemini_returns_empty_on_blank_response() -> None:
+    class _FakeResponse:
+        text = "   "
+        candidates: ClassVar = []
+
+    class _FakeModel:
+        def generate_content(self, model, contents, config):
+            return _FakeResponse()
+
+    class _FakeClient:
+        models = _FakeModel()
+
+    import os
+
+    os.environ["GEMINI_API_KEY"] = "test-key"
+    try:
+        notes = search_gemini("anything", genai_client_cls=lambda api_key: _FakeClient())
+    finally:
+        del os.environ["GEMINI_API_KEY"]
+
+    assert notes == []

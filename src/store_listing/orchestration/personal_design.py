@@ -1366,12 +1366,73 @@ def _brave_images(query: str, *, api_key: str, http: httpx.Client) -> list[Searc
     return notes
 
 
-def search_personal(query: str, *, client: httpx.Client | None = None) -> list[SearchNote]:
-    """Wikipedia, Brave Search, Commons, and Wikidata notes for one query.
+_GEMINI_MODEL = "gemini-2.0-flash"
+_GEMINI_PROMPT = (
+    "In 2-3 sentences describe what {query} looks like visually — "
+    "distinctive colours, features, costume, or setting. "
+    "Focus on visual details useful for illustration. Be specific."
+)
 
-    Brave Search replaces DuckDuckGo Instant Answer — richer web snippets and
-    an image search endpoint. A dedicated image call fires only when the web
-    pass returns no images, keeping usage within the 2,000 free queries/month.
+
+def search_gemini(
+    query: str,
+    *,
+    genai_client_cls: Any | None = None,
+) -> list[SearchNote]:
+    """Visually descriptive research text from Gemini with Google Search grounding.
+
+    Returns one SearchNote with a synthesised visual description grounded in
+    current web results. No image URL is returned; Gemini does not expose
+    image URLs via the API. Returns an empty list when GEMINI_API_KEY is not
+    set or the call fails.
+    """
+    import os
+
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        return []
+    try:
+        from google.genai import types  # type: ignore[import-not-found]
+
+        if genai_client_cls is not None:
+            make_client = genai_client_cls
+        else:
+            from google import genai  # type: ignore[import-not-found]
+
+            def make_client(key: str) -> Any:
+                return genai.Client(api_key=key)
+
+        client = make_client(api_key)
+        response = client.models.generate_content(
+            model=_GEMINI_MODEL,
+            contents=_GEMINI_PROMPT.format(query=query),
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                max_output_tokens=200,
+            ),
+        )
+        text = (response.text or "").strip()
+        if not text:
+            return []
+        title = query
+        try:
+            chunks = response.candidates[0].grounding_metadata.grounding_chunks or []
+            if chunks and chunks[0].web:
+                title = str(chunks[0].web.title or query).strip() or query
+        except (AttributeError, IndexError, TypeError):
+            pass
+        return [SearchNote(query=query, title=title, text=text, image_url=None)]
+    except Exception:  # noqa: BLE001
+        logger.warning("Gemini search failed for %r", query)
+        return []
+
+
+def search_personal(query: str, *, client: httpx.Client | None = None) -> list[SearchNote]:
+    """Wikipedia, Brave Search, Commons, Wikidata, and Gemini notes for one query.
+
+    Brave Search provides web snippets and reference images. Gemini with Google
+    Search grounding adds synthesised visual descriptions for characters, places,
+    and pop-culture subjects. Both degrade gracefully when their API keys are absent.
     """
     owns_client = client is None
     http = client or httpx.Client(timeout=10.0)
@@ -1380,6 +1441,7 @@ def search_personal(query: str, *, client: httpx.Client | None = None) -> list[S
         for search in (search_wikipedia, search_commons, search_wikidata):
             notes.extend(search(query, client=http))
         notes.extend(search_brave(query, client=http))
+        notes.extend(search_gemini(query))
         return notes
     finally:
         if owns_client:
