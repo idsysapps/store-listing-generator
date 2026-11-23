@@ -584,7 +584,10 @@ def curate_seeds_task(chain_depth: int = 0) -> dict:
 
 @celery_app.task
 def create_custom_brief_task(
-    description: str, product_type: str, personal_use: bool = False
+    description: str,
+    product_type: str,
+    personal_use: bool = False,
+    image_model: str | None = None,
 ) -> dict:
     """Create a design brief from a user's free-text description, then generate its image."""
     from store_listing.orchestration.custom_brief import create_custom_brief
@@ -604,6 +607,7 @@ def create_custom_brief_task(
         description,
         product_type,
         personal_use=personal_use,
+        image_model=image_model,
         enabled=enabled_product_types(DatabaseClient()),
         progress_client=progress_client,
     )

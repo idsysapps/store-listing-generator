@@ -69,7 +69,8 @@ public class CeleryTaskDispatcher {
                 .onFailure().invoke(e -> LOG.errorf(e, "Failed to dispatch Celery task %s", taskName));
     }
 
-    public Uni<String> dispatchCreateCustomBrief(String description, String productType, boolean personalUse) {
+    public Uni<String> dispatchCreateCustomBrief(
+            String description, String productType, boolean personalUse, String imageModel) {
         String taskName = "store_listing.orchestration.tasks.create_custom_brief_task";
         String taskId = UUID.randomUUID().toString();
         String correlationId = UUID.randomUUID().toString();
@@ -77,7 +78,10 @@ public class CeleryTaskDispatcher {
         String descEscaped = description.replace("\\", "\\\\").replace("\"", "\\\"");
         String ptEscaped = productType.replace("\\", "\\\\").replace("\"", "\\\"");
         String personalUseStr = personalUse ? "true" : "false";
-        String bodyJson = "[[\"" + descEscaped + "\", \"" + ptEscaped + "\", " + personalUseStr + "], {}, {\"callbacks\": null, \"errbacks\": null, \"chain\": null, \"chord\": null}]";
+        String model = (imageModel == null || imageModel.isBlank()) ? "qwen_image_2.1" : imageModel.trim();
+        String modelEscaped = model.replace("\\", "\\\\").replace("\"", "\\\"");
+        String bodyJson = "[[\"" + descEscaped + "\", \"" + ptEscaped + "\", " + personalUseStr
+                + ", \"" + modelEscaped + "\"], {}, {\"callbacks\": null, \"errbacks\": null, \"chain\": null, \"chord\": null}]";
         String bodyEncoded = Base64.getEncoder().encodeToString(bodyJson.getBytes());
 
         String message = """
@@ -98,7 +102,7 @@ public class CeleryTaskDispatcher {
                 "timelimit": [null, null],
                 "root_id": "%s",
                 "parent_id": null,
-                "argsrepr": "('%s', '%s', %s)",
+                "argsrepr": "('%s', '%s', %s, '%s')",
                 "kwargsrepr": "{}",
                 "origin": "trend-service"
               },
@@ -115,9 +119,13 @@ public class CeleryTaskDispatcher {
                 "delivery_tag": "%s"
               }
             }
-            """.formatted(bodyEncoded, taskName, taskId, taskId, descEscaped, ptEscaped, personalUseStr, correlationId, taskId);
+            """.formatted(
+                bodyEncoded, taskName, taskId, taskId, descEscaped, ptEscaped, personalUseStr,
+                modelEscaped, correlationId, taskId);
 
-        LOG.infof("Dispatching Celery task %s (taskId=%s, personalUse=%s)", taskName, taskId, personalUse);
+        LOG.infof(
+                "Dispatching Celery task %s (taskId=%s, personalUse=%s, imageModel=%s)",
+                taskName, taskId, personalUse, model);
 
         return redis.execute("LPUSH", CELERY_QUEUE, message)
                 .replaceWith(taskId)

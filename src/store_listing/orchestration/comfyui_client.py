@@ -61,19 +61,17 @@ DEFAULT_VAE_NAME = "ae.safetensors"
 DEFAULT_STEPS = 4
 DEFAULT_CFG = 1.0
 
-# Qwen-Image 1.0 (Apache 2.0) is the typographic hero model. The official
-# ComfyUI template runs 20 steps at cfg 4.0 with the AuraFlow shift at 3.1
-# (issue #254). It renders lettering reliably where FLUX.2 Klein 4B does not,
-# but it is 5-10x slower, so only the wordmark path uses it.
-QWEN_UNET_NAME = "qwen_image_fp8_e4m3fn.safetensors"
-QWEN_CLIP_NAME = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
-QWEN_VAE_NAME = "qwen_image_vae.safetensors"
-QWEN_STEPS = 20
-QWEN_CFG = 4.0
-QWEN_SHIFT = 3.1
+# Qwen-Image 2.1 is the typographic hero model. The official ComfyUI template
+# runs 25 steps at cfg 1.0 with euler/simple (issue #339). 1.0 weights may
+# remain on disk but are not loaded at runtime.
+QWEN_UNET_NAME = "qwen_image_2.1_int8_convrot.safetensors"
+QWEN_CLIP_NAME = "qwen3vl_8b_int8_convrot.safetensors"
+QWEN_VAE_NAME = "qwen_image_2.1_vae_bf16.safetensors"
+QWEN_STEPS = 25
+QWEN_CFG = 1.0
 QWEN_SIZE = 1328
-# A Qwen image takes 100-190s on the GB10 before queueing. The Flux 300s
-# default is too tight, so the Qwen path gets its own deadline.
+# A Qwen image can take minutes on the GB10. The Flux 300s default is too
+# tight, so the Qwen path gets its own deadline.
 QWEN_TIMEOUT_SECONDS = 900.0
 
 # A five-reference FLUX.2 dev render was still the only running prompt, with
@@ -336,23 +334,27 @@ class ComfyUIClient:
         seed: int | None = None,
         steps: int = QWEN_STEPS,
         cfg: float = QWEN_CFG,
-        shift: float = QWEN_SHIFT,
         sampler_name: str = "euler",
         scheduler: str = "simple",
         negative_prompt: str = "",
+        reference_images: list[bytes] | None = None,
         unet_name: str | None = None,
         clip_name: str | None = None,
         vae_name: str | None = None,
+        on_tick: Callable[[], None] | None = None,
     ) -> ComfyUIResult:
-        """Queue a Qwen-Image text-to-image workflow and block until it is ready.
+        """Queue a Qwen-Image 2.1 text-to-image workflow and block until ready.
 
-        Qwen-Image is only used for the typographic hero path: it can render a
-        kicker and a hero word with the subject weaving through the letters,
-        which Flux cannot spell (issue #254). The defaults are the official
-        ComfyUI template's, and the deadline is longer because a 20B model at
-        20 steps takes 100-190s on the GB10.
+        Used for typographic heroes and personal custom briefs (issue #339).
+        Optional reference photos are uploaded and spliced into
+        ``TextEncodeQwenImage21``. Defaults match the ComfyUI 2.1 template
+        (25 steps, cfg 1).
         """
         actual_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
+        names: list[str] = []
+        for image in reference_images or []:
+            uploaded = self._upload_image(image)
+            names.append(uploaded["name"])
         graph = build_qwen_image_txt2img_graph(
             prompt=prompt,
             width=width,
@@ -360,15 +362,20 @@ class ComfyUIClient:
             seed=actual_seed,
             steps=steps,
             cfg=cfg,
-            shift=shift,
             sampler_name=sampler_name,
             scheduler=scheduler,
             negative_prompt=negative_prompt,
+            reference_images=names,
             unet_name=unet_name or QWEN_UNET_NAME,
             clip_name=clip_name or QWEN_CLIP_NAME,
             vae_name=vae_name or QWEN_VAE_NAME,
         )
-        return self._run_graph(graph, seed=actual_seed, timeout_seconds=QWEN_TIMEOUT_SECONDS)
+        return self._run_graph(
+            graph,
+            seed=actual_seed,
+            timeout_seconds=QWEN_TIMEOUT_SECONDS,
+            on_tick=on_tick,
+        )
 
     def remove_background(
         self,

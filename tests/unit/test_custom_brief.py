@@ -1017,6 +1017,40 @@ class TestLiteralCustomWords:
         assert stored["personal_use"] is True
         assert stored["text_plan"]["subjects"] == words
         assert stored["text_plan"]["customer_lettering"] is False
+        assert stored["text_plan"]["image_model"] == "qwen_image_2.1"
+        assert result["image_model"] == "qwen_image_2.1"
+
+    def test_a_personal_brief_can_choose_flux2_dev(self) -> None:
+        db = MagicMock()
+        db.insert_design_brief.return_value = 44
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response(
+            concept="Cute forest friends",
+            headline_text="Forest Friends",
+            scene_description="five cute animals standing in a row",
+        )
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+
+        result = create_custom_brief(
+            db,
+            llm,
+            "model-x",
+            "lifelike Disney Zootopia characters",
+            "dtf_apparel",
+            personal_use=True,
+            image_model="flux2_dev",
+        )
+
+        assert result["status"] == "success"
+        assert result["image_model"] == "flux2_dev"
+        assert db.update_design_brief.call_args.kwargs["text_plan"]["image_model"] == "flux2_dev"
 
     def test_a_quoted_line_and_a_named_character_are_kept(self) -> None:
         db = MagicMock()

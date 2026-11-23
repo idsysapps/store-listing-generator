@@ -506,13 +506,19 @@ def generate_image(
 ) -> ImageResult:
     """Generate an image for a brief on the DGX.
 
-    A personal brief is drawn by FLUX.2 dev from the researched graphic and its
-    reference photos. Every other brief stays on Flux Schnell.
+    A personal brief is drawn by Qwen-Image 2.1 by default, or by FLUX.2 dev when
+    the brief asks for it, from the researched graphic (and reference photos for
+    FLUX.2). Every other brief stays on Flux Schnell.
 
     ``dtf_apparel`` briefs get their background removed with BiRefNet on the DGX;
     the original render is kept in ``raw_bytes``. Failures never raise - they are
     reported through ``ImageResult.error``.
     """
+    from store_listing.orchestration.personal_image_models import (
+        FLUX2_DEV,
+        normalize_personal_image_model,
+    )
+
     try:
         if brief.personal_use:
             prompt = _personal_prompt(brief, seed)
@@ -536,12 +542,23 @@ def generate_image(
         on_progress("sampling")
     try:
         if brief.personal_use:
-            result = comfyui_client.generate_flux2_image(
-                prompt=prompt,
-                reference_images=_reference_bytes(brief.reference_urls),
-                seed=seed,
-                on_tick=sampling,
-            )
+            model = normalize_personal_image_model(brief.image_model)
+            if model == FLUX2_DEV:
+                result = comfyui_client.generate_flux2_image(
+                    prompt=prompt,
+                    reference_images=_reference_bytes(brief.reference_urls),
+                    seed=seed,
+                    on_tick=sampling,
+                )
+            else:
+                result = comfyui_client.generate_qwen_image(
+                    prompt=prompt,
+                    reference_images=_reference_bytes(brief.reference_urls),
+                    seed=seed,
+                    width=width,
+                    height=height,
+                    on_tick=sampling,
+                )
         else:
             result = comfyui_client.generate_image(
                 prompt=prompt,

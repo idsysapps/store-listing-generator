@@ -341,6 +341,9 @@ class DesignBrief:
     # Quoted shirt text is drawn by the compositor. A voice line is drawn by
     # the image model.
     customer_lettering: bool = False
+    # Personal custom briefs only: qwen_image_2.1 (default) or flux2_dev.
+    # Sellable briefs ignore this and stay on Flux Schnell.
+    image_model: str | None = None
 
     @property
     def garment_material(self) -> dict[str, Any] | None:

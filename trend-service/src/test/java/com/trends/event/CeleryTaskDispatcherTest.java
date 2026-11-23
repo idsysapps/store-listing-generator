@@ -71,4 +71,32 @@ class CeleryTaskDispatcherTest {
 
         assertNotEquals(id1, id2);
     }
+
+    @Test
+    void testDispatchCreateCustomBrief_DefaultsImageModelToQwen() {
+        celeryTaskDispatcher
+                .dispatchCreateCustomBrief("a personal shirt", "dtf_apparel", true, null)
+                .await().indefinitely();
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+        verify(redis).execute(eq("LPUSH"), eq("celery"), messageCaptor.capture());
+
+        String message = messageCaptor.getValue();
+        assertTrue(message.contains("create_custom_brief_task"));
+        assertTrue(message.contains("qwen_image_2.1"));
+        assertTrue(message.contains("true"));
+    }
+
+    @Test
+    void testDispatchCreateCustomBrief_PassesFlux2Dev() {
+        celeryTaskDispatcher
+                .dispatchCreateCustomBrief("a personal shirt", "dtf_apparel", true, "flux2_dev")
+                .await().indefinitely();
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+        verify(redis).execute(eq("LPUSH"), eq("celery"), messageCaptor.capture());
+
+        String message = messageCaptor.getValue();
+        assertTrue(message.contains("flux2_dev"));
+    }
 }

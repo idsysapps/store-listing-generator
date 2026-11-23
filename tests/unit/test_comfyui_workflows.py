@@ -172,11 +172,11 @@ class TestBirefnetBackgroundGraph:
 
 
 class TestQwenImageTxt2ImgGraph:
-    """The Qwen-Image graph follows the official ComfyUI template.
+    """The Qwen-Image 2.1 graph follows the official ComfyUI template.
 
-    It is deliberately not the Flux node shape: Qwen-Image needs a single
-    Qwen2.5-VL text encoder, the AuraFlow model sampling shift, and a plain
-    SD3 latent. The Phase 0 bake-off (issue #254) used exactly this graph.
+    It is deliberately not the Flux node shape and not the Qwen-Image 1.0
+    AuraFlow/SD3 graph: 2.1 uses ``TextEncodeQwenImage21``, an empty latent,
+    and loads Qwen3-VL with ``type="qwen_image"`` (issue #339).
     """
 
     def _graph(self, **overrides: Any) -> dict[str, Any]:
@@ -185,95 +185,107 @@ class TestQwenImageTxt2ImgGraph:
             "width": 1328,
             "height": 1328,
             "seed": 42,
-            "steps": 20,
-            "cfg": 4.0,
+            "steps": 25,
+            "cfg": 1.0,
             "sampler_name": "euler",
             "scheduler": "simple",
-            "shift": 3.1,
             "negative_prompt": "blurry, misspelled",
-            "unet_name": "qwen_image_fp8_e4m3fn.safetensors",
-            "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
-            "vae_name": "qwen_image_vae.safetensors",
+            "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+            "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+            "vae_name": "qwen_image_2.1_vae_bf16.safetensors",
         }
         params.update(overrides)
         return build_qwen_image_txt2img_graph(**params)
 
-    def test_has_the_ten_expected_nodes(self) -> None:
-        assert set(self._graph()) == {str(number) for number in range(1, 11)}
+    def test_has_the_eight_expected_nodes(self) -> None:
+        assert set(self._graph()) == {str(number) for number in range(1, 9)}
 
     def test_node_class_types(self) -> None:
         graph = self._graph()
         assert graph["1"]["class_type"] == "UNETLoader"
         assert graph["2"]["class_type"] == "CLIPLoader"
         assert graph["3"]["class_type"] == "VAELoader"
-        assert graph["4"]["class_type"] == "ModelSamplingAuraFlow"
-        assert graph["5"]["class_type"] == "CLIPTextEncode"
-        assert graph["6"]["class_type"] == "CLIPTextEncode"
-        assert graph["7"]["class_type"] == "EmptySD3LatentImage"
-        assert graph["8"]["class_type"] == "KSampler"
-        assert graph["9"]["class_type"] == "VAEDecode"
-        assert graph["10"]["class_type"] == "SaveImage"
+        assert graph["4"]["class_type"] == "TextEncodeQwenImage21"
+        assert graph["5"]["class_type"] == "EmptyLatentImage"
+        assert graph["6"]["class_type"] == "KSampler"
+        assert graph["7"]["class_type"] == "VAEDecode"
+        assert graph["8"]["class_type"] == "SaveImage"
 
     def test_unet_loader(self) -> None:
         inputs = self._graph()["1"]["inputs"]
-        assert inputs["unet_name"] == "qwen_image_fp8_e4m3fn.safetensors"
+        assert inputs["unet_name"] == "qwen_image_2.1_int8_convrot.safetensors"
         assert inputs["weight_dtype"] == "default"
 
     def test_single_qwen_text_encoder(self) -> None:
         inputs = self._graph()["2"]["inputs"]
-        assert inputs["clip_name"] == "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+        assert inputs["clip_name"] == "qwen3vl_8b_int8_convrot.safetensors"
         assert inputs["type"] == "qwen_image"
         assert inputs["device"] == "default"
 
     def test_vae_loader(self) -> None:
-        assert self._graph()["3"]["inputs"]["vae_name"] == "qwen_image_vae.safetensors"
+        assert self._graph()["3"]["inputs"]["vae_name"] == "qwen_image_2.1_vae_bf16.safetensors"
 
-    def test_aura_flow_shift_wraps_the_model(self) -> None:
-        inputs = self._graph(shift=2.5)["4"]["inputs"]
+    def test_text_encode_wires_clip_and_prompts(self) -> None:
+        graph = self._graph(prompt="a ghost", negative_prompt="blurry")
+        inputs = graph["4"]["inputs"]
+        assert inputs["clip"] == ["2", 0]
+        assert inputs["prompt"] == "a ghost"
+        assert inputs["negative_prompt"] == "blurry"
+        assert inputs["resolution"] == 0
+        assert "vae" not in inputs
+        assert "images.image_1" not in inputs
+
+    def test_reference_images_are_loaded_into_the_text_encode(self) -> None:
+        graph = self._graph(reference_images=("jar.jpg", "ship.jpg"))
+        inputs = graph["4"]["inputs"]
+        assert inputs["vae"] == ["3", 0]
+        assert inputs["resolution"] == 1024
+        assert inputs["images.image_1"] == ["21", 0]
+        assert inputs["images.image_2"] == ["22", 0]
+        assert graph["21"] == {
+            "class_type": "LoadImage",
+            "inputs": {"image": "jar.jpg"},
+        }
+        assert graph["22"] == {
+            "class_type": "LoadImage",
+            "inputs": {"image": "ship.jpg"},
+        }
+        assert set(self._graph()) <= set(graph)
+
+    def test_sampler_wires_unet_encode_and_latent(self) -> None:
+        inputs = self._graph()["6"]["inputs"]
         assert inputs["model"] == ["1", 0]
-        assert inputs["shift"] == 2.5
+        assert inputs["positive"] == ["4", 0]
+        assert inputs["negative"] == ["4", 1]
+        assert inputs["latent_image"] == ["5", 0]
 
-    def test_sampler_wires_the_shifted_model_and_both_encodes(self) -> None:
-        inputs = self._graph()["8"]["inputs"]
-        assert inputs["model"] == ["4", 0]
-        assert inputs["positive"] == ["5", 0]
-        assert inputs["negative"] == ["6", 0]
-        assert inputs["latent_image"] == ["7", 0]
-
-    def test_sampler_uses_qwen_image_settings(self) -> None:
-        inputs = self._graph()["8"]["inputs"]
-        assert inputs["steps"] == 20
-        assert inputs["cfg"] == 4.0
+    def test_sampler_uses_qwen_image_21_settings(self) -> None:
+        inputs = self._graph()["6"]["inputs"]
+        assert inputs["steps"] == 25
+        assert inputs["cfg"] == 1.0
         assert inputs["sampler_name"] == "euler"
         assert inputs["scheduler"] == "simple"
         assert inputs["denoise"] == 1.0
 
     def test_sampler_carries_the_seed(self) -> None:
-        assert self._graph(seed=1234)["8"]["inputs"]["seed"] == 1234
+        assert self._graph(seed=1234)["6"]["inputs"]["seed"] == 1234
 
     def test_latent_carries_the_requested_dimensions(self) -> None:
-        inputs = self._graph(width=1024, height=1280)["7"]["inputs"]
+        inputs = self._graph(width=1024, height=1280)["5"]["inputs"]
         assert inputs["width"] == 1024
         assert inputs["height"] == 1280
         assert inputs["batch_size"] == 1
 
-    def test_positive_and_negative_prompts(self) -> None:
-        graph = self._graph(prompt="a ghost", negative_prompt="blurry")
-        assert graph["5"]["inputs"]["text"] == "a ghost"
-        assert graph["5"]["inputs"]["clip"] == ["2", 0]
-        assert graph["6"]["inputs"]["text"] == "blurry"
-        assert graph["6"]["inputs"]["clip"] == ["2", 0]
-
     def test_vae_decode_and_save_are_wired(self) -> None:
         graph = self._graph()
-        assert graph["9"]["inputs"]["samples"] == ["8", 0]
-        assert graph["9"]["inputs"]["vae"] == ["3", 0]
-        assert graph["10"]["inputs"]["images"] == ["9", 0]
-        assert graph["10"]["inputs"]["filename_prefix"] == "qwen_wordmark"
+        assert graph["7"]["inputs"]["samples"] == ["6", 0]
+        assert graph["7"]["inputs"]["vae"] == ["3", 0]
+        assert graph["8"]["inputs"]["images"] == ["7", 0]
+        assert graph["8"]["inputs"]["filename_prefix"] == "qwen_wordmark"
 
     def test_filename_prefix_is_overridable(self) -> None:
         graph = self._graph(filename_prefix="hero")
-        assert graph["10"]["inputs"]["filename_prefix"] == "hero"
+        assert graph["8"]["inputs"]["filename_prefix"] == "hero"
 
     def test_is_deterministic(self) -> None:
         assert self._graph() == self._graph()
