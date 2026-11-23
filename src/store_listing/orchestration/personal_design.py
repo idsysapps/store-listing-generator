@@ -75,6 +75,34 @@ _LOOK_PROMPT = (
     "crowd when the frame is full of people, and unrelated when it is not the subject."
 )
 
+_PAGE_SYSTEM = (
+    "Choose the Wikipedia article to open. The title must be a film, show, place, "
+    "or ride named in the customer's sentence. Do not invent a name. "
+    'Return JSON only: {"title": "article title"}.'
+)
+
+_SECTION_SYSTEM = (
+    "The customer described one character in a film. Choose the section that lists "
+    "the characters and says what each one is. Copy the heading exactly. "
+    'Return JSON only: {"section": "heading"}.'
+)
+
+_CHARACTER_SYSTEM = (
+    "Identify the one character the customer described, using only this section. "
+    'Return JSON only: {"name": "...", "description": "...", "enough": true} '
+    'or {"enough": false, "section": "a different exact heading"} '
+    "if this section does not contain them."
+)
+
+_PICTURE_SYSTEM = (
+    "You check search notes for pictures of one character. "
+    'Return JSON only: {"accept": true} '
+    'or {"accept": false, "query": "one better search"}. '
+    "Accept only when the notes are about that character. "
+    "A page that merely shares one word is not it. "
+    "When you reject, query is one new search for that character."
+)
+
 
 @dataclass(frozen=True)
 class PhotoLook:
@@ -94,6 +122,22 @@ class SearchNote:
     image_url: str | None = None
     look: str | None = None
     look_keep: bool = True
+
+
+@dataclass(frozen=True)
+class ArticleSection:
+    """One heading in a Wikipedia article."""
+
+    heading: str
+    index: str
+
+
+@dataclass(frozen=True)
+class ArticleOutline:
+    """A Wikipedia page and the headings the model may choose."""
+
+    title: str
+    sections: tuple[ArticleSection, ...]
 
 
 @dataclass(frozen=True)
@@ -381,6 +425,158 @@ def rearrange(design: PersonalDesign, seed: int) -> PersonalDesign:
     return replace(design, prompt=prompt)
 
 
+def _json_string(parsed: Any, key: str) -> str:
+    if not isinstance(parsed, dict):
+        return ""
+    value = parsed.get(key)
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())
+
+
+def _section_named(outline: ArticleOutline, heading: str) -> ArticleSection | None:
+    for section in outline.sections:
+        if section.heading.lower() == heading.lower():
+            return section
+    return None
+
+
+def _read_section_text(read_page: Callable[[str, str], str], title: str, index: str) -> str:
+    try:
+        return read_page(title, index)
+    except Exception:  # noqa: BLE001
+        logger.warning("The article section could not be read")
+        return ""
+
+
+def _choose_section(
+    complete: Callable[[list[dict[str, str]]], str],
+    sentence: str,
+    outline: ArticleOutline,
+) -> ArticleSection | None:
+    listing = "\n".join(f"- {section.heading}" for section in outline.sections)
+    raw = complete(
+        [
+            {"role": "system", "content": _SECTION_SYSTEM},
+            {"role": "user", "content": f"Sentence: {sentence}\n\nHeadings:\n{listing}"},
+        ]
+    )
+    return _section_named(outline, _json_string(_first_object(raw), "section"))
+
+
+def _picture_check(raw: str) -> tuple[bool, str | None]:
+    """Whether the notes are about the character, and a replacement search."""
+    parsed = _first_object(raw)
+    if not isinstance(parsed, dict) or "accept" not in parsed:
+        return True, None
+    if parsed.get("accept") is True:
+        return True, None
+    query = _json_string(parsed, "query")
+    return False, query or None
+
+
+def _ask_picture_check(
+    complete: Callable[[list[dict[str, str]]], str],
+    character: str,
+    query: str,
+    notes: Sequence[SearchNote],
+) -> tuple[bool, str | None]:
+    listed = "\n".join(_note_line(note) for note in notes)
+    raw = complete(
+        [
+            {"role": "system", "content": _PICTURE_SYSTEM},
+            {
+                "role": "user",
+                "content": f"Character: {character}\nQuery: {query}\n\nNotes:\n{listed}",
+            },
+        ]
+    )
+    return _picture_check(raw)
+
+
+def _read_character(
+    complete: Callable[[list[dict[str, str]]], str],
+    sentence: str,
+    heading: str,
+    text: str,
+) -> tuple[str | None, str | None, str | None]:
+    """The character, a description, and another heading when this section is not enough."""
+    raw = complete(
+        [
+            {"role": "system", "content": _CHARACTER_SYSTEM},
+            {
+                "role": "user",
+                "content": f"Sentence: {sentence}\n\nSection: {heading}\n\n{text[:14000]}",
+            },
+        ]
+    )
+    parsed = _first_object(raw)
+    if not isinstance(parsed, dict):
+        return None, None, None
+    if parsed.get("enough") is False:
+        retry = _json_string(parsed, "section")
+        return None, None, retry or None
+    name = _json_string(parsed, "name")
+    if not name or name.lower() == "null":
+        return None, None, None
+    return name, _json_string(parsed, "description"), None
+
+
+def _character_from_work(
+    sentence: str,
+    complete: Callable[[list[dict[str, str]]], str],
+    open_page: Callable[[str], ArticleOutline | None],
+    read_page: Callable[[str, str], str],
+) -> tuple[str | None, str | None]:
+    """The character the model finds in the work the customer named.
+
+    A title that is not a Wikipedia page is sent back once. A section that
+    does not contain the character is replaced once. The role words are not
+    a search.
+    """
+    note = "No page has been opened yet."
+    outline: ArticleOutline | None = None
+    for _attempt in range(2):
+        raw = complete(
+            [
+                {"role": "system", "content": _PAGE_SYSTEM},
+                {"role": "user", "content": f"Sentence: {sentence}\n\n{note}"},
+            ]
+        )
+        title = _json_string(_first_object(raw), "title")
+        if not title:
+            return None, None
+        try:
+            outline = open_page(title)
+        except Exception:  # noqa: BLE001
+            logger.warning("The article could not be opened for %r", title)
+            outline = None
+        if outline is not None and outline.sections:
+            break
+        note = f"No Wikipedia page is titled {title!r}. Choose a different name from the sentence."
+        outline = None
+    if outline is None:
+        return None, None
+
+    heading = _choose_section(complete, sentence, outline)
+    if heading is None:
+        return None, None
+    text = _read_section_text(read_page, outline.title, heading.index)
+    name, description, retry = _read_character(complete, sentence, heading.heading, text)
+    if name:
+        return name, description
+    if not retry or retry.lower() == heading.heading.lower():
+        return None, None
+    other = _section_named(outline, retry)
+    if other is None:
+        return None, None
+    text = _read_section_text(read_page, outline.title, other.index)
+    name, description, _again = _read_character(complete, sentence, other.heading, text)
+    if not name:
+        return None, None
+    return name, description
+
+
 def research_personal_design(
     sentence: str,
     *,
@@ -389,11 +585,14 @@ def research_personal_design(
     seed: int,
     look: Callable[[bytes], PhotoLook] | None = None,
     fetch: Callable[[str], bytes | None] | None = None,
+    open_page: Callable[[str], ArticleOutline | None] | None = None,
+    read_page: Callable[[str, str], str] | None = None,
 ) -> PersonalDesign:
     """Search the sentence, look at the photos, and turn them into one graphic.
 
     ``complete`` is one Qwen call. ``search`` is one query. ``look`` describes
-    one downloaded photo. All three are injected so a test never touches the
+    one downloaded photo. ``open_page`` and ``read_page`` read the work the
+    customer named. All of them are injected so a test never touches the
     network. A missing look keeps the text-only path.
     """
     named = list(specified_characters(sentence))
@@ -403,18 +602,54 @@ def research_personal_design(
     character_notes: list[SearchNote] = []
     seen: list[SearchNote] = []
 
+    def _accepted(query: str, found: list[SearchNote]) -> list[SearchNote]:
+        """Notes about this character. A different character is searched once more."""
+        if resolved is None or not found:
+            return found
+        accept, replacement = _ask_picture_check(complete, resolved, query, found)
+        if accept:
+            return found
+        if not replacement or replacement.lower() == query.lower():
+            return []
+        try:
+            raw = search(replacement)
+        except Exception:  # noqa: BLE001
+            logger.warning("Personal design search failed for %r", replacement)
+            raw = []
+        retried = matching_notes(replacement, raw)
+        if not retried:
+            return []
+        accept_again, _again = _ask_picture_check(complete, resolved, replacement, retried)
+        return retried if accept_again else []
+
     def _found(query: str) -> list[SearchNote]:
         try:
-            found = search(query)
+            raw = search(query)
         except Exception:  # noqa: BLE001
             logger.warning("Personal design search failed for %r", query)
-            found = []
-        seen.extend(found)
-        return matching_notes(query, found)
+            raw = []
+        matched = matching_notes(query, raw)
+        if resolved and query.lower() in character_keys:
+            # A rejected picture never becomes a reference. Other searches still
+            # show every result to the photo check, including a logo.
+            kept = _accepted(query, matched)
+            seen.extend(kept)
+            return kept
+        seen.extend(raw)
+        return matched
 
-    role_notes = _found(role) if role else []
-    notes.extend(role_notes)
-    resolved = character_from_notes(role, role_notes) if role else None
+    resolved: str | None = None
+    if role:
+        # The role words are not a search. Separate words match a different work.
+        resolved, description = _character_from_work(
+            sentence,
+            complete,
+            open_page or open_article,
+            read_page or read_section,
+        )
+        if resolved and description:
+            character_notes.append(SearchNote(query=resolved, title=resolved, text=description))
+            notes.extend(character_notes)
     characters = list(named)
     if resolved is not None and resolved.lower() not in {name.lower() for name in characters}:
         characters.insert(0, resolved)
@@ -425,6 +660,9 @@ def research_personal_design(
     for query in _queries(complete, sentence):
         if len(queries) >= MAX_QUERIES:
             break
+        cleaned = query.strip().lower()
+        if role and cleaned in {role.lower(), sentence.strip().lower()}:
+            continue
         if _guessed_names(query, known, sentence):
             continue
         _add_query(queries, query)
@@ -435,12 +673,6 @@ def research_personal_design(
         if query.lower() in character_keys:
             character_notes.extend(found)
         notes.extend(found)
-    if resolved is not None:
-        character_notes.extend(
-            note
-            for note in role_notes
-            if resolved.lower() in _title_text(note.title) or resolved.lower() in note.text.lower()
-        )
     if look is not None:
         seen = _attach_looks(seen, look, fetch or fetch_reference)
         by_url = {note.image_url: note for note in seen if note.image_url}
@@ -515,6 +747,110 @@ def research_personal_design(
     )
 
 
+def section_lines(wikitext: str) -> str:
+    """The bullets of one section, including a cast list wrapped in a template.
+
+    The cast is ``{{castlist| ... }}``. Dropping that template drops the names
+    inside it. A reference and a link's markup are not part of the line.
+    """
+    lines: list[str] = []
+    for raw in (wikitext or "").splitlines():
+        if not raw.lstrip().startswith("*"):
+            continue
+        line = re.sub(r"<ref\b[^>]*/>", "", raw)
+        line = re.sub(r"<ref\b[^>]*>.*?</ref>", "", line, flags=re.DOTALL)
+        line = re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]+)\]\]", r"\1", line)
+        line = re.sub(r"'{2,}", "", line)
+        line = re.sub(r"\*+", "", line).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def open_article(title: str, *, client: httpx.Client | None = None) -> ArticleOutline | None:
+    """The page and its headings, or None when Wikipedia has no such page."""
+    owns_client = client is None
+    http = client or httpx.Client(timeout=10.0)
+    try:
+        response = http.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={"action": "query", "redirects": "1", "titles": title, "format": "json"},
+            headers={"User-Agent": _USER_AGENT},
+        )
+        response.raise_for_status()
+        pages = (response.json().get("query") or {}).get("pages") or {}
+        page = next(iter(pages.values()), None) if isinstance(pages, dict) else None
+        if not isinstance(page, dict) or "missing" in page:
+            return None
+        resolved = str(page.get("title") or title).strip()
+        sections_response = http.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "parse",
+                "page": resolved,
+                "prop": "sections",
+                "format": "json",
+            },
+            headers={"User-Agent": _USER_AGENT},
+        )
+        sections_response.raise_for_status()
+        raw_sections = (sections_response.json().get("parse") or {}).get("sections") or []
+        sections = tuple(
+            ArticleSection(str(item.get("line") or "").strip(), str(item.get("index") or ""))
+            for item in raw_sections
+            if isinstance(item, dict) and str(item.get("line") or "").strip() and item.get("index")
+        )
+        if not sections:
+            return None
+        return ArticleOutline(resolved, sections)
+    except (httpx.HTTPError, ValueError, StopIteration):
+        logger.warning("Wikipedia article could not be opened for %r", title)
+        return None
+    finally:
+        if owns_client:
+            http.close()
+
+
+def read_section(title: str, index: str, *, client: httpx.Client | None = None) -> str:
+    """The flattened lines of one section. A failed call is an empty string."""
+    owns_client = client is None
+    http = client or httpx.Client(timeout=10.0)
+    try:
+        response = http.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "parse",
+                "page": title,
+                "prop": "wikitext",
+                "section": index,
+                "format": "json",
+            },
+            headers={"User-Agent": _USER_AGENT},
+        )
+        response.raise_for_status()
+        wikitext = ((response.json().get("parse") or {}).get("wikitext") or {}).get("*")
+        if not isinstance(wikitext, str):
+            return ""
+        return section_lines(wikitext)
+    except (httpx.HTTPError, ValueError):
+        logger.warning("Wikipedia section could not be read")
+        return ""
+    finally:
+        if owns_client:
+            http.close()
+
+
+def bound_query(query: str) -> str:
+    """Several words are one phrase. Separate words match a different page."""
+    words = query.split()
+    if len(words) < 2:
+        return " ".join(words)
+    phrase = " ".join(words)
+    if phrase.startswith('"') and phrase.endswith('"'):
+        return phrase
+    return f'"{phrase}"'
+
+
 def search_wikipedia(query: str, *, client: httpx.Client | None = None) -> list[SearchNote]:
     """Short visual notes from Wikipedia. A failed call is an empty list."""
     owns_client = client is None
@@ -525,7 +861,7 @@ def search_wikipedia(query: str, *, client: httpx.Client | None = None) -> list[
             params={
                 "action": "query",
                 "generator": "search",
-                "gsrsearch": query,
+                "gsrsearch": bound_query(query),
                 "gsrlimit": "3",
                 "prop": "extracts|pageimages",
                 "exintro": "1",
@@ -570,7 +906,12 @@ def search_duckduckgo(query: str, *, client: httpx.Client | None = None) -> list
     try:
         response = http.get(
             "https://api.duckduckgo.com/",
-            params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
+            params={
+                "q": bound_query(query),
+                "format": "json",
+                "no_html": "1",
+                "skip_disambig": "1",
+            },
             headers={"User-Agent": _USER_AGENT},
         )
         response.raise_for_status()
@@ -603,7 +944,7 @@ def search_commons(query: str, *, client: httpx.Client | None = None) -> list[Se
             params={
                 "action": "query",
                 "generator": "search",
-                "gsrsearch": query,
+                "gsrsearch": bound_query(query),
                 "gsrnamespace": "6",
                 "gsrlimit": "4",
                 "prop": "imageinfo",

@@ -8,6 +8,8 @@ import httpx
 import pytest
 
 from store_listing.orchestration.personal_design import (
+    ArticleOutline,
+    ArticleSection,
     PersonalDesign,
     PhotoLook,
     SearchNote,
@@ -26,6 +28,7 @@ from store_listing.orchestration.personal_design import (
     search_duckduckgo,
     search_personal,
     search_wikipedia,
+    section_lines,
     specified_characters,
 )
 
@@ -221,6 +224,7 @@ def test_a_rejected_reference_is_not_kept() -> None:
 def test_a_search_keeps_a_photo_and_drops_a_logo() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.params["piprop"] == "thumbnail"
+        assert request.url.params["gsrsearch"] == "park"
         return httpx.Response(
             200,
             json={
@@ -287,6 +291,27 @@ def test_plural_characters_are_not_one_specific_character() -> None:
     assert character_role("Judy Hopps character") is None
 
 
+def test_a_cast_list_keeps_every_bullet() -> None:
+    wikitext = """
+== Voice cast ==
+{{Multiple image
+| footer = [[Someone]]
+}}
+{{castlist|
+* Raymond S. Persi as:
+** Flash Slothmore, the "fastest" [[three-toed sloth]] in the DMV.
+* [[Kristen Bell]] as Priscilla Tripletoe, a sloth and Flash's co-worker.<ref name="k" />
+}}
+"""
+
+    lines = section_lines(wikitext)
+
+    assert 'Flash Slothmore, the "fastest" three-toed sloth in the DMV.' in lines
+    assert "Priscilla Tripletoe, a sloth and Flash's co-worker." in lines
+    assert "castlist" not in lines
+    assert "<ref" not in lines
+
+
 def test_a_role_is_the_search_for_an_unnamed_character() -> None:
     assert (
         character_role(
@@ -322,34 +347,47 @@ def test_a_crowd_of_names_is_not_resolved() -> None:
     assert character_from_notes("Zootopia sleuth character", notes) is None
 
 
-def test_research_replaces_a_role_with_the_character_the_search_names() -> None:
+def _article(title: str, *headings: tuple[str, str]) -> ArticleOutline:
+    return ArticleOutline(
+        title,
+        tuple(ArticleSection(heading, index) for heading, index in headings),
+    )
+
+
+def _design_answer(subjects: str) -> str:
+    return json.dumps(
+        {
+            "customer_line": None,
+            "voice_found": False,
+            "lettering": None,
+            "subjects": subjects,
+            "references": [],
+        }
+    )
+
+
+def test_research_names_the_character_from_the_article() -> None:
+    sentence = 'Zootopia sleuth character showing slow moving with text "Get There Eventually"'
     answers = iter(
         [
-            json.dumps({"queries": ["zootopia movie"]}),
+            json.dumps({"title": "Zootopia"}),
+            json.dumps({"section": "Voice cast"}),
             json.dumps(
                 {
-                    "customer_line": None,
-                    "voice_found": False,
-                    "lettering": None,
-                    "subjects": "a grey rabbit beside an orange tiger",
-                    "references": [],
+                    "name": "Flash Slothmore",
+                    "description": "the fastest three-toed sloth in the DMV.",
+                    "enough": True,
                 }
             ),
+            json.dumps({"queries": []}),
+            json.dumps({"accept": True}),
+            _design_answer("a grey rabbit beside an orange tiger"),
         ]
     )
     queries: list[str] = []
 
     def search(query: str) -> list[SearchNote]:
         queries.append(query)
-        if query == "Zootopia sleuth character":
-            return [
-                SearchNote(
-                    query,
-                    "Flash Slothmore",
-                    "Flash Slothmore is a sloth.",
-                    "https://example.com/flash.jpg",
-                )
-            ]
         if query == "Flash Slothmore":
             return [
                 SearchNote(
@@ -362,46 +400,142 @@ def test_research_replaces_a_role_with_the_character_the_search_names() -> None:
         return [
             SearchNote(
                 query,
-                "Zootopia",
-                "Judy Hopps and Nick Wilde are police officers.",
-                None,
+                "Winnie the Pooh (franchise)",
+                "Pooh's Super Sleuth Christmas Movie.",
+                "https://example.com/pooh.jpg",
             )
         ]
 
     design = research_personal_design(
-        'Zootopia sleuth character showing slow moving with text "Get There Eventually"',
+        sentence,
         complete=lambda _messages: next(answers),
         search=search,
         seed=1,
+        open_page=lambda title: _article(title, ("Voice cast", "2")),
+        read_page=lambda _title, _index: (
+            'Flash Slothmore, the "fastest" three-toed sloth in the DMV.'
+        ),
     )
 
-    assert queries[0] == "Zootopia sleuth character"
-    assert "Flash Slothmore" in queries
+    assert queries == ["Flash Slothmore"]
     assert "Flash Slothmore" in design.subjects
     assert "not a different character" in design.subjects
     assert "Judy Hopps" not in design.subjects
+    assert "https://example.com/pooh.jpg" not in design.reference_urls
     assert design.reference_urls[0] == "https://example.com/flash-ref.jpg"
     assert design.lettering == "Get There Eventually"
 
 
+def test_a_reference_search_rejects_another_character_and_keeps_flash() -> None:
+    sentence = 'Zootopia sleuth character showing slow moving with text "Get There Eventually"'
+    answers = iter(
+        [
+            json.dumps({"title": "Zootopia"}),
+            json.dumps({"section": "Voice cast"}),
+            json.dumps(
+                {
+                    "name": "Flash Slothmore",
+                    "description": "the fastest three-toed sloth in the DMV.",
+                    "enough": True,
+                }
+            ),
+            json.dumps({"queries": []}),
+            json.dumps({"accept": False, "query": "Flash Slothmore sloth"}),
+            json.dumps({"accept": True}),
+            _design_answer("a sloth"),
+        ]
+    )
+    queries: list[str] = []
+
+    def search(query: str) -> list[SearchNote]:
+        queries.append(query)
+        if query == "Flash Slothmore sloth":
+            return [
+                SearchNote(
+                    query,
+                    "Flash Slothmore",
+                    "Flash Slothmore is a sloth in Zootopia.",
+                    "https://example.com/flash-ref.jpg",
+                )
+            ]
+        return [
+            SearchNote(
+                query,
+                "Winnie the Pooh (franchise)",
+                "Pooh's Super Sleuth Christmas Movie.",
+                "https://example.com/pooh.jpg",
+            )
+        ]
+
+    design = research_personal_design(
+        sentence,
+        complete=lambda _messages: next(answers),
+        search=search,
+        seed=1,
+        open_page=lambda title: _article(title, ("Voice cast", "2")),
+        read_page=lambda _title, _index: "Flash Slothmore, a sloth in the DMV.",
+    )
+
+    assert queries == ["Flash Slothmore", "Flash Slothmore sloth"]
+    assert design.reference_urls == ("https://example.com/flash-ref.jpg",)
+    assert "Winnie" not in design.subjects
+    assert "Flash Slothmore" in design.subjects
+
+
+def test_a_missing_article_title_is_rejected_and_the_next_title_is_opened() -> None:
+    sentence = 'Zootopia sleuth character showing slow moving with text "Get There Eventually"'
+    opened: list[str] = []
+    answers = iter(
+        [
+            json.dumps({"title": "Clauddius Bullfrog"}),
+            json.dumps({"title": "Zootopia"}),
+            json.dumps({"section": "Voice cast"}),
+            json.dumps(
+                {
+                    "name": "Flash Slothmore",
+                    "description": "a sloth in the DMV.",
+                    "enough": True,
+                }
+            ),
+            json.dumps({"queries": []}),
+            json.dumps({"accept": True}),
+            _design_answer("a sloth"),
+        ]
+    )
+
+    def open_page(title: str) -> ArticleOutline | None:
+        opened.append(title)
+        if title == "Zootopia":
+            return _article(title, ("Voice cast", "2"))
+        return None
+
+    design = research_personal_design(
+        sentence,
+        complete=lambda _messages: next(answers),
+        search=lambda query: [
+            SearchNote(query, query, f"{query} is a sloth.", "https://example.com/flash.jpg")
+        ],
+        seed=1,
+        open_page=open_page,
+        read_page=lambda _title, _index: "Flash Slothmore, a sloth.",
+    )
+
+    assert opened == ["Clauddius Bullfrog", "Zootopia"]
+    assert "Flash Slothmore" in design.subjects
+
+
 def test_an_unresolved_role_is_researched_and_not_replaced_by_a_guess() -> None:
-    # The model knows Judy Hopps. The notes do not name one character, so
-    # that guess must not be searched or drawn.
+    # The model knows Judy Hopps. The article names nobody, so that guess
+    # must not be searched or drawn, and the loose role is not a search.
     prompts: list[str] = []
 
     def complete(messages: list[dict[str, str]]) -> str:
         prompts.append(messages[0]["content"])
-        if len(prompts) == 1:
+        if "Wikipedia article" in messages[0]["content"]:
+            return json.dumps({"title": "Nope"})
+        if "web searches" in messages[0]["content"]:
             return json.dumps({"queries": ["Judy Hopps", "slow moving"]})
-        return json.dumps(
-            {
-                "customer_line": None,
-                "voice_found": False,
-                "lettering": None,
-                "subjects": "Judy Hopps, a rabbit police officer",
-                "references": [],
-            }
-        )
+        return _design_answer("Judy Hopps, a rabbit police officer")
 
     queries: list[str] = []
 
@@ -421,16 +555,17 @@ def test_an_unresolved_role_is_researched_and_not_replaced_by_a_guess() -> None:
         complete=complete,
         search=search,
         seed=1,
+        open_page=lambda _title: None,
     )
 
-    assert queries[0] == "Zootopia sleuth character"
+    assert "Zootopia sleuth character" not in queries
     assert "Judy Hopps" not in queries
     assert "slow moving" in queries
     assert "Judy Hopps" not in design.subjects
     assert "Judy Hopps" not in design.prompt
     assert "Zootopia sleuth character" in design.subjects
-    assert "Do not guess a name." in prompts[0]
-    assert "Do not invent a character the notes do not name." in prompts[1]
+    assert any("Do not guess a name." in prompt for prompt in prompts)
+    assert any("Do not invent a character the notes do not name." in prompt for prompt in prompts)
 
 
 def test_research_prints_the_quoted_line_and_locks_the_named_character() -> None:
@@ -476,6 +611,7 @@ def test_research_prints_the_quoted_line_and_locks_the_named_character() -> None
         complete=lambda _messages: next(answers),
         search=search,
         seed=1,
+        open_page=lambda title: (_ for _ in ()).throw(AssertionError(title)),
     )
 
     assert design.customer_lettering is True
@@ -492,7 +628,7 @@ def test_research_prints_the_quoted_line_and_locks_the_named_character() -> None
 
 def test_duckduckgo_adds_a_short_note_and_a_picture() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.params["q"] == "Judy Hopps"
+        assert request.url.params["q"] == '"Judy Hopps"'
         return httpx.Response(
             200,
             json={
@@ -512,6 +648,7 @@ def test_duckduckgo_adds_a_short_note_and_a_picture() -> None:
 def test_commons_keeps_a_character_picture_and_drops_a_logo() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.params["gsrnamespace"] == "6"
+        assert request.url.params["gsrsearch"] == '"Judy Hopps"'
         return httpx.Response(
             200,
             json={
@@ -664,6 +801,7 @@ def test_a_photo_look_fills_the_gaps_and_does_not_rename_the_mountain() -> None:
         seed=1,
         look=look,
         fetch=lambda url: b"logo" if url.endswith("logo.jpg") else b"mountain",
+        open_page=lambda title: (_ for _ in ()).throw(AssertionError(title)),
     )
 
     instructions = " ".join(message["content"] for messages in seen for message in messages)
