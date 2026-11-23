@@ -596,6 +596,7 @@ def create_custom_brief_task(
     client = get_llm_client()
     model = get_llm_model()
     _check_llm_model(client, model)
+    progress_client = _image_progress()[1]
     result = create_custom_brief(
         DatabaseClient(),
         client.chat.completions,
@@ -604,6 +605,7 @@ def create_custom_brief_task(
         product_type,
         personal_use=personal_use,
         enabled=enabled_product_types(DatabaseClient()),
+        progress_client=progress_client,
     )
     result["llm_model"] = model
 
@@ -682,13 +684,17 @@ def replan_design_briefs_task(batch_id: str, feedback: str | None = None) -> dic
     return result
 
 
-def _image_status_publisher() -> Any:
-    """Publish render progress on the Redis channel the GraphQL subscription reads."""
+def _image_progress() -> tuple[Any, Any]:
+    """The publisher and the Redis client that keeps one brief's clock.
+
+    The client is how the image task continues a clock the brief task started.
+    """
     import redis
 
     from store_listing.orchestration.image_progress import publishing
 
-    return publishing(redis.Redis.from_url(celery_redis_url()))
+    client = redis.Redis.from_url(celery_redis_url())
+    return publishing(client), client
 
 
 @celery_app.task
@@ -728,6 +734,7 @@ def generate_design_images_task() -> dict:
         threshold=float(os.environ.get("TEXT_MATCH_THRESHOLD", "0.85")),
         require_tagline=_require_tagline_text(),
     )
+    status_publisher, progress_client = _image_progress()
 
     return generate_images_for_briefs(
         db_client=DatabaseClient(),
@@ -741,7 +748,8 @@ def generate_design_images_task() -> dict:
         hero_validator=_build_hero_validator(),
         product_types=enabled_product_types(DatabaseClient()),
         brief_rewriter=_lettering_brief_rewriter(),
-        status_publisher=_image_status_publisher(),
+        status_publisher=status_publisher,
+        progress_client=progress_client,
     )
 
 
@@ -782,6 +790,7 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         threshold=float(os.environ.get("TEXT_MATCH_THRESHOLD", "0.85")),
         require_tagline=_require_tagline_text(),
     )
+    status_publisher, progress_client = _image_progress()
 
     return generate_image_for_brief(
         brief_id=brief_id,
@@ -795,5 +804,6 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         artwork_text_validator=_build_artwork_text_validator(),
         hero_validator=_build_hero_validator(),
         brief_rewriter=_lettering_brief_rewriter(),
-        status_publisher=_image_status_publisher(),
+        status_publisher=status_publisher,
+        progress_client=progress_client,
     )

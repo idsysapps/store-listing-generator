@@ -25,9 +25,14 @@ public class ImageGenerationSubscription {
         if (securityIdentity == null || securityIdentity.isAnonymous()) {
             throw new GraphQLException("Authentication required");
         }
-        return redis.pubsub(String.class)
+        Multi<ImageGenerationStatus> live = redis.pubsub(String.class)
                 .subscribe(ImageGenerationStatuses.CHANNEL)
                 .map(ImageGenerationStatuses::parse)
                 .select().where(status -> ImageGenerationStatuses.forBrief(status, briefId));
+        return redis.value(String.class)
+                .get(ImageGenerationStatuses.statusKey(briefId))
+                .onFailure().recoverWithItem((String) null)
+                .onItem().transformToMulti(json -> ImageGenerationStatuses.startingWith(
+                        ImageGenerationStatuses.parse(json), briefId, live));
     }
 }

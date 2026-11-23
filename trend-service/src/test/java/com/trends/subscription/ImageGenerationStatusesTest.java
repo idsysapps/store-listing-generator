@@ -1,7 +1,11 @@
 package com.trends.subscription;
 
 import com.trends.dto.ImageGenerationStatus;
+import io.smallrye.mutiny.Multi;
 import org.junit.jupiter.api.Test;
+
+import java.time.Duration;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,5 +38,46 @@ class ImageGenerationStatusesTest {
         assertNull(ImageGenerationStatuses.parse("not json"));
         assertNull(ImageGenerationStatuses.parse(""));
         assertFalse(ImageGenerationStatuses.forBrief(null, 12));
+    }
+
+    @Test
+    void theStatusKeyMatchesTheKeyTheWorkerWrites() {
+        assertEquals("image-generation:status:12", ImageGenerationStatuses.statusKey(12));
+    }
+
+    @Test
+    void theSnapshotIsSentBeforeLiveEvents() {
+        ImageGenerationStatus snapshot = status("writing");
+        ImageGenerationStatus live = status("researching");
+
+        List<ImageGenerationStatus> seen = ImageGenerationStatuses
+                .startingWith(snapshot, 12, Multi.createFrom().item(live))
+                .collect().asList()
+                .await().atMost(Duration.ofSeconds(2));
+
+        assertEquals(List.of("writing", "researching"),
+                seen.stream().map(ImageGenerationStatus::getPhase).toList());
+    }
+
+    @Test
+    void aSnapshotForAnotherBriefIsSkipped() {
+        ImageGenerationStatus other = status("writing");
+        other.setBriefId(4);
+        ImageGenerationStatus live = status("sampling");
+
+        List<ImageGenerationStatus> seen = ImageGenerationStatuses
+                .startingWith(other, 12, Multi.createFrom().item(live))
+                .collect().asList()
+                .await().atMost(Duration.ofSeconds(2));
+
+        assertEquals(List.of("sampling"),
+                seen.stream().map(ImageGenerationStatus::getPhase).toList());
+    }
+
+    private static ImageGenerationStatus status(String phase) {
+        ImageGenerationStatus status = new ImageGenerationStatus();
+        status.setBriefId(12);
+        status.setPhase(phase);
+        return status;
     }
 }

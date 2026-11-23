@@ -569,6 +569,7 @@ class DatabaseClient:
         subtitle_text: str | None = None,
         footer_text: str | None = None,
         label_plates: list[dict[str, Any]] | None = None,
+        image_status: str | None = None,
     ) -> int:
         import json as _json
 
@@ -585,8 +586,8 @@ class DatabaseClient:
                      layout_type, headline_text, tagline_text, copy_mode, kicker_text,
                      font_color, scene_description, personal_use, recommended_materials, voice,
                      font_family, style_preset, text_plan, pricing, listing_description,
-                     silhouette, subtitle_text, footer_text, label_plates)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     silhouette, subtitle_text, footer_text, label_plates, image_status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -618,6 +619,7 @@ class DatabaseClient:
                     subtitle_text,
                     footer_text,
                     label_plates_json,
+                    image_status,
                 ),
             )
             result = cur.fetchone()
@@ -625,6 +627,100 @@ class DatabaseClient:
                 msg = "Failed to insert design brief"
                 raise RuntimeError(msg)
             return result[0]
+
+    def update_design_brief(
+        self,
+        brief_id: int,
+        *,
+        concept: str,
+        product_type: str,
+        specific_products: list[str],
+        audience: str,
+        visual_style: str,
+        confidence: int,
+        reasoning: str,
+        llm_model: str,
+        batch_id: str,
+        layout_type: str = "full_bleed",
+        headline_text: str | None = None,
+        tagline_text: str | None = None,
+        copy_mode: str = "caption",
+        kicker_text: str | None = None,
+        font_color: str | None = None,
+        scene_description: str | None = None,
+        personal_use: bool = False,
+        voice: str = DEFAULT_VOICE,
+        font_family: str | None = None,
+        style_preset: str | None = None,
+        text_plan: dict[str, Any] | None = None,
+        listing_description: str | None = None,
+        label_plates: list[dict[str, Any]] | None = None,
+        image_status: str = "pending",
+    ) -> None:
+        """Fill a brief that was reserved before its research finished."""
+        import json as _json
+
+        text_plan_json = _json.dumps(text_plan) if text_plan else None
+        label_plates_json = _json.dumps(label_plates) if label_plates else None
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE design_briefs
+                SET concept = %s,
+                    product_type = %s,
+                    specific_products = %s,
+                    audience = %s,
+                    visual_style = %s,
+                    confidence = %s,
+                    reasoning = %s,
+                    llm_model = %s,
+                    batch_id = %s,
+                    layout_type = %s,
+                    headline_text = %s,
+                    tagline_text = %s,
+                    copy_mode = %s,
+                    kicker_text = %s,
+                    font_color = %s,
+                    scene_description = %s,
+                    personal_use = %s,
+                    voice = %s,
+                    font_family = %s,
+                    style_preset = %s,
+                    text_plan = %s,
+                    listing_description = %s,
+                    label_plates = %s,
+                    image_status = %s,
+                    image_error = NULL
+                WHERE id = %s
+                """,
+                (
+                    concept,
+                    product_type,
+                    specific_products,
+                    audience,
+                    visual_style,
+                    confidence,
+                    reasoning,
+                    llm_model,
+                    batch_id,
+                    layout_type,
+                    headline_text,
+                    tagline_text,
+                    copy_mode,
+                    kicker_text,
+                    font_color,
+                    scene_description,
+                    personal_use,
+                    voice,
+                    font_family,
+                    style_preset,
+                    text_plan_json,
+                    listing_description,
+                    label_plates_json,
+                    image_status,
+                    brief_id,
+                ),
+            )
 
     def insert_brief_source(self, brief_id: int, active_seed_id: int) -> int | None:
         with self.connect() as conn, conn.cursor() as cur:
@@ -659,7 +755,8 @@ class DatabaseClient:
                            label_plates
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
-                      AND (image_status IS NULL OR image_status <> 'needs_attention')
+                      AND (image_status IS NULL OR image_status NOT IN ('needs_attention', 'preparing'))
+                      AND (batch_id IS NULL OR batch_id <> 'custom')
                       AND (review_status IS NULL OR review_status <> 'rejected')
                       AND product_type = ANY(%s)
                     ORDER BY created_at DESC
@@ -678,7 +775,8 @@ class DatabaseClient:
                            label_plates
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
-                      AND (image_status IS NULL OR image_status <> 'needs_attention')
+                      AND (image_status IS NULL OR image_status NOT IN ('needs_attention', 'preparing'))
+                      AND (batch_id IS NULL OR batch_id <> 'custom')
                       AND (review_status IS NULL OR review_status <> 'rejected')
                     ORDER BY created_at DESC
                     LIMIT %s
