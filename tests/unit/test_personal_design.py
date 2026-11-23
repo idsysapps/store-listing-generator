@@ -1127,3 +1127,105 @@ def test_no_duplicate_holiday_injection_when_subjects_already_name_it() -> None:
     )
 
     assert "The scene is Thanksgiving-themed" not in design.subjects
+
+
+# ---------------------------------------------------------------------------
+# 429 retry on search sources (issue #348 or similar)
+# ---------------------------------------------------------------------------
+
+
+def test_wikipedia_retries_on_429_and_returns_notes() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"retry-after": "0"})
+        return httpx.Response(
+            200,
+            json={
+                "query": {
+                    "pages": {
+                        "1": {
+                            "title": "Thanksgiving",
+                            "extract": "Thanksgiving is an annual holiday.",
+                            "thumbnail": {"source": "https://example.com/turkey.jpg"},
+                        }
+                    }
+                }
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        notes = search_wikipedia("Thanksgiving", client=client)
+
+    assert len(calls) == 2
+    assert notes[0].title == "Thanksgiving"
+
+
+def test_wikipedia_returns_empty_after_all_retries_exhausted() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"retry-after": "0"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        notes = search_wikipedia("Thanksgiving", client=client)
+
+    assert notes == []
+
+
+def test_commons_retries_on_429_and_returns_notes() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"retry-after": "0"})
+        return httpx.Response(
+            200,
+            json={
+                "query": {
+                    "pages": {
+                        "1": {
+                            "title": "File:Thanksgiving.jpg",
+                            "imageinfo": [{"thumburl": "https://upload.wikimedia.org/turkey.jpg"}],
+                        }
+                    }
+                }
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        notes = search_commons("Thanksgiving", client=client)
+
+    assert len(calls) == 2
+    assert notes[0].image_url == "https://upload.wikimedia.org/turkey.jpg"
+
+
+def test_wikidata_retries_on_429_and_returns_notes() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        action = request.url.params.get("action")
+        if action == "wbsearchentities":
+            if len(calls) == 1:
+                return httpx.Response(429, headers={"retry-after": "0"})
+            return httpx.Response(
+                200,
+                json={
+                    "search": [
+                        {
+                            "id": "Q4166",
+                            "label": "Thanksgiving",
+                            "description": "annual national holiday in the United States",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"entities": {"Q4166": {"claims": {}}}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        notes = search_wikidata("Thanksgiving", client=client)
+
+    assert notes[0].title == "Thanksgiving"
+    assert notes[0].text == "annual national holiday in the United States"

@@ -962,12 +962,34 @@ def bound_query(query: str) -> str:
     return f'"{phrase}"'
 
 
+_SEARCH_ATTEMPTS = 3
+
+
+def _search_get(
+    http: httpx.Client,
+    url: str,
+    *,
+    params: dict,
+    headers: dict,
+) -> httpx.Response:
+    """GET with backoff retry on 429 and 503. Raises HTTPError on other failures."""
+    response = http.get(url, params=params, headers=headers)
+    for attempt in range(1, _SEARCH_ATTEMPTS):
+        if response.status_code not in (429, 503):
+            break
+        time.sleep(_retry_delay(response, attempt))
+        response = http.get(url, params=params, headers=headers)
+    response.raise_for_status()
+    return response
+
+
 def search_wikipedia(query: str, *, client: httpx.Client | None = None) -> list[SearchNote]:
     """Short visual notes from Wikipedia. A failed call is an empty list."""
     owns_client = client is None
     http = client or httpx.Client(timeout=10.0)
     try:
-        response = http.get(
+        response = _search_get(
+            http,
             "https://en.wikipedia.org/w/api.php",
             params={
                 "action": "query",
@@ -984,7 +1006,6 @@ def search_wikipedia(query: str, *, client: httpx.Client | None = None) -> list[
             },
             headers={"User-Agent": "store-listing-generator/1.0 (personal design research)"},
         )
-        response.raise_for_status()
         payload = response.json()
     except (httpx.HTTPError, ValueError):
         logger.warning("Wikipedia search failed for %r", query)
@@ -1050,7 +1071,8 @@ def search_commons(query: str, *, client: httpx.Client | None = None) -> list[Se
     owns_client = client is None
     http = client or httpx.Client(timeout=10.0)
     try:
-        response = http.get(
+        response = _search_get(
+            http,
             "https://commons.wikimedia.org/w/api.php",
             params={
                 "action": "query",
@@ -1065,7 +1087,6 @@ def search_commons(query: str, *, client: httpx.Client | None = None) -> list[Se
             },
             headers={"User-Agent": _USER_AGENT},
         )
-        response.raise_for_status()
         payload = response.json()
     except (httpx.HTTPError, ValueError):
         logger.warning("Commons search failed for %r", query)
@@ -1096,7 +1117,8 @@ def search_wikidata(query: str, *, client: httpx.Client | None = None) -> list[S
     owns_client = client is None
     http = client or httpx.Client(timeout=10.0)
     try:
-        r = http.get(
+        r = _search_get(
+            http,
             "https://www.wikidata.org/w/api.php",
             params={
                 "action": "wbsearchentities",
@@ -1107,7 +1129,6 @@ def search_wikidata(query: str, *, client: httpx.Client | None = None) -> list[S
             },
             headers={"User-Agent": _USER_AGENT},
         )
-        r.raise_for_status()
         results = r.json().get("search") or []
         if not isinstance(results, list):
             return []
@@ -1129,7 +1150,8 @@ def search_wikidata(query: str, *, client: httpx.Client | None = None) -> list[S
 
         image_url: str | None = None
         try:
-            r2 = http.get(
+            r2 = _search_get(
+                http,
                 "https://www.wikidata.org/w/api.php",
                 params={
                     "action": "wbgetentities",
@@ -1139,7 +1161,6 @@ def search_wikidata(query: str, *, client: httpx.Client | None = None) -> list[S
                 },
                 headers={"User-Agent": _USER_AGENT},
             )
-            r2.raise_for_status()
             entity = (r2.json().get("entities") or {}).get(qid) or {}
             p18 = (entity.get("claims") or {}).get("P18") or []
             if isinstance(p18, list) and p18:
