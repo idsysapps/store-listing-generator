@@ -1336,6 +1336,7 @@ _GEMINI_PROMPT = (
     "distinctive colours, features, costume, or setting. "
     "Focus on visual details useful for illustration. Be specific."
 )
+_GEMINI_ATTEMPTS = 3
 
 
 def search_gemini(
@@ -1349,6 +1350,10 @@ def search_gemini(
     current web results. No image URL is returned; Gemini does not expose
     image URLs via the API. Returns an empty list when GEMINI_API_KEY is not
     set or the call fails.
+
+    Retries up to three times on 429 rate-limit responses with backoff, since
+    the pipeline fires one Gemini call per named subject in quick succession.
+    Uses v1beta explicitly so Google Search grounding is available.
     """
     import os
 
@@ -1364,17 +1369,35 @@ def search_gemini(
             from google import genai  # type: ignore[import-not-found]
 
             def make_client(key: str) -> Any:
-                return genai.Client(api_key=key)
+                return genai.Client(
+                    api_key=key,
+                    http_options={"api_version": "v1beta"},
+                )
 
         client = make_client(api_key)
-        response = client.models.generate_content(
-            model=_GEMINI_MODEL,
-            contents=_GEMINI_PROMPT.format(query=query),
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                max_output_tokens=200,
-            ),
-        )
+        last_exc: Exception | None = None
+        for attempt in range(1, _GEMINI_ATTEMPTS + 1):
+            try:
+                response = client.models.generate_content(
+                    model=_GEMINI_MODEL,
+                    contents=_GEMINI_PROMPT.format(query=query),
+                    config=types.GenerateContentConfig(
+                        tools=[types.Tool(google_search=types.GoogleSearch())],
+                        max_output_tokens=1000,
+                    ),
+                )
+                break
+            except Exception as exc:
+                last_exc = exc
+                exc_str = str(exc)
+                if "429" in exc_str and attempt < _GEMINI_ATTEMPTS:
+                    wait = min(4.0 * attempt, 15.0)
+                    time.sleep(wait)
+                    continue
+                raise
+        else:
+            raise last_exc  # type: ignore[misc]
+
         text = (response.text or "").strip()
         if not text:
             return []
