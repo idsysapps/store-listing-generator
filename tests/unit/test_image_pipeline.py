@@ -244,7 +244,7 @@ class TestGenerateImagesForBriefs:
         call_kwargs = db.update_brief_image_keys.call_args.kwargs
         assert "transparent" in call_kwargs["image_key_transparent"]
 
-    def test_a_personal_brief_is_drawn_by_flux2_with_its_line(self) -> None:
+    def test_a_personal_brief_is_drawn_by_qwen_with_its_line(self) -> None:
         db = _mock_db_client(
             briefs=[
                 _brief(
@@ -265,7 +265,7 @@ class TestGenerateImagesForBriefs:
             ]
         )
         comfyui = _comfyui_client()
-        comfyui.generate_flux2_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="f")
+        comfyui.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="q")
         lettering = _artwork_text_validator(True)
 
         result = generate_images_for_briefs(
@@ -278,7 +278,8 @@ class TestGenerateImagesForBriefs:
 
         assert result["images_generated"] == 1
         comfyui.generate_image.assert_not_called()
-        prompt = comfyui.generate_flux2_image.call_args.kwargs["prompt"]
+        comfyui.generate_flux2_image.assert_not_called()
+        prompt = comfyui.generate_qwen_image.call_args.kwargs["prompt"]
         assert prompt.count("Mesa so very, very thankful!") == 1
         lettering.validate.assert_not_called()
         lettering.validate_no_text.assert_not_called()
@@ -310,8 +311,8 @@ class TestGenerateImagesForBriefs:
             ]
         )
         comfyui = _comfyui_client()
-        comfyui.generate_flux2_image.return_value = ComfyUIResult(
-            image_bytes=blank.getvalue(), prompt_id="f"
+        comfyui.generate_qwen_image.return_value = ComfyUIResult(
+            image_bytes=blank.getvalue(), prompt_id="q"
         )
         s3 = MagicMock()
 
@@ -323,7 +324,7 @@ class TestGenerateImagesForBriefs:
         )
 
         assert result["images_generated"] == 1
-        prompt = comfyui.generate_flux2_image.call_args.kwargs["prompt"]
+        prompt = comfyui.generate_qwen_image.call_args.kwargs["prompt"]
         assert "Get There Eventually" not in prompt
         assert "Judy Hopps" in prompt
         raw = s3.put_object.call_args_list[0].kwargs["Body"]

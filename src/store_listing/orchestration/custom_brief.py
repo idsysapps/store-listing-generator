@@ -421,20 +421,25 @@ def _personal_answer(llm_completions: Any, model: str, messages: list[dict[str, 
     return response.choices[0].message.content or ""
 
 
-def _stored_text_plan(brief: DesignBrief, design: Any) -> dict[str, Any] | None:
+def _stored_text_plan(
+    brief: DesignBrief, design: Any, *, image_model: str | None = None
+) -> dict[str, Any] | None:
     """The text plan column. A personal graphic stores its research there.
 
-    There is no reference-image column. The urls, facts, and the one line ride
-    in the existing JSON so a later render can rearrange them.
+    There is no reference-image column. The urls, facts, the one line, and the
+    chosen image model ride in the existing JSON so a later render can use them.
     """
     if design is not None:
-        return {
+        plan: dict[str, Any] = {
             "reference_urls": list(design.reference_urls),
             "facts": list(design.facts),
             "subjects": design.subjects,
             "lettering": design.lettering,
             "customer_lettering": design.customer_lettering,
         }
+        if image_model is not None:
+            plan["image_model"] = image_model
+        return plan
     if brief.text_plan is not None:
         return brief.text_plan.to_dict()
     return None
@@ -479,9 +484,16 @@ def create_custom_brief(
     product_type: str,
     *,
     personal_use: bool = False,
+    image_model: str | None = None,
     enabled: Sequence[str] | None = None,
     progress_client: Any | None = None,
 ) -> dict[str, Any]:
+    from store_listing.orchestration.personal_image_models import (
+        normalize_personal_image_model,
+    )
+
+    chosen_image_model = normalize_personal_image_model(image_model) if personal_use else None
+
     scope_reason = content_rejection(("description", description))
     if scope_reason is not None:
         # A personal item waives the trademark check. It does not waive the library.
@@ -623,13 +635,20 @@ def create_custom_brief(
         voice=brief.voice,
         font_family=brief.font_family,
         style_preset=brief.style_preset,
-        text_plan=_stored_text_plan(brief, design),
+        text_plan=_stored_text_plan(brief, design, image_model=chosen_image_model),
         listing_description=brief.listing_description,
         label_plates=plates_to_value(brief.label_plates),
         image_status="pending",
     )
 
-    return {"status": "success", "brief_id": brief_id, "personal_use": personal_use}
+    result: dict[str, Any] = {
+        "status": "success",
+        "brief_id": brief_id,
+        "personal_use": personal_use,
+    }
+    if chosen_image_model is not None:
+        result["image_model"] = chosen_image_model
+    return result
 
 
 def _research_personal(

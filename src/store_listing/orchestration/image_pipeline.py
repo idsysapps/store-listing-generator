@@ -201,6 +201,7 @@ def _personal_research(value: Any) -> dict[str, Any]:
         else ()
     )
     lettering = value.get("lettering")
+    image_model = value.get("image_model")
     return {
         "reference_urls": urls,
         "facts": facts,
@@ -209,6 +210,9 @@ def _personal_research(value: Any) -> dict[str, Any]:
         if isinstance(lettering, str) and lettering.strip()
         else None,
         "customer_lettering": value.get("customer_lettering") is True,
+        "image_model": image_model.strip()
+        if isinstance(image_model, str) and image_model.strip()
+        else None,
     }
 
 
@@ -284,6 +288,7 @@ def _brief_from_row(brief_row: dict[str, Any]) -> DesignBrief:
         design_subjects=research.get("subjects"),
         design_lettering=research.get("lettering"),
         customer_lettering=bool(research.get("customer_lettering")),
+        image_model=research.get("image_model"),
     )
 
 

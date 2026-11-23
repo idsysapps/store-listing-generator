@@ -535,12 +535,42 @@ class TestGenerateImage:
         client.remove_background.assert_not_called()
 
 
-class TestPersonalFlux2:
-    def test_a_personal_brief_uses_flux2_and_not_schnell(self) -> None:
+class TestPersonalImageModel:
+    def test_a_personal_brief_defaults_to_qwen_image_21(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _client()
+        client.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="q")
+        monkeypatch.setattr(
+            "store_listing.orchestration.image_generation.fetch_reference",
+            lambda _url: b"ref-bytes",
+        )
+        brief = _make_brief(
+            personal_use=True,
+            product_type="sublimation",
+            design_subjects="a tall Gungan beside a round freighter",
+            design_lettering="Mesa so very, very thankful!",
+            design_facts=("Jar Jar speaks in a Gungan voice.",),
+            reference_urls=("https://example.com/jar.jpg",),
+        )
+
+        generate_image(brief, comfyui_client=client, seed=2)
+
+        client.generate_image.assert_not_called()
+        client.generate_flux2_image.assert_not_called()
+        call = client.generate_qwen_image.call_args.kwargs
+        assert call["seed"] == 2
+        assert "solid pure magenta" in call["prompt"]
+        assert call["prompt"].count("Mesa so very, very thankful!") == 1
+        assert "Jar Jar speaks in a Gungan voice." in call["prompt"]
+        assert call["reference_images"] == [b"ref-bytes"]
+
+    def test_a_personal_brief_can_choose_flux2_dev(self) -> None:
         client = _client()
         client.generate_flux2_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="f")
         brief = _make_brief(
             personal_use=True,
+            image_model="flux2_dev",
             product_type="sublimation",
             design_subjects="a tall Gungan beside a round freighter",
             design_lettering="Mesa so very, very thankful!",
@@ -549,16 +579,14 @@ class TestPersonalFlux2:
 
         generate_image(brief, comfyui_client=client, seed=2)
 
-        client.generate_image.assert_not_called()
+        client.generate_qwen_image.assert_not_called()
         call = client.generate_flux2_image.call_args.kwargs
         assert call["seed"] == 2
         assert "solid pure magenta" in call["prompt"]
-        assert call["prompt"].count("Mesa so very, very thankful!") == 1
-        assert "Jar Jar speaks in a Gungan voice." in call["prompt"]
 
     def test_a_quoted_personal_line_is_left_for_the_compositor(self) -> None:
         client = _client()
-        client.generate_flux2_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="f")
+        client.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="q")
         brief = _make_brief(
             personal_use=True,
             product_type="sublimation",
@@ -569,7 +597,7 @@ class TestPersonalFlux2:
 
         generate_image(brief, comfyui_client=client, seed=2)
 
-        prompt = client.generate_flux2_image.call_args.kwargs["prompt"]
+        prompt = client.generate_qwen_image.call_args.kwargs["prompt"]
         assert "Get There Eventually" not in prompt
         assert "No lettering" in prompt
         assert "Judy Hopps" in prompt
@@ -581,10 +609,11 @@ class TestPersonalFlux2:
 
         client.generate_image.assert_called_once()
         client.generate_flux2_image.assert_not_called()
+        client.generate_qwen_image.assert_not_called()
 
     def test_a_personal_dtf_graphic_is_cut_out(self) -> None:
         client = _client()
-        client.generate_flux2_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="f")
+        client.generate_qwen_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="q")
         brief = _make_brief(personal_use=True, scene_description="a tall Gungan on magenta")
 
         result = generate_image(brief, comfyui_client=client)
@@ -600,7 +629,7 @@ class TestPersonalFlux2:
             tick = kwargs["on_tick"]
             assert callable(tick)
             tick()
-            return ComfyUIResult(image_bytes=b"raw", prompt_id="f")
+            return ComfyUIResult(image_bytes=b"raw", prompt_id="q")
 
         def cut(image_bytes: bytes, **kwargs: object) -> ComfyUIResult:
             tick = kwargs["on_tick"]
@@ -608,7 +637,7 @@ class TestPersonalFlux2:
             tick()
             return ComfyUIResult(image_bytes=b"cut", prompt_id="c")
 
-        client.generate_flux2_image.side_effect = draw
+        client.generate_qwen_image.side_effect = draw
         client.remove_background.side_effect = cut
         brief = _make_brief(personal_use=True, scene_description="a tall Gungan on magenta")
 

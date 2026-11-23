@@ -112,27 +112,34 @@ def build_qwen_image_txt2img_graph(
     width: int,
     height: int,
     seed: int,
-    steps: int = 20,
-    cfg: float = 4.0,
+    steps: int = 25,
+    cfg: float = 1.0,
     sampler_name: str = "euler",
     scheduler: str = "simple",
-    shift: float = 3.1,
     negative_prompt: str = "",
+    reference_images: Sequence[str] = (),
     unet_name: str,
     clip_name: str,
     vae_name: str,
     filename_prefix: str = QWEN_IMAGE_FILENAME_PREFIX,
 ) -> dict[str, Any]:
-    """Return the Qwen-Image text-to-image graph from the official template.
+    """Return the Qwen-Image 2.1 text-to-image graph from the official template.
 
-    Qwen-Image is a 20B MMDiT. It is not a Flux graph: the text encoder is a
-    single Qwen2.5-VL model loaded with ``type="qwen_image"``, the model needs
-    the AuraFlow sampling shift, and the latent is the SD3 shape. The sampler
-    runs 20 steps at cfg 4.0 - the settings the Phase 0 bake-off used (issue
-    #254). It is much slower than Flux Schnell, so only the typographic hero
-    path uses it.
+    Qwen-Image 2.1 is not a Flux graph and not the 1.0 AuraFlow/SD3 graph: the
+    text encoder is Qwen3-VL loaded with ``type="qwen_image"``, prompts go
+    through ``TextEncodeQwenImage21``, and the sampler uses an empty latent at
+    the requested size. Optional reference filenames are uploaded images wired
+    into ``images.image_1`` … ``image_16`` with the VAE so the encode can splice
+    their latents (issue #339). Defaults match the ComfyUI template (25 steps,
+    cfg 1, euler/simple).
     """
-    return {
+    encode_inputs: dict[str, Any] = {
+        "clip": ["2", 0],
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "resolution": 1024 if reference_images else 0,
+    }
+    graph: dict[str, Any] = {
         "1": {
             "class_type": "UNETLoader",
             "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
@@ -146,45 +153,47 @@ def build_qwen_image_txt2img_graph(
             "inputs": {"vae_name": vae_name},
         },
         "4": {
-            "class_type": "ModelSamplingAuraFlow",
-            "inputs": {"model": ["1", 0], "shift": shift},
+            "class_type": "TextEncodeQwenImage21",
+            "inputs": encode_inputs,
         },
         "5": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": prompt, "clip": ["2", 0]},
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": negative_prompt, "clip": ["2", 0]},
-        },
-        "7": {
-            "class_type": "EmptySD3LatentImage",
+            "class_type": "EmptyLatentImage",
             "inputs": {"width": width, "height": height, "batch_size": 1},
         },
-        "8": {
+        "6": {
             "class_type": "KSampler",
             "inputs": {
-                "model": ["4", 0],
+                "model": ["1", 0],
                 "seed": seed,
                 "steps": steps,
                 "cfg": cfg,
                 "sampler_name": sampler_name,
                 "scheduler": scheduler,
-                "positive": ["5", 0],
-                "negative": ["6", 0],
-                "latent_image": ["7", 0],
+                "positive": ["4", 0],
+                "negative": ["4", 1],
+                "latent_image": ["5", 0],
                 "denoise": 1.0,
             },
         },
-        "9": {
+        "7": {
             "class_type": "VAEDecode",
-            "inputs": {"samples": ["8", 0], "vae": ["3", 0]},
+            "inputs": {"samples": ["6", 0], "vae": ["3", 0]},
         },
-        "10": {
+        "8": {
             "class_type": "SaveImage",
-            "inputs": {"filename_prefix": filename_prefix, "images": ["9", 0]},
+            "inputs": {"filename_prefix": filename_prefix, "images": ["7", 0]},
         },
     }
+    if reference_images:
+        encode_inputs["vae"] = ["3", 0]
+        for index, image_name in enumerate(reference_images[:16], start=1):
+            load_id = str(20 + index)
+            graph[load_id] = {
+                "class_type": "LoadImage",
+                "inputs": {"image": image_name},
+            }
+            encode_inputs[f"images.image_{index}"] = [load_id, 0]
+    return graph
 
 
 def build_flux2_dev_txt2img_graph(

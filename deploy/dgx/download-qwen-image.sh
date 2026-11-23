@@ -1,25 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-# Downloads Qwen-Image 1.0 (Apache 2.0) for the typographic wordmark layer.
+# Downloads Qwen-Image 2.1 (INT8 ComfyUI pack) for the typographic wordmark layer.
 #
-# Qwen-Image is a 20B MMDiT that renders text far more reliably than the 4B
-# FLUX.2 Klein models in the Phase 0 bake-off (20/20 exact phrases vs 13-15/20).
-# All files are public - no HF token and no licence click.
+# Runtime uses 2.1 only (issue #339). Older Qwen-Image 1.0 files may remain on
+# disk and are left alone by this script.
 #
-#   - qwen_image_fp8_e4m3fn.safetensors      Comfy-Org/Qwen-Image_ComfyUI   20.4 GB
-#   - qwen_2.5_vl_7b_fp8_scaled.safetensors  Comfy-Org/Qwen-Image_ComfyUI    9.4 GB
-#   - qwen_image_vae.safetensors             Comfy-Org/Qwen-Image_ComfyUI    254 MB
+#   - qwen_image_2.1_int8_convrot.safetensors   Comfy-Org/Qwen-Image-2.1  ~6.8 GB
+#   - qwen3vl_8b_int8_convrot.safetensors       Comfy-Org/Qwen-Image-2.1  ~8.7 GB
+#   - qwen_image_2.1_vae_bf16.safetensors       Comfy-Org/Qwen-Image-2.1  ~645 MB
 #
-# Total ~30 GB. The model is licensed Apache 2.0, so its output can be printed
-# on products we sell. Do not substitute Qwen-Image 2.1 (research-only licence).
-#
-# The script is idempotent and resumable: re-running it continues a partial
-# download (wget -c) and skips files that are already complete.
+# Total ~16 GB. The script is idempotent and resumable: re-running continues a
+# partial download (wget -c) and skips files that are already complete.
 
 COMFYUI_DATA="${COMFYUI_DATA_PATH:-/opt/comfyui-data}"
 MODELS_DIR="$COMFYUI_DATA/models"
-HF_BASE="https://huggingface.co"
+HF_BASE="https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main"
 
 file_size() {
     stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null || echo 0
@@ -77,23 +73,23 @@ fi
 
 mkdir -p "$MODELS_DIR"/{diffusion_models,text_encoders,vae}
 
-echo "==> Downloading the Qwen2.5-VL-7B text encoder (~9.4 GB)..."
+echo "==> Downloading the Qwen3-VL-8B text encoder (~8.7 GB)..."
 download \
-    "$HF_BASE/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors" \
-    "$MODELS_DIR/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors" \
-    9384670680
+    "$HF_BASE/text_encoders/qwen3vl_8b_int8_convrot.safetensors" \
+    "$MODELS_DIR/text_encoders/qwen3vl_8b_int8_convrot.safetensors" \
+    9350798360
 
-echo "==> Downloading the Qwen-Image UNET (~20.4 GB)..."
+echo "==> Downloading the Qwen-Image 2.1 UNET (~6.8 GB)..."
 download \
-    "$HF_BASE/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_fp8_e4m3fn.safetensors" \
-    "$MODELS_DIR/diffusion_models/qwen_image_fp8_e4m3fn.safetensors" \
-    20430635136
+    "$HF_BASE/diffusion_models/qwen_image_2.1_int8_convrot.safetensors" \
+    "$MODELS_DIR/diffusion_models/qwen_image_2.1_int8_convrot.safetensors" \
+    7256783064
 
-echo "==> Downloading the Qwen-Image VAE (~254 MB)..."
+echo "==> Downloading the Qwen-Image 2.1 VAE (~645 MB)..."
 download \
-    "$HF_BASE/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors" \
-    "$MODELS_DIR/vae/qwen_image_vae.safetensors" \
-    253806246
+    "$HF_BASE/vae/qwen_image_2.1_vae_bf16.safetensors" \
+    "$MODELS_DIR/vae/qwen_image_2.1_vae_bf16.safetensors" \
+    675509688
 
 echo ""
 echo "==> Verifying sizes"
@@ -115,9 +111,9 @@ verify() {
         status=1
     fi
 }
-verify "$MODELS_DIR/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors" 9384670680
-verify "$MODELS_DIR/diffusion_models/qwen_image_fp8_e4m3fn.safetensors" 20430635136
-verify "$MODELS_DIR/vae/qwen_image_vae.safetensors" 253806246
+verify "$MODELS_DIR/text_encoders/qwen3vl_8b_int8_convrot.safetensors" 9350798360
+verify "$MODELS_DIR/diffusion_models/qwen_image_2.1_int8_convrot.safetensors" 7256783064
+verify "$MODELS_DIR/vae/qwen_image_2.1_vae_bf16.safetensors" 675509688
 
 if [ "$status" -ne 0 ]; then
     echo ""

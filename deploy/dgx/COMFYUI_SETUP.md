@@ -11,7 +11,7 @@ must be built natively on the DGX before first use.
 ./download-flux.sh  # Downloads Flux Schnell + BiRefNet (~30 GB)
 
 # Optional typographic wordmark models (see "Wordmark models" below)
-./download-qwen-image.sh    # Qwen-Image 1.0, Apache 2.0 (~30 GB) - recommended
+./download-qwen-image.sh    # Qwen-Image 2.1 INT8 (~16 GB) - typographic runtime
 ./download-flux2-klein.sh   # FLUX.2 Klein 4B, Apache 2.0 (~24 GB) - experimental
 ```
 
@@ -82,10 +82,11 @@ Models are stored on the host at `/opt/comfyui-data/models/`:
     vae/ae.safetensors                          # Flux VAE (335 MB)
     background_removal/birefnet.safetensors      # BiRefNet (444 MB)
 
-    # Optional wordmark models (download-qwen-image.sh / download-flux2-klein.sh)
-    diffusion_models/qwen_image_fp8_e4m3fn.safetensors          # Qwen-Image 1.0 (20.4 GB)
-    text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors         # Qwen2.5-VL-7B (9.4 GB)
-    vae/qwen_image_vae.safetensors                              # Qwen-Image VAE (254 MB)
+    # Wordmark runtime (download-qwen-image.sh) — Qwen-Image 2.1
+    diffusion_models/qwen_image_2.1_int8_convrot.safetensors    # Qwen-Image 2.1 INT8 (~6.8 GB)
+    text_encoders/qwen3vl_8b_int8_convrot.safetensors           # Qwen3-VL-8B INT8 (~8.7 GB)
+    vae/qwen_image_2.1_vae_bf16.safetensors                     # Qwen-Image 2.1 VAE (~645 MB)
+    # Optional: older 1.0 files may remain on disk but are not used at runtime
     diffusion_models/flux-2-klein-4b.safetensors                # FLUX.2 Klein distilled (7.8 GB)
     diffusion_models/flux-2-klein-base-4b.safetensors           # FLUX.2 Klein base (7.8 GB)
     text_encoders/qwen_3_4b.safetensors                         # Qwen3-4B (8.0 GB)
@@ -120,24 +121,18 @@ partial download and verifies the final file sizes.
 
 ### Wordmark models
 
-These are only needed for the typographic design path. Both are Apache 2.0, so
-their output can be printed on products we sell.
+These are only needed for the typographic design path. Runtime uses **Qwen-Image
+2.1** (issue #339). Qwen-Image 1.0 weights may remain on disk for reference but
+are not loaded.
 
-| Model | Files | Size | Phase 0 result (20 phrases) |
-|-------|-------|------|-----------------------------|
-| **Qwen-Image 1.0** (20B) | `qwen_image_fp8_e4m3fn`, `qwen_2.5_vl_7b_fp8_scaled`, `qwen_image_vae` | ~30 GB | **20/20 exact**, ~100 s/image |
-| FLUX.2 Klein 4B base | `flux-2-klein-base-4b`, `qwen_3_4b`, `flux2-vae` | ~16 GB | 15/20 exact, ~25 s/image |
-| FLUX.2 Klein 4B distilled | `flux-2-klein-4b`, `qwen_3_4b`, `flux2-vae` | ~16 GB | 13/20 exact, ~5 s/image |
+| Model | Files | Size | Notes |
+|-------|-------|------|-------|
+| **Qwen-Image 2.1** (runtime) | `qwen_image_2.1_int8_convrot`, `qwen3vl_8b_int8_convrot`, `qwen_image_2.1_vae_bf16` | ~16 GB | ComfyUI template: 25 steps, cfg 1 |
+| Qwen-Image 1.0 (on disk only) | `qwen_image_fp8_e4m3fn`, `qwen_2.5_vl_7b_fp8_scaled`, `qwen_image_vae` | ~30 GB | Phase 0 bake-off; not used at runtime |
+| FLUX.2 Klein 4B base | `flux-2-klein-base-4b`, `qwen_3_4b`, `flux2-vae` | ~16 GB | Experimental |
+| FLUX.2 Klein 4B distilled | `flux-2-klein-4b`, `qwen_3_4b`, `flux2-vae` | ~16 GB | Experimental |
 
-The bake-off prompted each model for a standalone bubble-letter wordmark on a
-plain white background and OCR'd the result with the DGX Qwen2.5-VL model.
-Spelling errors were confirmed by eye, not just OCR. Klein's style is close to
-the reference but it misspells common words (`WEERD`, `COOD`, `HOCUS POUSS`),
-so it is not safe without an OCR gate and retries. Qwen-Image rendered every
-phrase exactly, including `SALT & PEPPER`, `2 SPOOKY 4 YOU`, and `BOO JEE`.
-
-> Qwen-Image **2.1** is research-only and must not be used. FLUX.2 dev (32B) and
-> FLUX.2 Klein 9B are non-commercial. Ideogram is API-only.
+> FLUX.2 Klein 9B is non-commercial. Ideogram is API-only.
 
 ### Typographic hero path
 

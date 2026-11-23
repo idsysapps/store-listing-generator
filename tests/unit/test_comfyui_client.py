@@ -675,8 +675,8 @@ class TestGenerateQwenImage:
                 bodies.append(json.loads(request.content))
                 return _prompt_ok()
             if path.startswith("/history/"):
-                # The Qwen graph saves from node 10, not the Flux node 9.
-                return _history_ok(node_id="10")
+                # The Qwen 2.1 graph saves from node 8, not the Flux node 9.
+                return _history_ok(node_id="8")
             if path == "/view":
                 return httpx.Response(200, content=_png_bytes())
             return httpx.Response(404)
@@ -698,23 +698,62 @@ class TestGenerateQwenImage:
         )
 
         graph = bodies[0]["prompt"]
-        assert graph["1"]["inputs"]["unet_name"] == "qwen_image_fp8_e4m3fn.safetensors"
+        assert graph["1"]["inputs"]["unet_name"] == "qwen_image_2.1_int8_convrot.safetensors"
+        assert graph["2"]["inputs"]["clip_name"] == "qwen3vl_8b_int8_convrot.safetensors"
         assert graph["2"]["inputs"]["type"] == "qwen_image"
-        assert graph["3"]["inputs"]["vae_name"] == "qwen_image_vae.safetensors"
-        assert graph["4"]["class_type"] == "ModelSamplingAuraFlow"
-        assert graph["8"]["inputs"]["steps"] == 20
-        assert graph["8"]["inputs"]["cfg"] == 4.0
-        assert graph["8"]["inputs"]["seed"] == 7
-        assert graph["7"]["inputs"]["width"] == 1024
-        assert graph["7"]["inputs"]["height"] == 1280
-        assert graph["5"]["inputs"]["text"] == "a ghost with GROOVY"
+        assert graph["3"]["inputs"]["vae_name"] == "qwen_image_2.1_vae_bf16.safetensors"
+        assert graph["4"]["class_type"] == "TextEncodeQwenImage21"
+        assert graph["4"]["inputs"]["prompt"] == "a ghost with GROOVY"
+        assert graph["6"]["inputs"]["steps"] == 25
+        assert graph["6"]["inputs"]["cfg"] == 1.0
+        assert graph["6"]["inputs"]["seed"] == 7
+        assert graph["5"]["inputs"]["width"] == 1024
+        assert graph["5"]["inputs"]["height"] == 1280
 
     def test_accepts_a_negative_prompt(self) -> None:
         bodies: list[dict] = []
         _client(self._handler(bodies)).generate_qwen_image(
             prompt="a ghost", negative_prompt="misspelled"
         )
-        assert bodies[0]["prompt"]["6"]["inputs"]["text"] == "misspelled"
+        assert bodies[0]["prompt"]["4"]["inputs"]["negative_prompt"] == "misspelled"
+
+    def test_uploads_reference_images_into_the_qwen_encode(self) -> None:
+        bodies: list[dict] = []
+        uploads = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal uploads
+            path = request.url.path
+            if path == "/upload/image":
+                uploads += 1
+                return httpx.Response(
+                    200,
+                    json={"name": f"ref-{uploads}.png", "subfolder": "", "type": "input"},
+                )
+            if path == "/prompt":
+                import json
+
+                bodies.append(json.loads(request.content))
+                return _prompt_ok()
+            if path.startswith("/history/"):
+                return _history_ok(node_id="8")
+            if path == "/view":
+                return httpx.Response(200, content=_png_bytes())
+            return httpx.Response(404)
+
+        _client(handler).generate_qwen_image(
+            prompt="a saint",
+            reference_images=[_png_bytes(), _png_bytes()],
+            seed=3,
+        )
+
+        assert uploads == 2
+        encode = bodies[0]["prompt"]["4"]["inputs"]
+        assert encode["images.image_1"] == ["21", 0]
+        assert encode["images.image_2"] == ["22", 0]
+        assert encode["vae"] == ["3", 0]
+        assert bodies[0]["prompt"]["21"]["inputs"]["image"] == "ref-1.png"
+        assert bodies[0]["prompt"]["22"]["inputs"]["image"] == "ref-2.png"
 
     def test_model_names_and_sampling_are_overridable(self) -> None:
         bodies: list[dict] = []
@@ -724,16 +763,14 @@ class TestGenerateQwenImage:
             clip_name="custom-clip.safetensors",
             vae_name="custom-vae.safetensors",
             steps=8,
-            cfg=1.0,
-            shift=2.0,
+            cfg=2.0,
         )
         graph = bodies[0]["prompt"]
         assert graph["1"]["inputs"]["unet_name"] == "custom-unet.safetensors"
         assert graph["2"]["inputs"]["clip_name"] == "custom-clip.safetensors"
         assert graph["3"]["inputs"]["vae_name"] == "custom-vae.safetensors"
-        assert graph["8"]["inputs"]["steps"] == 8
-        assert graph["8"]["inputs"]["cfg"] == 1.0
-        assert graph["4"]["inputs"]["shift"] == 2.0
+        assert graph["6"]["inputs"]["steps"] == 8
+        assert graph["6"]["inputs"]["cfg"] == 2.0
 
     def test_raises_when_the_graph_is_rejected(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

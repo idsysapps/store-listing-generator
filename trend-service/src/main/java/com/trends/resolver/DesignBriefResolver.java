@@ -175,10 +175,18 @@ public class DesignBriefResolver {
     }
 
     @Mutation("createCustomBrief")
-    public String createCustomBrief(String description, String productType, boolean personalUse) throws GraphQLException {
+    public String createCustomBrief(
+            String description,
+            String productType,
+            boolean personalUse,
+            @org.eclipse.microprofile.graphql.DefaultValue("qwen_image_2.1") String imageModel
+    ) throws GraphQLException {
         requireAuthentication();
-        LOG.infof("Creating custom brief: description=%s, productType=%s, personalUse=%s", description, productType, personalUse);
-        return celeryTaskDispatcher.dispatchCreateCustomBrief(description, productType, personalUse)
+        LOG.infof(
+                "Creating custom brief: description=%s, productType=%s, personalUse=%s, imageModel=%s",
+                description, productType, personalUse, imageModel);
+        return celeryTaskDispatcher
+                .dispatchCreateCustomBrief(description, productType, personalUse, imageModel)
                 .await().indefinitely();
     }
 
