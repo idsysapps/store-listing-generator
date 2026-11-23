@@ -11,6 +11,7 @@ import com.trends.dto.DesignBriefOrderBy;
 import com.trends.dto.DesignBriefSummary;
 import com.trends.dto.DesignReviewFilter;
 import com.trends.dto.PageInfo;
+import com.trends.dto.StylePresetInfo;
 import com.trends.event.CeleryTaskDispatcher;
 import com.trends.repository.DesignBriefRepository;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -174,19 +175,41 @@ public class DesignBriefResolver {
         return filtered.isEmpty() ? null : filtered;
     }
 
+    private static final List<StylePresetInfo> STYLE_PRESETS = List.of(
+            new StylePresetInfo("vintage_screenprint", "Vintage screenprint"),
+            new StylePresetInfo("seventies_retro", "Seventies retro"),
+            new StylePresetInfo("halftone_comic", "Comic book"),
+            new StylePresetInfo("riso_two_color", "Riso two colour"),
+            new StylePresetInfo("hand_inked_woodcut", "Hand inked woodcut"),
+            new StylePresetInfo("kawaii_flat", "Kawaii flat"),
+            new StylePresetInfo("art_nouveau", "Art nouveau"),
+            new StylePresetInfo("distressed_band_tee", "Distressed band tee"),
+            new StylePresetInfo("photorealistic", "Photorealistic"),
+            new StylePresetInfo("3d", "3D"),
+            new StylePresetInfo("2d", "2D"),
+            new StylePresetInfo("flat_3d", "Flat 3D")
+    );
+
+    @Query("customBriefStylePresets")
+    public List<StylePresetInfo> customBriefStylePresets() throws GraphQLException {
+        requireAuthentication();
+        return STYLE_PRESETS;
+    }
+
     @Mutation("createCustomBrief")
     public String createCustomBrief(
             String description,
             String productType,
             boolean personalUse,
-            @org.eclipse.microprofile.graphql.DefaultValue("qwen_image_2.1") String imageModel
+            @org.eclipse.microprofile.graphql.DefaultValue("qwen_image_2.1") String imageModel,
+            String stylePreset
     ) throws GraphQLException {
         requireAuthentication();
         LOG.infof(
-                "Creating custom brief: description=%s, productType=%s, personalUse=%s, imageModel=%s",
-                description, productType, personalUse, imageModel);
+                "Creating custom brief: description=%s, productType=%s, personalUse=%s, imageModel=%s, stylePreset=%s",
+                description, productType, personalUse, imageModel, stylePreset);
         return celeryTaskDispatcher
-                .dispatchCreateCustomBrief(description, productType, personalUse, imageModel)
+                .dispatchCreateCustomBrief(description, productType, personalUse, imageModel, stylePreset)
                 .await().indefinitely();
     }
 

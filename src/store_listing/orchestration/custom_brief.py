@@ -51,6 +51,7 @@ from store_listing.orchestration.llm_client import (
 from store_listing.orchestration.personal_design import (
     MAX_QUERIES,
     look_at_reference,
+    research_has_sources,
     research_personal_design,
     search_personal,
 )
@@ -436,6 +437,11 @@ def _stored_text_plan(
             "subjects": design.subjects,
             "lettering": design.lettering,
             "customer_lettering": design.customer_lettering,
+            "search_query_count": int(getattr(design, "search_query_count", 0) or 0),
+            "note_count": int(getattr(design, "note_count", 0) or 0),
+            "fact_count": len(design.facts),
+            "reference_count": len(design.reference_urls),
+            "search_errors": list(getattr(design, "search_errors", ()) or ()),
         }
         if image_model is not None:
             plan["image_model"] = image_model
@@ -476,6 +482,10 @@ def _abandon(
     return {"status": "error", "error": error, "brief_id": brief_id}
 
 
+_DEFAULT_PERSONAL_STYLE = "2d"
+_EMPTY_RESEARCH = "Personal research returned no sources"
+
+
 def create_custom_brief(
     db_client: DesignBriefDBClient,
     llm_completions: Any,
@@ -485,6 +495,7 @@ def create_custom_brief(
     *,
     personal_use: bool = False,
     image_model: str | None = None,
+    style_preset: str | None = None,
     enabled: Sequence[str] | None = None,
     progress_client: Any | None = None,
 ) -> dict[str, Any]:
@@ -493,6 +504,14 @@ def create_custom_brief(
     )
 
     chosen_image_model = normalize_personal_image_model(image_model) if personal_use else None
+    requested_style = (style_preset or "").strip() or None
+    if requested_style is not None and preset_for(requested_style) is None:
+        return {
+            "status": "error",
+            "error": f"Unknown style preset: {requested_style}",
+        }
+    if requested_style is None and personal_use:
+        requested_style = _DEFAULT_PERSONAL_STYLE
 
     scope_reason = content_rejection(("description", description))
     if scope_reason is not None:
@@ -574,6 +593,26 @@ def create_custom_brief(
             model=model,
             watch=watch,
         )
+        if not research_has_sources(design):
+            logger.error(
+                "Personal research empty for brief %s (queries=%s notes=%s); retrying once",
+                brief_id,
+                design.search_query_count,
+                design.note_count,
+            )
+            design = _research_personal(
+                words,
+                llm_completions=llm_completions,
+                model=model,
+                watch=watch,
+            )
+        if not research_has_sources(design):
+            logger.error(
+                "Personal research still empty for brief %s: errors=%s",
+                brief_id,
+                list(design.search_errors),
+            )
+            return _abandon(db_client, brief_id, watch, _EMPTY_RESEARCH)
         brief = replace(
             brief,
             concept=words,
@@ -583,6 +622,7 @@ def create_custom_brief(
             kicker_text=None,
             copy_mode=CAPTION if design.customer_lettering else NO_TEXT,
             personal_use=True,
+            style_preset=requested_style or brief.style_preset,
         )
     else:
         brief = replace(
@@ -593,6 +633,7 @@ def create_custom_brief(
             tagline_text=None,
             kicker_text=None,
             personal_use=False,
+            style_preset=requested_style or brief.style_preset,
         )
 
     _watch_phase(watch, "planning")
@@ -648,6 +689,8 @@ def create_custom_brief(
     }
     if chosen_image_model is not None:
         result["image_model"] = chosen_image_model
+    if brief.style_preset:
+        result["style_preset"] = brief.style_preset
     return result
 
 

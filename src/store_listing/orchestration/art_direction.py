@@ -29,10 +29,12 @@ __all__ = [
     "PRESET_IDS",
     "Preset",
     "family_for",
+    "forbids_lifelike",
     "negative_for",
     "palette_allows_magenta",
     "palette_names",
     "palette_phrase",
+    "preset_catalog",
     "preset_for",
     "prompt_for",
     "tagline_family_for",
@@ -170,6 +172,55 @@ PRESETS: Final[dict[str, Preset]] = {
         tagline_family="bebas",
         texture="crackle",
     ),
+    "photorealistic": Preset(
+        id="photorealistic",
+        label="Photorealistic",
+        prompt=(
+            "lifelike photographic subject, real materials and lighting, sharp detail, "
+            "natural colour"
+        ),
+        negative="cartoon, clip art, flat vector, cel shade, plastic toy look",
+        palette=("#F5F0E6", "#2A2A2A", "#C4A574", "#4A6FA5"),
+        headline_family="bebas",
+        tagline_family="abril",
+        texture=None,
+    ),
+    "3d": Preset(
+        id="3d",
+        label="3D",
+        prompt=(
+            "fully rendered 3D CGI subject, volumetric shading, clean geometry, studio lighting"
+        ),
+        negative="photorealistic photo, flat 2d vector, hand ink, noisy grain",
+        palette=("#F5F0E6", "#1F3050", "#E0A526", "#C1502E"),
+        headline_family="bebas",
+        tagline_family="anton",
+        texture=None,
+    ),
+    "2d": Preset(
+        id="2d",
+        label="2D",
+        prompt=(
+            "flat graphic illustration, clean print shapes, bold outlines, simple colour fills"
+        ),
+        negative="photorealistic, 3d render, glossy, depth of field, cinematic lighting",
+        palette=("#F2E8D5", "#1F3050", "#C1502E", "#E0A526"),
+        headline_family="bebas",
+        tagline_family="anton",
+        texture=None,
+    ),
+    "flat_3d": Preset(
+        id="flat_3d",
+        label="Flat 3D",
+        prompt=(
+            "soft cel-shaded stylized 3D, simple volumes, clean colour breaks, not a photograph"
+        ),
+        negative="photorealistic, noisy grain, hyper detailed skin pores, flat 2d clip art",
+        palette=("#F5EFE0", "#2F4F3E", "#C9A227", "#6B2737"),
+        headline_family="bungee",
+        tagline_family="bebas",
+        texture=None,
+    ),
 }
 
 # The looks, in the order they are offered to the model.
@@ -183,6 +234,11 @@ def preset_for(name: str | None) -> Preset | None:
     return PRESETS.get(name.strip().lower())
 
 
+def preset_catalog() -> tuple[dict[str, str], ...]:
+    """Id and label for every selectable style, for GraphQL and clients."""
+    return tuple({"id": preset.id, "label": preset.label} for preset in PRESETS.values())
+
+
 def prompt_for(preset: Preset | None) -> str:
     """What the image model is told about the look of the design."""
     return preset.prompt if preset else ""
@@ -192,11 +248,12 @@ def forbids_lifelike(preset: Preset | None) -> bool:
     """Whether this look tells the image model not to draw a lifelike picture.
 
     A personal brief that asks for a lifelike subject cannot wear a look whose
-    prompt or negative forbids one.
+    negative forbids one. The positive prompt may name photorealism without
+    forbidding it.
     """
     if preset is None:
         return False
-    text = f"{preset.prompt} {preset.negative}".lower()
+    text = preset.negative.lower()
     return any(
         phrase in text
         for phrase in ("realistic", "photorealistic", "flat colour", "flat color", "flat spot")

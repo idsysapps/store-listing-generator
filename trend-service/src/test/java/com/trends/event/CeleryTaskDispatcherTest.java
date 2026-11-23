@@ -99,4 +99,18 @@ class CeleryTaskDispatcherTest {
         String message = messageCaptor.getValue();
         assertTrue(message.contains("flux2_dev"));
     }
+
+    @Test
+    void testDispatchCreateCustomBrief_PassesStylePreset() {
+        celeryTaskDispatcher
+                .dispatchCreateCustomBrief(
+                        "a personal shirt", "dtf_apparel", true, "qwen_image_2.1", "photorealistic")
+                .await().indefinitely();
+
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+        verify(redis).execute(eq("LPUSH"), eq("celery"), messageCaptor.capture());
+
+        String message = messageCaptor.getValue();
+        assertTrue(message.contains("photorealistic"));
+    }
 }

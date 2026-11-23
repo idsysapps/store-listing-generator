@@ -39,10 +39,11 @@ _QUERY_SYSTEM = (
     'request. Return JSON only: {"queries": ["..."]}. Search for the places, '
     "rides, shows, and objects, and for how a named speaker talks. Give each "
     "place, ride, show, and character its own query, and search a character by "
-    "that character's name alone. A place or a ride is not "
-    "a movie. Do not merge two names into one search. At most four queries. "
-    "Do not guess a name. Search the role the customer wrote, and do not search "
-    "a character you are naming from memory."
+    "that character's name alone. A named place such as Magic Kingdom must be "
+    "searched by that place name so the article can name the icons that belong "
+    "there. A place or a ride is not a movie. Do not merge two names into one "
+    "search. At most four queries. Do not guess a name. Search the role the "
+    "customer wrote, and do not search a character you are naming from memory."
 )
 
 _DESIGN_SYSTEM = (
@@ -56,10 +57,11 @@ _DESIGN_SYSTEM = (
     "additions (what the sentence asks for that the photos do not show, or null), "
     'and references (up to six objects {"url", "keep"}). '
     "Fill the gaps. A role such as sleuth is a character in the picture, not a "
-    "word on the shirt. Do not invent a character the notes do not name. If the "
-    "notes do not name one character, keep the customer's words and do not "
-    "substitute a character from memory. Name the shirt subject from the photo. "
-    "Do not replace "
+    "word on the shirt. Do not invent a character the notes do not name. When "
+    "the notes name a character that belongs to a place the customer named, "
+    "that character may be the shirt subject. If the notes do not name one "
+    "character, keep the customer's words and do not substitute a character "
+    "from memory. Name the shirt subject from the photo. Do not replace "
     "the photo with the article's object. A logo, a poster, a map, a costume "
     "crowd, a tight crop, or a photo full of unrelated people is keep false. "
     "Do not invent a line when voice_found is false. Do not print the customer's "
@@ -102,6 +104,17 @@ _PICTURE_SYSTEM = (
     "A page that merely shares one word is not it. "
     "When you reject, query is one new search for that character."
 )
+
+_DEEPEN_SYSTEM = (
+    "You read search notes about one shirt design request. Return JSON only: "
+    '{"subjects": ["Name", ...]}. List up to three concrete visual subjects the '
+    "notes say a named place, park, show, or work is known for. Prefer the most "
+    "iconic character when the customer named a park (for example Mickey Mouse "
+    "for Magic Kingdom when the notes support that). Copy names from the notes "
+    "only. Do not invent a name the notes do not contain. An empty list is allowed."
+)
+
+MAX_DEEPEN_SUBJECTS: int = 3
 
 
 @dataclass(frozen=True)
@@ -150,6 +163,14 @@ class PersonalDesign:
     facts: tuple[str, ...]
     subjects: str
     customer_lettering: bool = False
+    search_query_count: int = 0
+    note_count: int = 0
+    search_errors: tuple[str, ...] = ()
+
+
+def research_has_sources(design: PersonalDesign) -> bool:
+    """Whether research found facts or reference photos to anchor the graphic."""
+    return bool(design.facts) or bool(design.reference_urls)
 
 
 def resolve_lettering(
@@ -392,10 +413,12 @@ def graphic_prompt(
     arrangement: str,
     facts: Sequence[str] = (),
     leave_text_blank: bool = False,
+    style: str = "",
 ) -> str:
     """The ComfyUI prompt: a flat magenta key, the subjects, and one line."""
     fact_text = " ".join(fact.strip() for fact in facts if fact and fact.strip())
     known = f"Known facts: {fact_text} " if fact_text else ""
+    look = f"{style.strip()} " if style.strip() else ""
     if lettering:
         line = f' One line of lettering, spelled exactly: "{lettering}". No other text.'
     elif leave_text_blank:
@@ -409,7 +432,7 @@ def graphic_prompt(
         "Shirt print artwork. A solid pure magenta field fills every pixel that is "
         "not the subject, one flat colour edge to edge. No street, no sky, no ground, "
         "no buildings, no crowd, no place photograph, no frame, no backdrop. "
-        f"{known}{subjects.strip()} {placed}{line}"
+        f"{known}{look}{subjects.strip()} {placed}{line}"
     )
 
 
@@ -601,6 +624,7 @@ def research_personal_design(
     notes: list[SearchNote] = []
     character_notes: list[SearchNote] = []
     seen: list[SearchNote] = []
+    search_errors: list[str] = []
 
     def _accepted(query: str, found: list[SearchNote]) -> list[SearchNote]:
         """Notes about this character. A different character is searched once more."""
@@ -614,7 +638,8 @@ def research_personal_design(
         try:
             raw = search(replacement)
         except Exception:  # noqa: BLE001
-            logger.warning("Personal design search failed for %r", replacement)
+            logger.error("Personal design search failed for %r", replacement)
+            search_errors.append(f"search failed for {replacement!r}")
             raw = []
         retried = matching_notes(replacement, raw)
         if not retried:
@@ -626,8 +651,12 @@ def research_personal_design(
         try:
             raw = search(query)
         except Exception:  # noqa: BLE001
-            logger.warning("Personal design search failed for %r", query)
+            logger.error("Personal design search failed for %r", query)
+            search_errors.append(f"search failed for {query!r}")
             raw = []
+        if not raw:
+            logger.error("Personal design search returned no notes for %r", query)
+            search_errors.append(f"no notes for {query!r}")
         matched = matching_notes(query, raw)
         if resolved and query.lower() in character_keys:
             # A rejected picture never becomes a reference. Other searches still
@@ -666,13 +695,35 @@ def research_personal_design(
         if _guessed_names(query, known, sentence):
             continue
         _add_query(queries, query)
+    # Guessed LLM queries can all be filtered out (brief 344). Always search the
+    # customer's sentence so a named place such as Magic Kingdom still has notes.
+    if not queries and sentence.strip():
+        _add_query(queries, sentence.strip())
 
     character_keys = {name.lower() for name in characters}
+    # Knowledge pass: text extracts first. Reference photos are fetched after
+    # the deepen step names the icons those notes support (Magic Kingdom → Mickey).
     for query in queries:
         found = _found(query)
         if query.lower() in character_keys:
             character_notes.extend(found)
         notes.extend(found)
+
+    icons = _deepen_subjects(complete, sentence, notes)
+    for icon in icons:
+        if icon.lower() not in {name.lower() for name in characters}:
+            characters.append(icon)
+    known = _known_names(sentence, characters)
+    character_keys = {name.lower() for name in characters}
+    for icon in icons[:MAX_DEEPEN_SUBJECTS]:
+        if any(icon.lower() == existing.lower() for existing in queries):
+            continue
+        found = _found(icon)
+        _add_query(queries, icon)
+        if icon.lower() in character_keys:
+            character_notes.extend(found)
+        notes.extend(found)
+
     if look is not None:
         seen = _attach_looks(seen, look, fetch or fetch_reference)
         by_url = {note.image_url: note for note in seen if note.image_url}
@@ -693,6 +744,11 @@ def research_personal_design(
     )
     design = _read_design(complete, sentence, notes)
     picture = _without_quotes(sentence).strip() or sentence.strip()
+    stats = {
+        "search_query_count": len(queries),
+        "note_count": len(notes),
+        "search_errors": tuple(search_errors),
+    }
     if design is None:
         subjects = lock_characters(picture, characters)
         return PersonalDesign(
@@ -708,6 +764,7 @@ def research_personal_design(
             facts=facts,
             subjects=subjects,
             customer_lettering=quotes is not None,
+            **stats,
         )
 
     lettering = (
@@ -744,6 +801,7 @@ def research_personal_design(
         facts=image_facts,
         subjects=subject,
         customer_lettering=quotes is not None,
+        **stats,
     )
 
 
@@ -1155,6 +1213,38 @@ def _drawn_subject(
     if extra:
         shown.append(extra)
     return ". ".join(shown) + ".", True
+
+
+def _deepen_subjects(
+    complete: Callable[[list[dict[str, str]]], str],
+    sentence: str,
+    notes: Sequence[SearchNote],
+) -> list[str]:
+    """Icons the notes say a place or work is known for, before picture search."""
+    if not any(_fact(note) for note in notes):
+        return []
+    note_text = "\n".join(_note_line(note) for note in notes)
+    raw = complete(
+        [
+            {"role": "system", "content": _DEEPEN_SYSTEM},
+            {"role": "user", "content": f"Sentence: {sentence}\n\nNotes:\n{note_text}"},
+        ]
+    )
+    parsed = _first_object(raw)
+    if not isinstance(parsed, dict):
+        return []
+    subjects = parsed.get("subjects")
+    if not isinstance(subjects, list):
+        return []
+    cleaned: list[str] = []
+    for item in subjects:
+        name = " ".join(str(item).split())
+        if not name:
+            continue
+        if name.lower() in {existing.lower() for existing in cleaned}:
+            continue
+        cleaned.append(name)
+    return cleaned[:MAX_DEEPEN_SUBJECTS]
 
 
 def _queries(complete: Callable[[list[dict[str, str]]], str], sentence: str) -> list[str]:

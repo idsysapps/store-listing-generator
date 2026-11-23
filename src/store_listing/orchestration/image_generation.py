@@ -233,9 +233,11 @@ def font_colour(brief: DesignBrief) -> str:
 
 
 def _picture_preset(brief: DesignBrief):
-    """The look sent to the image model."""
-    # A personal item keeps the concept the customer named. A style preset
-    # replaces that concept with a house look.
+    """The look sent to the image model.
+
+    Personal briefs apply the look in ``_personal_prompt`` so a house negative
+    cannot forbid a lifelike subject the customer asked for.
+    """
     if brief.personal_use:
         return None
     return preset_for(brief.style_preset)
@@ -464,6 +466,7 @@ def build_negative_prompt(brief: DesignBrief) -> str:
 
 def _personal_prompt(brief: DesignBrief, seed: int | None) -> str:
     """The researched graphic, arranged again for this seed."""
+    style = prompt_for(preset_for(brief.style_preset))
     if brief.design_subjects:
         return graphic_prompt(
             subjects=brief.design_subjects,
@@ -471,8 +474,12 @@ def _personal_prompt(brief: DesignBrief, seed: int | None) -> str:
             arrangement=arrangement_line(0 if seed is None else seed),
             facts=brief.design_facts,
             leave_text_blank=brief.customer_lettering,
+            style=style,
         )
-    return (brief.scene_description or "").strip()
+    base = (brief.scene_description or "").strip()
+    if not base or not style:
+        return base
+    return f"{base} {style}"
 
 
 def _reference_bytes(urls: tuple[str, ...]) -> list[bytes]:

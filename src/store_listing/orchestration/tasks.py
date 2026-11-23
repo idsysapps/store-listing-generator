@@ -588,6 +588,7 @@ def create_custom_brief_task(
     product_type: str,
     personal_use: bool = False,
     image_model: str | None = None,
+    style_preset: str | None = None,
 ) -> dict:
     """Create a design brief from a user's free-text description, then generate its image."""
     from store_listing.orchestration.custom_brief import create_custom_brief
@@ -608,6 +609,7 @@ def create_custom_brief_task(
         product_type,
         personal_use=personal_use,
         image_model=image_model,
+        style_preset=style_preset,
         enabled=enabled_product_types(DatabaseClient()),
         progress_client=progress_client,
     )

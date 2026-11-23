@@ -33,6 +33,34 @@ from store_listing.orchestration.personal_design import (
 )
 
 
+def _complete_from(answers):
+    def complete(messages: list[dict[str, str]]) -> str:
+        system = ""
+        if messages and isinstance(messages[0], dict):
+            system = str(messages[0].get("content") or "")
+        if "List up to three concrete visual subjects" in system:
+            return json.dumps({"subjects": []})
+        return next(answers)
+
+    return complete
+
+
+def _scripted_complete(*lines: str, deepen: list[str] | None = None):
+    """LLM answers for research tests; deepen is answered from the system prompt."""
+    answers = iter(lines)
+    deepen_json = json.dumps({"subjects": list(deepen or [])})
+
+    def complete(messages: list[dict[str, str]]) -> str:
+        system = ""
+        if messages and isinstance(messages[0], dict):
+            system = str(messages[0].get("content") or "")
+        if "List up to three concrete visual subjects" in system:
+            return deepen_json
+        return next(answers)
+
+    return complete
+
+
 def test_customer_written_words_are_the_only_line() -> None:
     line = resolve_lettering(
         customer_line="Get there eventually",
@@ -124,7 +152,7 @@ def test_research_writes_one_line_when_the_notes_have_a_voice() -> None:
 
     design = research_personal_design(
         "hollywood studios, jar jar, thanksgiving",
-        complete=lambda _messages: next(answers),
+        complete=_complete_from(answers),
         search=lambda _query: [note],
         seed=1,
     )
@@ -154,7 +182,7 @@ def test_research_drops_a_line_the_notes_cannot_support() -> None:
 
     design = research_personal_design(
         "thanksgiving table",
-        complete=lambda _messages: next(answers),
+        complete=_complete_from(answers),
         search=lambda _query: [],
         seed=1,
     )
@@ -182,7 +210,7 @@ def test_research_keeps_at_most_six_references() -> None:
 
     design = research_personal_design(
         "a round freighter",
-        complete=lambda _messages: next(answers),
+        complete=_complete_from(answers),
         search=lambda _query: [],
         seed=4,
     )
@@ -211,7 +239,7 @@ def test_a_rejected_reference_is_not_kept() -> None:
 
     design = research_personal_design(
         "a round freighter",
-        complete=lambda _messages: next(answers),
+        complete=_complete_from(answers),
         search=lambda _query: [
             SearchNote("ship", "Ship", "A round freighter.", "https://example.com/crowd.jpg")
         ],
@@ -408,7 +436,7 @@ def test_research_names_the_character_from_the_article() -> None:
 
     design = research_personal_design(
         sentence,
-        complete=lambda _messages: next(answers),
+        complete=_complete_from(answers),
         search=search,
         seed=1,
         open_page=lambda title: _article(title, ("Voice cast", "2")),
@@ -469,7 +497,7 @@ def test_a_reference_search_rejects_another_character_and_keeps_flash() -> None:
 
     design = research_personal_design(
         sentence,
-        complete=lambda _messages: next(answers),
+        complete=_complete_from(answers),
         search=search,
         seed=1,
         open_page=lambda title: _article(title, ("Voice cast", "2")),
@@ -511,7 +539,7 @@ def test_a_missing_article_title_is_rejected_and_the_next_title_is_opened() -> N
 
     design = research_personal_design(
         sentence,
-        complete=lambda _messages: next(answers),
+        complete=_complete_from(answers),
         search=lambda query: [
             SearchNote(query, query, f"{query} is a sloth.", "https://example.com/flash.jpg")
         ],
@@ -531,6 +559,8 @@ def test_an_unresolved_role_is_researched_and_not_replaced_by_a_guess() -> None:
 
     def complete(messages: list[dict[str, str]]) -> str:
         prompts.append(messages[0]["content"])
+        if "List up to three concrete visual subjects" in messages[0]["content"]:
+            return json.dumps({"subjects": []})
         if "Wikipedia article" in messages[0]["content"]:
             return json.dumps({"title": "Nope"})
         if "web searches" in messages[0]["content"]:
@@ -608,7 +638,7 @@ def test_research_prints_the_quoted_line_and_locks_the_named_character() -> None
 
     design = research_personal_design(
         'Judy Hopps character showing slow moving with text "Get There Eventually"',
-        complete=lambda _messages: next(answers),
+        complete=_complete_from(answers),
         search=search,
         seed=1,
         open_page=lambda title: (_ for _ in ()).throw(AssertionError(title)),
@@ -779,6 +809,9 @@ def test_a_photo_look_fills_the_gaps_and_does_not_rename_the_mountain() -> None:
 
     def complete(messages: list[dict[str, str]]) -> str:
         seen.append(messages)
+        system = messages[0]["content"] if messages else ""
+        if "List up to three concrete visual subjects" in system:
+            return json.dumps({"subjects": []})
         return next(answers)
 
     def look(image: bytes) -> PhotoLook:
@@ -817,6 +850,59 @@ def test_a_photo_look_fills_the_gaps_and_does_not_rename_the_mountain() -> None:
     assert design.reference_urls == ("https://example.com/mountain.jpg",)
 
 
+def test_deepen_searches_icons_from_place_notes_before_design() -> None:
+    """Magic Kingdom notes name Mickey; deepen searches him before the design pass."""
+    queries: list[str] = []
+
+    def search(query: str) -> list[SearchNote]:
+        queries.append(query)
+        if query == "Magic Kingdom":
+            return [
+                SearchNote(
+                    query,
+                    "Magic Kingdom",
+                    "Magic Kingdom is known for Mickey Mouse and Cinderella Castle.",
+                    "https://example.com/park.jpg",
+                )
+            ]
+        if query == "Mickey Mouse":
+            return [
+                SearchNote(
+                    query,
+                    "Mickey Mouse",
+                    "Mickey Mouse is the iconic mouse mascot.",
+                    "https://example.com/mickey.jpg",
+                )
+            ]
+        return []
+
+    design = research_personal_design(
+        "Thanksgiving-themed Magic Kingdom",
+        complete=_scripted_complete(
+            json.dumps({"queries": ["Magic Kingdom"]}),
+            json.dumps(
+                {
+                    "customer_line": None,
+                    "voice_found": False,
+                    "lettering": None,
+                    "subjects": "Mickey Mouse beside Cinderella Castle",
+                    "references": [{"url": "https://example.com/mickey.jpg", "keep": True}],
+                }
+            ),
+            deepen=["Mickey Mouse"],
+        ),
+        search=search,
+        seed=1,
+    )
+
+    assert queries[0] == "Magic Kingdom"
+    assert "Mickey Mouse" in queries
+    assert queries.index("Magic Kingdom") < queries.index("Mickey Mouse")
+    assert "Mickey Mouse" in design.subjects
+    assert design.reference_urls[0] == "https://example.com/mickey.jpg"
+    assert any("Mickey Mouse" in fact for fact in design.facts)
+
+
 def test_a_failed_look_stays_on_the_article() -> None:
     answers = iter(
         [
@@ -835,7 +921,7 @@ def test_a_failed_look_stays_on_the_article() -> None:
 
     design = research_personal_design(
         "Expedition Everest",
-        complete=lambda _messages: next(answers),
+        complete=_complete_from(answers),
         search=lambda _query: [
             SearchNote(
                 "expedition everest",
