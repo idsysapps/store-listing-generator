@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import json
 
+import httpx
+import pytest
+
 from store_listing.orchestration.personal_design import (
     PersonalDesign,
     SearchNote,
     arrangement_line,
+    fetch_reference,
     graphic_prompt,
     rearrange,
     research_personal_design,
     resolve_lettering,
+    search_wikipedia,
 )
 
 
@@ -201,3 +206,54 @@ def test_a_rejected_reference_is_not_kept() -> None:
     )
 
     assert design.reference_urls == ("https://example.com/ship.jpg",)
+
+
+def test_a_search_keeps_a_photo_and_drops_a_logo() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["piprop"] == "thumbnail"
+        return httpx.Response(
+            200,
+            json={
+                "query": {
+                    "pages": {
+                        "1": {
+                            "title": "Park",
+                            "extract": "A theme park.",
+                            "thumbnail": {"source": "https://upload.wikimedia.org/park.jpg"},
+                        },
+                        "2": {
+                            "title": "Logo",
+                            "extract": "A studio logo.",
+                            "thumbnail": {"source": "https://upload.wikimedia.org/logo.svg"},
+                        },
+                    }
+                }
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        notes = search_wikipedia("park", client=client)
+    urls = [note.image_url for note in notes]
+
+    assert "https://upload.wikimedia.org/park.jpg" in urls
+    assert "https://upload.wikimedia.org/logo.svg" not in urls
+
+
+def test_a_reference_download_retries_a_rate_limit_and_rejects_a_logo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.time.sleep", lambda _seconds: None
+    )
+    jpeg = b"\xff\xd8\xff" + b"photo"
+    photo_calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        photo_calls["n"] += 1
+        if photo_calls["n"] == 1:
+            return httpx.Response(429, content=b"slow", headers={"content-type": "text/html"})
+        return httpx.Response(200, content=jpeg, headers={"content-type": "image/jpeg"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert fetch_reference("https://example.com/logo.svg", client=client) is None
+        assert fetch_reference("https://example.com/park.jpg", client=client) == jpeg

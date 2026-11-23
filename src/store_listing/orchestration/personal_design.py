@@ -9,6 +9,7 @@ not call it.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -31,19 +32,22 @@ _ARRANGEMENTS: tuple[str, ...] = (
 _QUERY_SYSTEM = (
     "You choose web searches for one shirt design. The customer's sentence is the "
     'request. Return JSON only: {"queries": ["..."]}. Search for the places, '
-    "shows, and objects, and for how a named speaker talks. At most four queries."
+    "rides, shows, and objects, and for how a named speaker talks. Give each "
+    "place, ride, show, and character its own query. A place or a ride is not "
+    "a movie. Do not merge two names into one search. At most four queries."
 )
 
 _DESIGN_SYSTEM = (
     "You turn search notes into one DTF shirt graphic. Return JSON only with "
-    "customer_line (the words the customer asked to print, or null), "
+    "customer_line (a phrase the customer asked to print, or null; the picture "
+    "description is not a line), "
     "voice_found (true only when the notes show how the subject speaks), "
     "lettering (one new line in that voice for this sentence, or null), "
-    "subjects (how the subject and the objects look), and references "
-    '(up to six objects {"url", "keep"} for a clear view of the subject or '
-    "the place). A costume crowd, a tight crop, or a photo full of unrelated "
-    "people is keep false. Do not invent a line when voice_found is false. "
-    "Do not replace words the customer wrote."
+    "subjects (how the named places, rides, characters, and objects look), and "
+    'references (up to six objects {"url", "keep"} for a clear photo of the '
+    "subject or the place). A logo, a poster, a map, a costume crowd, a tight "
+    "crop, or a photo full of unrelated people is keep false. Do not invent a "
+    "line when voice_found is false. Do not replace words the customer wrote."
 )
 
 
@@ -203,7 +207,8 @@ def search_wikipedia(query: str, *, client: httpx.Client | None = None) -> list[
                 "exintro": "1",
                 "explaintext": "1",
                 "exchars": "400",
-                "piprop": "original",
+                "piprop": "thumbnail",
+                "pithumbsize": "1024",
                 "format": "json",
             },
             headers={"User-Agent": "store-listing-generator/1.0 (personal design research)"},
@@ -226,36 +231,70 @@ def search_wikipedia(query: str, *, client: httpx.Client | None = None) -> list[
             continue
         title = str(page.get("title") or "").strip()
         text = str(page.get("extract") or "").strip()
-        original = page.get("original")
+        original = page.get("thumbnail") or page.get("original")
         source = original.get("source") if isinstance(original, dict) else None
-        image_url = source if isinstance(source, str) and source.strip() else None
+        image_url = source if isinstance(source, str) and _is_raster_url(source) else None
         if title and text:
             notes.append(SearchNote(query=query, title=title, text=text, image_url=image_url))
     return notes
 
 
+_RASTER_TYPES = ("image/jpeg", "image/jpg", "image/png", "image/webp")
+_FETCH_ATTEMPTS = 3
+
+
+def _is_raster_url(url: str) -> bool:
+    path = url.split("?", 1)[0].lower()
+    return path.endswith((".jpg", ".jpeg", ".png", ".webp"))
+
+
+def _retry_delay(response: httpx.Response, attempt: int) -> float:
+    """How long to wait after a rate limit. The server's number wins."""
+    header = response.headers.get("retry-after", "").strip()
+    try:
+        requested = float(header)
+    except ValueError:
+        requested = float(attempt * 4)
+    return min(max(requested, 1.0), 15.0)
+
+
 def fetch_reference(url: str, *, client: httpx.Client | None = None) -> bytes | None:
-    """The bytes of one reference photo, or None when it cannot be fetched."""
+    """The bytes of one reference photo, or None when it cannot be fetched.
+
+    A logo is not a photo. A rate limit is waited out and tried again.
+    """
     owns_client = client is None
     http = client or httpx.Client(timeout=20.0, follow_redirects=True)
     try:
-        response = http.get(
-            url,
-            headers={"User-Agent": "store-listing-generator/1.0 (personal design research)"},
-        )
-        response.raise_for_status()
-    except httpx.HTTPError:
-        logger.warning("Reference image could not be fetched")
+        if not _is_raster_url(url):
+            return None
+        for attempt in range(1, _FETCH_ATTEMPTS + 1):
+            try:
+                response = http.get(
+                    url,
+                    headers={
+                        "User-Agent": "store-listing-generator/1.0 (personal design research)"
+                    },
+                )
+            except httpx.HTTPError:
+                logger.warning("Reference image could not be fetched")
+                return None
+            if response.status_code in (429, 503) and attempt < _FETCH_ATTEMPTS:
+                time.sleep(_retry_delay(response, attempt))
+                continue
+            try:
+                response.raise_for_status()
+            except httpx.HTTPError:
+                logger.warning("Reference image could not be fetched")
+                return None
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            if content_type not in _RASTER_TYPES or not response.content:
+                return None
+            return response.content
         return None
     finally:
         if owns_client:
             http.close()
-    content_type = response.headers.get("content-type", "")
-    if content_type and not content_type.startswith("image/"):
-        return None
-    if not response.content:
-        return None
-    return response.content
 
 
 def _queries(complete: Callable[[list[dict[str, str]]], str], sentence: str) -> list[str]:
