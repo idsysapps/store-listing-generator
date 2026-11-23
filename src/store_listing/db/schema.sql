@@ -192,7 +192,11 @@ CREATE TABLE design_briefs (
     listing_description TEXT,
     -- Whether the image is complete or needs operator attention.
     image_status VARCHAR(30),
-    image_error TEXT
+    image_error TEXT,
+    -- An operator rejection. NULL means the design is still in the working list.
+    review_status VARCHAR(20),
+    rejection_reason TEXT,
+    rejected_at TIMESTAMP WITH TIME ZONE
 );
 
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS text_plan JSONB;
@@ -209,6 +213,10 @@ ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS silhouette VARCHAR(40);
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS subtitle_text TEXT;
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS footer_text TEXT;
 ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS label_plates JSONB;
+-- An operator rejection. NULL means the design is still in the working list.
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS review_status VARCHAR(20);
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE design_briefs ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP WITH TIME ZONE;
 
 CREATE INDEX idx_design_briefs_product_type ON design_briefs(product_type);
 CREATE INDEX idx_design_briefs_created_at ON design_briefs(created_at);

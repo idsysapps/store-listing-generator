@@ -40,7 +40,9 @@ _QUERY_SYSTEM = (
     "rides, shows, and objects, and for how a named speaker talks. Give each "
     "place, ride, show, and character its own query, and search a character by "
     "that character's name alone. A place or a ride is not "
-    "a movie. Do not merge two names into one search. At most four queries."
+    "a movie. Do not merge two names into one search. At most four queries. "
+    "Do not guess a name. Search the role the customer wrote, and do not search "
+    "a character you are naming from memory."
 )
 
 _DESIGN_SYSTEM = (
@@ -54,7 +56,10 @@ _DESIGN_SYSTEM = (
     "additions (what the sentence asks for that the photos do not show, or null), "
     'and references (up to six objects {"url", "keep"}). '
     "Fill the gaps. A role such as sleuth is a character in the picture, not a "
-    "word on the shirt. Name the shirt subject from the photo. Do not replace "
+    "word on the shirt. Do not invent a character the notes do not name. If the "
+    "notes do not name one character, keep the customer's words and do not "
+    "substitute a character from memory. Name the shirt subject from the photo. "
+    "Do not replace "
     "the photo with the article's object. A logo, a poster, a map, a costume "
     "crowd, a tight crop, or a photo full of unrelated people is keep false. "
     "Do not invent a line when voice_found is false. Do not print the customer's "
@@ -266,6 +271,32 @@ def character_from_notes(query: str, notes: Sequence[SearchNote]) -> str | None:
     return None
 
 
+def _known_names(sentence: str, characters: Sequence[str]) -> set[str]:
+    """Names the customer wrote, plus a name the notes already resolved."""
+    known = {name.lower() for name in characters}
+    known.update(name.lower() for name in _proper_names(sentence, set()))
+    return known
+
+
+def _guessed_names(text: str, known: set[str], sentence: str) -> list[str]:
+    """Proper names in ``text`` that neither the customer nor the notes supplied.
+
+    A name the customer wrote in lower case, such as ``jar jar``, is still
+    the customer's name.
+    """
+    folded = sentence.lower()
+    return [
+        name
+        for name in _proper_names(text, set())
+        if " " in name and name.lower() not in known and name.lower() not in folded
+    ]
+
+
+def _facts_without_guesses(facts: Sequence[str], known: set[str], sentence: str) -> tuple[str, ...]:
+    """Facts that do not hand the picture a character nobody resolved."""
+    return tuple(fact for fact in facts if not _guessed_names(fact, known, sentence))
+
+
 def lock_characters(subjects: str, characters: Sequence[str]) -> str:
     """The picture description, with every named character still in it."""
     text = " ".join((subjects or "").split())
@@ -387,12 +418,15 @@ def research_personal_design(
     characters = list(named)
     if resolved is not None and resolved.lower() not in {name.lower() for name in characters}:
         characters.insert(0, resolved)
+    known = _known_names(sentence, characters)
     queries: list[str] = []
     for name in characters:
         _add_query(queries, name)
     for query in _queries(complete, sentence):
         if len(queries) >= MAX_QUERIES:
             break
+        if _guessed_names(query, known, sentence):
+            continue
         _add_query(queries, query)
 
     character_keys = {name.lower() for name in characters}
@@ -420,7 +454,11 @@ def research_personal_design(
         character_notes = [_with_look(note) for note in character_notes]
     reference_notes = seen if look is not None else notes
 
-    facts = tuple(_fact(note) for note in notes if _fact(note))
+    facts = _facts_without_guesses(
+        tuple(_fact(note) for note in notes if _fact(note)),
+        known,
+        sentence,
+    )
     design = _read_design(complete, sentence, notes)
     picture = _without_quotes(sentence).strip() or sentence.strip()
     if design is None:
@@ -455,6 +493,10 @@ def research_personal_design(
         design["additions"],
         _kept_looks(reference_notes, urls),
     )
+    if _guessed_names(subject, known, sentence) and not from_photos:
+        # A photo may describe what it shows. A name the notes did not return
+        # is the model choosing a character, so the customer's words stay.
+        subject = picture
     subject = lock_characters(subject, characters)
     image_facts = () if from_photos else facts
     return PersonalDesign(

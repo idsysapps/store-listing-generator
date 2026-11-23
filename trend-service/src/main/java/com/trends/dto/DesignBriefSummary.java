@@ -28,6 +28,8 @@ public class DesignBriefSummary {
     private String listingDescription;
     private String imageStatus;
     private String imageError;
+    private String reviewStatus;
+    private String rejectionReason;
     private String voice;
     private String stylePreset;
     private String fontFamily;
@@ -133,6 +135,12 @@ public class DesignBriefSummary {
 
     public String getImageError() { return imageError; }
     public void setImageError(String imageError) { this.imageError = imageError; }
+
+    public String getReviewStatus() { return reviewStatus; }
+    public void setReviewStatus(String reviewStatus) { this.reviewStatus = reviewStatus; }
+
+    public String getRejectionReason() { return rejectionReason; }
+    public void setRejectionReason(String rejectionReason) { this.rejectionReason = rejectionReason; }
 
     public String getVoice() { return voice; }
     public void setVoice(String voice) { this.voice = voice; }
