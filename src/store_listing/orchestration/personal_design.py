@@ -1266,107 +1266,69 @@ def search_wikidata(query: str, *, client: httpx.Client | None = None) -> list[S
             http.close()
 
 
-_BRAVE_WEB_URL = "https://api.search.brave.com/res/v1/web/search"
-_BRAVE_IMAGE_URL = "https://api.search.brave.com/res/v1/images/search"
-_BRAVE_WEB_RESULTS = 5
-_BRAVE_IMAGE_RESULTS = 5
+_GOOGLE_IMAGES_ACTOR = "bvAQMqCbp6wE53JzK"
+_GOOGLE_IMAGES_RESULTS = 50
 
 
-def search_brave(
+def search_google_images(
     query: str,
     *,
-    client: httpx.Client | None = None,
+    apify_client_cls: Any | None = None,
 ) -> list[SearchNote]:
-    """Web snippets and reference images from Brave Search API.
+    """Reference images from Google Image Search via Apify (johnvc/google-images-api).
 
-    One web search call returns text snippets and thumbnail images per result.
-    A dedicated image search call fires only when the web pass returns no raster
-    images, keeping quota usage within the 2,000 free queries/month limit.
-
-    Returns an empty list when BRAVE_API_KEY is not set or the call fails.
+    Fires only as a fallback when Wikimedia sources return no raster images.
+    Cost: $0.0001/image × 50-image minimum = $0.005 per call.
+    Returns an empty list when APIFY_API_TOKEN is not set or the call fails.
     """
     import os
 
-    api_key = os.environ.get("BRAVE_API_KEY", "")
-    if not api_key:
+    token = os.environ.get("APIFY_API_TOKEN", "")
+    if not token:
         return []
-
-    owns_client = client is None
-    http = client or httpx.Client(timeout=10.0)
     try:
-        notes = _brave_web(query, api_key=api_key, http=http)
-        if not any(note.image_url for note in notes):
-            notes.extend(_brave_images(query, api_key=api_key, http=http))
-        return notes
-    finally:
-        if owns_client:
-            http.close()
+        if apify_client_cls is not None:
+            make_client = apify_client_cls
+        else:
+            from apify_client import ApifyClient  # type: ignore[import-not-found]
 
+            def make_client(tok: str) -> Any:
+                return ApifyClient(tok)
 
-def _brave_headers(api_key: str) -> dict:
-    return {
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip",
-        "X-Subscription-Token": api_key,
-        "User-Agent": _USER_AGENT,
-    }
-
-
-def _brave_web(query: str, *, api_key: str, http: httpx.Client) -> list[SearchNote]:
-    try:
-        r = _search_get(
-            http,
-            _BRAVE_WEB_URL,
-            params={"q": query, "count": str(_BRAVE_WEB_RESULTS), "country": "us"},
-            headers=_brave_headers(api_key),
+        client = make_client(token)
+        run = client.actor(_GOOGLE_IMAGES_ACTOR).call(
+            run_input={
+                "queries": [query],
+                "maxResultsPerQuery": _GOOGLE_IMAGES_RESULTS,
+                "gl": "us",
+                "hl": "en",
+            },
         )
-        payload = r.json()
-    except (httpx.HTTPError, ValueError):
-        logger.warning("Brave web search failed for %r", query)
+        if run is None:
+            return []
+        dataset_id = (
+            run.get("defaultDatasetId") if isinstance(run, dict) else run.default_dataset_id
+        )
+        items = client.dataset(dataset_id).list_items().items
+    except Exception:  # noqa: BLE001
+        logger.warning("Google Images (Apify) search failed for %r", query)
         return []
 
     notes: list[SearchNote] = []
-    for item in (payload.get("web") or {}).get("results") or []:
+    for item in items or []:
         if not isinstance(item, dict):
             continue
-        title = str(item.get("title") or "").strip()
-        text = str(item.get("description") or "").strip()
-        if not title or not text:
-            continue
-        thumbnail = item.get("thumbnail") or {}
-        raw_url = thumbnail.get("original") or thumbnail.get("src")
-        image_url = raw_url if isinstance(raw_url, str) and _is_raster_url(raw_url) else None
-        notes.append(SearchNote(query=query, title=title, text=text, image_url=image_url))
-    return notes
-
-
-def _brave_images(query: str, *, api_key: str, http: httpx.Client) -> list[SearchNote]:
-    try:
-        r = _search_get(
-            http,
-            _BRAVE_IMAGE_URL,
-            params={"q": query, "count": str(_BRAVE_IMAGE_RESULTS), "country": "us"},
-            headers=_brave_headers(api_key),
-        )
-        payload = r.json()
-    except (httpx.HTTPError, ValueError):
-        logger.warning("Brave image search failed for %r", query)
-        return []
-
-    notes: list[SearchNote] = []
-    for item in payload.get("results") or []:
-        if not isinstance(item, dict):
-            continue
-        props = item.get("properties") or {}
-        url = str(props.get("url") or "").strip()
-        if not url or not _is_raster_url(url):
+        url = item.get("imageUrl")
+        if not isinstance(url, str) or not _is_raster_url(url):
             continue
         title = str(item.get("title") or query).strip()
-        notes.append(SearchNote(query=query, title=title, text=title, image_url=url))
+        source = str(item.get("source") or "").strip()
+        text = f"{title} ({source})" if source else title
+        notes.append(SearchNote(query=query, title=title, text=text, image_url=url))
     return notes
 
 
-_GEMINI_MODEL = "gemini-2.0-flash"
+_GEMINI_MODEL = "gemini-3.8-flash"
 _GEMINI_PROMPT = (
     "In 2-3 sentences describe what {query} looks like visually — "
     "distinctive colours, features, costume, or setting. "
@@ -1428,11 +1390,11 @@ def search_gemini(
 
 
 def search_personal(query: str, *, client: httpx.Client | None = None) -> list[SearchNote]:
-    """Wikipedia, Brave Search, Commons, Wikidata, and Gemini notes for one query.
+    """Wikipedia, Commons, Wikidata, Gemini, and Google Images notes for one query.
 
-    Brave Search provides web snippets and reference images. Gemini with Google
-    Search grounding adds synthesised visual descriptions for characters, places,
-    and pop-culture subjects. Both degrade gracefully when their API keys are absent.
+    Gemini with Google Search grounding supplies synthesised visual descriptions.
+    Google Images via Apify fires only as a fallback when Wikimedia sources return
+    no raster images, keeping cost within budget (~$0.005 per fallback call).
     """
     owns_client = client is None
     http = client or httpx.Client(timeout=10.0)
@@ -1440,8 +1402,9 @@ def search_personal(query: str, *, client: httpx.Client | None = None) -> list[S
         notes: list[SearchNote] = []
         for search in (search_wikipedia, search_commons, search_wikidata):
             notes.extend(search(query, client=http))
-        notes.extend(search_brave(query, client=http))
         notes.extend(search_gemini(query))
+        if not any(note.image_url for note in notes):
+            notes.extend(search_google_images(query))
         return notes
     finally:
         if owns_client:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import httpx
 import pytest
@@ -25,10 +25,10 @@ from store_listing.orchestration.personal_design import (
     rearrange,
     research_personal_design,
     resolve_lettering,
-    search_brave,
     search_commons,
     search_duckduckgo,
     search_gemini,
+    search_google_images,
     search_personal,
     search_wikidata,
     search_wikipedia,
@@ -737,139 +737,155 @@ def test_personal_search_asks_every_source(monkeypatch: pytest.MonkeyPatch) -> N
         lambda query, client=None: note("wikidata"),
     )
     monkeypatch.setattr(
-        "store_listing.orchestration.personal_design.search_brave",
-        lambda query, client=None: note("brave"),
-    )
-    monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_gemini",
         lambda query: note("gemini"),
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_google_images",
+        lambda query, apify_client_cls=None: [],
     )
 
     notes = search_personal("Judy Hopps")
 
-    assert seen == ["wikipedia", "commons", "wikidata", "brave", "gemini"]
-    assert [note.title for note in notes] == [
-        "wikipedia",
-        "commons",
-        "wikidata",
-        "brave",
-        "gemini",
+    assert seen == ["wikipedia", "commons", "wikidata", "gemini"]
+    assert [note.title for note in notes] == ["wikipedia", "commons", "wikidata", "gemini"]
+
+
+# ---------------------------------------------------------------------------
+# Google Images via Apify — image fallback
+# ---------------------------------------------------------------------------
+
+
+def test_google_images_returns_empty_without_apify_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("APIFY_API_TOKEN", raising=False)
+    assert search_google_images("Tron") == []
+
+
+def test_google_images_fallback_fires_when_wikimedia_returns_no_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    google_called: list[str] = []
+
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_wikipedia",
+        lambda query, client=None: [SearchNote(query, "Title", "Some text.", None)],
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_commons",
+        lambda query, client=None: [],
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_wikidata",
+        lambda query, client=None: [],
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_gemini",
+        lambda query: [],
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_google_images",
+        lambda query, apify_client_cls=None: (
+            google_called.append(query)
+            or [SearchNote(query, "Google result", "From google.", "https://example.com/img.jpg")]
+        ),
+    )
+
+    notes = search_personal("Tron")
+
+    assert google_called == ["Tron"]
+    assert any(note.image_url for note in notes)
+
+
+def test_google_images_fallback_skipped_when_wikimedia_has_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    google_called: list[str] = []
+
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_wikipedia",
+        lambda query, client=None: [
+            SearchNote(query, "Title", "Text.", "https://upload.wikimedia.org/img.jpg")
+        ],
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_commons",
+        lambda query, client=None: [],
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_wikidata",
+        lambda query, client=None: [],
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_gemini",
+        lambda query: [],
+    )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_google_images",
+        lambda query, apify_client_cls=None: google_called.append(query) or [],
+    )
+
+    search_personal("Mickey Mouse")
+
+    assert google_called == []
+
+
+def _fake_apify_client(raw_items: list) -> type:
+    """Minimal Apify client stub whose dataset returns raw_items."""
+
+    def _list_items(raw: list) -> Any:
+        return type("Result", (), {"items": raw})()
+
+    class _FakeDataset:
+        def list_items(self) -> Any:
+            return _list_items(raw_items)
+
+    class _FakeRun:
+        default_dataset_id = "ds-test"
+
+    class _FakeActor:
+        def call(self, **kwargs: Any) -> _FakeRun:
+            return _FakeRun()
+
+    class _FakeClient:
+        def __init__(self, token: str) -> None:
+            pass
+
+        def actor(self, actor_id: str) -> _FakeActor:
+            return _FakeActor()
+
+        def dataset(self, dataset_id: str) -> _FakeDataset:
+            return _FakeDataset()
+
+    return _FakeClient
+
+
+def test_google_images_returns_raster_notes_and_filters_svg() -> None:
+    raw = [
+        {
+            "imageUrl": "https://example.com/tron.jpg",
+            "title": "Tron character",
+            "source": "disney.fandom.com",
+        },
+        {"imageUrl": "https://example.com/logo.svg", "title": "SVG logo", "source": "example.com"},
+        {
+            "imageUrl": "https://example.com/char.png",
+            "title": "Tron 2",
+            "source": "disney.fandom.com",
+        },
     ]
-
-
-# ---------------------------------------------------------------------------
-# Brave Search — web text + image in one source
-# ---------------------------------------------------------------------------
-
-
-def test_brave_returns_empty_without_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
-    assert search_brave("Tron") == []
-
-
-def test_brave_web_returns_snippets_and_thumbnail_images() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert "api.search.brave.com" in str(request.url)
-        assert "images" not in str(request.url)
-        assert request.url.params["q"] == "Tron"
-        return httpx.Response(
-            200,
-            json={
-                "web": {
-                    "results": [
-                        {
-                            "title": "Tron (character)",
-                            "description": "Tron is a heroic program from the 1982 film.",
-                            "url": "https://disney.fandom.com/wiki/Tron",
-                            "thumbnail": {"original": "https://example.com/tron.jpg"},
-                        },
-                        {"title": "No description", "description": ""},
-                    ]
-                }
-            },
-        )
-
     import os
 
-    os.environ["BRAVE_API_KEY"] = "test-key"
+    os.environ["APIFY_API_TOKEN"] = "test-token"
     try:
-        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            notes = search_brave("Tron", client=client)
+        notes = search_google_images("Tron", apify_client_cls=_fake_apify_client(raw))
     finally:
-        del os.environ["BRAVE_API_KEY"]
+        del os.environ["APIFY_API_TOKEN"]
 
-    assert len(notes) == 1
-    assert notes[0].title == "Tron (character)"
-    assert "heroic program" in notes[0].text
+    assert len(notes) == 2
     assert notes[0].image_url == "https://example.com/tron.jpg"
-
-
-def test_brave_image_fallback_fires_when_web_has_no_images() -> None:
-    """When web thumbnails are absent, the image endpoint is called."""
-    urls_called: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        urls_called.append(str(request.url.path))
-        if "images" in str(request.url):
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        {"title": "Tron img", "properties": {"url": "https://example.com/tron.png"}}
-                    ]
-                },
-            )
-        return httpx.Response(
-            200,
-            json={"web": {"results": [{"title": "Tron", "description": "A Disney character."}]}},
-        )
-
-    import os
-
-    os.environ["BRAVE_API_KEY"] = "test-key"
-    try:
-        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            notes = search_brave("Tron", client=client)
-    finally:
-        del os.environ["BRAVE_API_KEY"]
-
-    assert any("images" in u for u in urls_called)
-    image_notes = [n for n in notes if n.image_url]
-    assert image_notes[0].image_url == "https://example.com/tron.png"
-
-
-def test_brave_image_fallback_skipped_when_web_has_images() -> None:
-    """Image endpoint is NOT called when web results already have thumbnails."""
-    urls_called: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        urls_called.append(str(request.url.path))
-        return httpx.Response(
-            200,
-            json={
-                "web": {
-                    "results": [
-                        {
-                            "title": "Mickey Mouse",
-                            "description": "Mickey is a cartoon mouse.",
-                            "thumbnail": {"original": "https://example.com/mickey.jpg"},
-                        }
-                    ]
-                }
-            },
-        )
-
-    import os
-
-    os.environ["BRAVE_API_KEY"] = "test-key"
-    try:
-        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            search_brave("Mickey Mouse", client=client)
-    finally:
-        del os.environ["BRAVE_API_KEY"]
-
-    assert not any("images" in u for u in urls_called)
-    assert any("web/search" in u for u in urls_called)
+    assert notes[1].image_url == "https://example.com/char.png"
 
 
 def test_a_reference_download_retries_a_rate_limit_and_rejects_a_logo(
