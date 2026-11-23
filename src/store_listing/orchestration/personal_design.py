@@ -370,6 +370,7 @@ def research_personal_design(
     quotes = quoted_lettering(sentence)
     notes: list[SearchNote] = []
     character_notes: list[SearchNote] = []
+    seen: list[SearchNote] = []
 
     def _found(query: str) -> list[SearchNote]:
         try:
@@ -377,6 +378,7 @@ def research_personal_design(
         except Exception:  # noqa: BLE001
             logger.warning("Personal design search failed for %r", query)
             found = []
+        seen.extend(found)
         return matching_notes(query, found)
 
     role_notes = _found(role) if role else []
@@ -406,7 +408,17 @@ def research_personal_design(
             if resolved.lower() in _title_text(note.title) or resolved.lower() in note.text.lower()
         )
     if look is not None:
-        notes = _attach_looks(notes, look, fetch or fetch_reference)
+        seen = _attach_looks(seen, look, fetch or fetch_reference)
+        by_url = {note.image_url: note for note in seen if note.image_url}
+
+        def _with_look(note: SearchNote) -> SearchNote:
+            if note.image_url and note.image_url in by_url:
+                return by_url[note.image_url]
+            return note
+
+        notes = [_with_look(note) for note in notes]
+        character_notes = [_with_look(note) for note in character_notes]
+    reference_notes = seen if look is not None else notes
 
     facts = tuple(_fact(note) for note in notes if _fact(note))
     design = _read_design(complete, sentence, notes)
@@ -437,11 +449,11 @@ def research_personal_design(
             voice_found=bool(design["voice_found"]),
         )
     )
-    urls = _merged_urls(character_notes, _reference_urls(design["references"], notes))
+    urls = _merged_urls(character_notes, _reference_urls(design["references"], reference_notes))
     subject, from_photos = _drawn_subject(
         _without_quotes(design["subjects"]).strip() or picture,
         design["additions"],
-        _kept_looks(notes, urls),
+        _kept_looks(reference_notes, urls),
     )
     subject = lock_characters(subject, characters)
     image_facts = () if from_photos else facts
@@ -844,7 +856,7 @@ def _merged_urls(character_notes: Sequence[SearchNote], chosen: Sequence[str]) -
     urls: list[str] = []
     for note in character_notes:
         url = note.image_url
-        if isinstance(url, str) and url.strip() and url.strip() not in urls:
+        if isinstance(url, str) and url.strip() and note.look_keep and url.strip() not in urls:
             urls.append(url.strip())
     for url in chosen:
         if url not in urls:
