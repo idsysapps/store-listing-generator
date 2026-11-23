@@ -16,6 +16,7 @@ from store_listing.orchestration.brief_prompts import (
     content_scope_rules,
     copy_mode_rules,
     layout_rules,
+    personal_content_scope_rules,
     product_belongs_to,
     product_catalog,
 )
@@ -115,7 +116,7 @@ def _system_prompt(enabled: Sequence[str] | None, personal_use: bool) -> str:
         f"{literal_rules}"
         f"{personal_use_rules}"
         f"{product_catalog(types)}\n"
-        f"{content_scope_rules()}\n"
+        f"{personal_content_scope_rules() if personal_use else content_scope_rules()}\n"
         "Return a single JSON object with this structure:\n"
         '{"brief": {\n'
         '  "concept": "design-ready phrase or visual idea",\n'

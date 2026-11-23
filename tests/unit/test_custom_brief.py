@@ -754,6 +754,23 @@ class TestPersonalUsePrompt:
         assert messages[1]["role"] == "user"
         assert "disney shirt for family trip" in messages[1]["content"]
 
+    def test_personal_use_does_not_restrict_theme_library(self) -> None:
+        messages = build_custom_brief_prompt(
+            "Disney's Magic Kingdom - Mickey Mouse, Tron, Space Mountain -- Thanksgiving themed",
+            "dtf_apparel",
+            personal_use=True,
+        )
+        system_msg = messages[0]["content"]
+        assert "Catholic and Christian themes" not in system_msg
+        assert "the only themes this store prints" not in system_msg
+
+    def test_personal_use_still_prohibits_explicit_content(self) -> None:
+        messages = build_custom_brief_prompt(
+            "Disney's Magic Kingdom shirt", "dtf_apparel", personal_use=True
+        )
+        system_msg = messages[0]["content"]
+        assert "explicit" in system_msg.lower() or "occult" in system_msg.lower()
+
 
 class TestTheVoiceOfTheCustomBrief:
     def test_the_prompt_asks_for_a_voice(self) -> None:
