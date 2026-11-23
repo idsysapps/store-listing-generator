@@ -384,6 +384,55 @@ def test_research_replaces_a_role_with_the_character_the_search_names() -> None:
     assert design.lettering == "Get There Eventually"
 
 
+def test_an_unresolved_role_is_researched_and_not_replaced_by_a_guess() -> None:
+    # The model knows Judy Hopps. The notes do not name one character, so
+    # that guess must not be searched or drawn.
+    prompts: list[str] = []
+
+    def complete(messages: list[dict[str, str]]) -> str:
+        prompts.append(messages[0]["content"])
+        if len(prompts) == 1:
+            return json.dumps({"queries": ["Judy Hopps", "slow moving"]})
+        return json.dumps(
+            {
+                "customer_line": None,
+                "voice_found": False,
+                "lettering": None,
+                "subjects": "Judy Hopps, a rabbit police officer",
+                "references": [],
+            }
+        )
+
+    queries: list[str] = []
+
+    def search(query: str) -> list[SearchNote]:
+        queries.append(query)
+        return [
+            SearchNote(
+                query,
+                "Zootopia",
+                "Judy Hopps, Nick Wilde and Flash Slothmore appear.",
+                None,
+            )
+        ]
+
+    design = research_personal_design(
+        'Zootopia sleuth character showing slow moving with text "Get There Eventually"',
+        complete=complete,
+        search=search,
+        seed=1,
+    )
+
+    assert queries[0] == "Zootopia sleuth character"
+    assert "Judy Hopps" not in queries
+    assert "slow moving" in queries
+    assert "Judy Hopps" not in design.subjects
+    assert "Judy Hopps" not in design.prompt
+    assert "Zootopia sleuth character" in design.subjects
+    assert "Do not guess a name." in prompts[0]
+    assert "Do not invent a character the notes do not name." in prompts[1]
+
+
 def test_research_prints_the_quoted_line_and_locks_the_named_character() -> None:
     answers = iter(
         [
