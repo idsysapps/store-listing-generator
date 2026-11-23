@@ -660,6 +660,7 @@ class DatabaseClient:
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND (image_status IS NULL OR image_status <> 'needs_attention')
+                      AND (review_status IS NULL OR review_status <> 'rejected')
                       AND product_type = ANY(%s)
                     ORDER BY created_at DESC
                     LIMIT %s
@@ -678,6 +679,7 @@ class DatabaseClient:
                     FROM design_briefs
                     WHERE image_key_raw IS NULL
                       AND (image_status IS NULL OR image_status <> 'needs_attention')
+                      AND (review_status IS NULL OR review_status <> 'rejected')
                     ORDER BY created_at DESC
                     LIMIT %s
                     """,
@@ -912,6 +914,7 @@ class DatabaseClient:
                 FROM design_briefs
                 WHERE created_at > NOW() - INTERVAL '30 days'
                   AND personal_use = FALSE
+                  AND (review_status IS NULL OR review_status <> 'rejected')
                   AND (last_reranked_at IS NULL
                        OR last_reranked_at < NOW() - INTERVAL '24 hours')
                 ORDER BY created_at DESC

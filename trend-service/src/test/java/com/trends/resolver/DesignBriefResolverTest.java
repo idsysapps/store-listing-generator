@@ -10,6 +10,7 @@ import com.trends.domain.DesignBriefSource;
 import com.trends.dto.DesignBriefConnection;
 import com.trends.dto.DesignBriefOrderBy;
 import com.trends.dto.DesignBriefSummary;
+import com.trends.dto.DesignReviewFilter;
 import com.trends.dto.BriefPricing;
 import com.trends.dto.MaterialRecommendation;
 import com.trends.event.CeleryTaskDispatcher;
@@ -770,5 +771,121 @@ class DesignBriefResolverTest {
         GraphQLException ex = assertThrows(GraphQLException.class,
                 () -> designBriefResolver.requestRegeneration(1, "feedback", null, null));
         assertEquals("Authentication required", ex.getMessage());
+    }
+
+    @Test
+    void testRejectDesign_KeepsTheImageAndStoresTheReason() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
+        brief.imageKeyRaw = "designs/2026/09/dtf_apparel/1_raw.png";
+        brief.imageKeyTransparent = "designs/2026/09/dtf_apparel/1_transparent.png";
+        brief.imageStatus = "complete";
+        when(designBriefRepository.findById(1L)).thenReturn(brief);
+
+        DesignBriefSummary result = designBriefResolver.rejectDesign(
+                1, "  the rabbit is a generic substitute  ");
+
+        assertNotNull(result);
+        assertEquals("designs/2026/09/dtf_apparel/1_raw.png", brief.imageKeyRaw);
+        assertEquals("designs/2026/09/dtf_apparel/1_transparent.png", brief.imageKeyTransparent);
+        assertEquals("complete", brief.imageStatus);
+        assertEquals("rejected", brief.reviewStatus);
+        assertEquals("the rabbit is a generic substitute", brief.rejectionReason);
+        assertNotNull(brief.rejectedAt);
+        assertEquals("rejected", result.getReviewStatus());
+        assertEquals("the rabbit is a generic substitute", result.getRejectionReason());
+        verify(designBriefRepository).persist(brief);
+    }
+
+    @Test
+    void testRejectDesign_BlankReasonIsStoredAsNull() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Skeleton Yoga", "dtf_apparel");
+        brief.rejectionReason = "an older reason";
+        when(designBriefRepository.findById(1L)).thenReturn(brief);
+
+        designBriefResolver.rejectDesign(1, "   ");
+
+        assertEquals("rejected", brief.reviewStatus);
+        assertNull(brief.rejectionReason);
+        assertNotNull(brief.rejectedAt);
+    }
+
+    @Test
+    void testRejectDesign_UnknownBriefReturnsNull() throws GraphQLException {
+        when(designBriefRepository.findById(9L)).thenReturn(null);
+
+        assertNull(designBriefResolver.rejectDesign(9, "the lettering is wrong"));
+        verify(designBriefRepository, never()).persist(any(DesignBrief.class));
+    }
+
+    @Test
+    void testRejectDesign_ThrowsAuthenticationRequired_WhenAnonymous() {
+        when(securityIdentity.isAnonymous()).thenReturn(true);
+
+        GraphQLException ex = assertThrows(GraphQLException.class,
+                () -> designBriefResolver.rejectDesign(1, "the lettering is wrong"));
+        assertEquals("Authentication required", ex.getMessage());
+    }
+
+    @Test
+    void testGetDesignBriefs_ActiveFilterExcludesRejected() throws GraphQLException {
+        DesignBrief brief = makeBrief(1, "Kept Shirt", "dtf_apparel");
+        when(designBriefRepository.findWithFilters(
+                null, null, null, null, null, null, null, null, null,
+                10, 0, DesignBriefOrderBy.CREATED_AT_DESC, null, DesignReviewFilter.ACTIVE))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countWithFilters(
+                null, null, null, null, null, null, null, null, null, DesignReviewFilter.ACTIVE))
+                .thenReturn(1L);
+
+        DesignBriefConnection result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null, null, null, null, null,
+                DesignReviewFilter.ACTIVE, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
+
+        assertEquals(1, result.getItems().size());
+        verify(designBriefRepository).findWithFilters(
+                null, null, null, null, null, null, null, null, null,
+                10, 0, DesignBriefOrderBy.CREATED_AT_DESC, null, DesignReviewFilter.ACTIVE);
+        verify(designBriefRepository, never())
+                .findRecentPaginated(anyInt(), anyInt(), any(DesignBriefOrderBy.class));
+    }
+
+    @Test
+    void testGetDesignBriefs_RejectedFilterReturnsOnlyRejected() throws GraphQLException {
+        DesignBrief brief = makeBrief(2, "Dropped Shirt", "dtf_apparel");
+        brief.reviewStatus = "rejected";
+        brief.rejectionReason = "the lettering is wrong";
+        when(designBriefRepository.findWithFilters(
+                null, null, null, null, null, null, null, null, null,
+                10, 0, DesignBriefOrderBy.CREATED_AT_DESC, null, DesignReviewFilter.REJECTED))
+                .thenReturn(List.of(brief));
+        when(designBriefRepository.countWithFilters(
+                null, null, null, null, null, null, null, null, null, DesignReviewFilter.REJECTED))
+                .thenReturn(1L);
+
+        DesignBriefConnection result = designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null, null, null, null, null,
+                DesignReviewFilter.REJECTED, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
+
+        assertEquals("rejected", result.getItems().get(0).getReviewStatus());
+        assertEquals("the lettering is wrong", result.getItems().get(0).getRejectionReason());
+        verify(designBriefRepository).findWithFilters(
+                null, null, null, null, null, null, null, null, null,
+                10, 0, DesignBriefOrderBy.CREATED_AT_DESC, null, DesignReviewFilter.REJECTED);
+    }
+
+    @Test
+    void testGetDesignBriefs_AllReviewFilterKeepsTheRecentList() throws GraphQLException {
+        when(designBriefRepository.findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC))
+                .thenReturn(List.of());
+        when(designBriefRepository.countAll()).thenReturn(0L);
+
+        designBriefResolver.getDesignBriefs(
+                null, null, null, null, null, null, null, null, null, null,
+                DesignReviewFilter.ALL, 10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
+
+        verify(designBriefRepository).findRecentPaginated(10, 0, DesignBriefOrderBy.CREATED_AT_DESC);
+        verify(designBriefRepository, never()).findWithFilters(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                anyInt(), anyInt(), any(), any(), any());
     }
 }
