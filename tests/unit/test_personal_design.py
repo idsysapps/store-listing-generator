@@ -1229,3 +1229,83 @@ def test_wikidata_retries_on_429_and_returns_notes() -> None:
 
     assert notes[0].title == "Thanksgiving"
     assert notes[0].text == "annual national holiday in the United States"
+
+
+# ---------------------------------------------------------------------------
+# Multi-element scenes: all named things must appear (issue #349-ish)
+# ---------------------------------------------------------------------------
+
+
+def test_named_element_missing_from_llm_subjects_is_injected_into_prompt() -> None:
+    """When the LLM omits a searched element from subjects, it is added back as a scene note."""
+    queries_seen: list[str] = []
+
+    def search(query: str) -> list[SearchNote]:
+        queries_seen.append(query)
+        note_map = {
+            "Mickey Mouse": SearchNote(
+                "Mickey Mouse", "Mickey Mouse", "Mickey is a cartoon mouse.", None
+            ),
+            "Tron": SearchNote("Tron", "Tron", "Tron is a sci-fi Disney film.", None),
+            "Space Mountain": SearchNote(
+                "Space Mountain", "Space Mountain", "Space Mountain is a roller coaster.", None
+            ),
+        }
+        return [note_map[query]] if query in note_map else []
+
+    design = research_personal_design(
+        "Mickey Mouse, tron, space mountain",
+        complete=_scripted_complete(
+            json.dumps({"queries": ["Mickey Mouse", "Tron", "Space Mountain"]}),
+            json.dumps(
+                {
+                    "customer_line": None,
+                    "voice_found": False,
+                    "lettering": None,
+                    "subjects": "Mickey Mouse waving cheerfully",
+                    "additions": None,
+                    "references": [],
+                }
+            ),
+        ),
+        search=search,
+        seed=0,
+    )
+
+    subjects_lower = design.subjects.lower()
+    assert "tron" in subjects_lower
+    assert "space mountain" in subjects_lower
+
+
+def test_all_named_elements_appear_in_prompt_when_llm_includes_them() -> None:
+    """When the LLM correctly includes all elements, no duplicate injection happens."""
+    design = research_personal_design(
+        "Mickey Mouse, tron, space mountain",
+        complete=_scripted_complete(
+            json.dumps({"queries": ["Mickey Mouse", "Tron", "Space Mountain"]}),
+            json.dumps(
+                {
+                    "customer_line": None,
+                    "voice_found": False,
+                    "lettering": None,
+                    "subjects": ("Mickey Mouse in Tron costume speeding away from Space Mountain"),
+                    "additions": None,
+                    "references": [],
+                }
+            ),
+        ),
+        search=lambda q: [SearchNote(q, q, f"{q} is a thing.", None)],
+        seed=0,
+    )
+
+    assert "weave in" not in design.subjects.lower()
+    assert "mickey mouse" in design.subjects.lower()
+    assert "tron" in design.subjects.lower()
+    assert "space mountain" in design.subjects.lower()
+
+
+def test_max_queries_allows_more_than_four_searches() -> None:
+    """With six named things, all six should be searched (MAX_QUERIES >= 6)."""
+    from store_listing.orchestration.personal_design import MAX_QUERIES
+
+    assert MAX_QUERIES >= 6
