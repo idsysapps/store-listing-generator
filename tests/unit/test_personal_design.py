@@ -27,6 +27,7 @@ from store_listing.orchestration.personal_design import (
     search_commons,
     search_duckduckgo,
     search_personal,
+    search_wikidata,
     search_wikipedia,
     section_lines,
     specified_characters,
@@ -732,11 +733,15 @@ def test_personal_search_asks_every_source(monkeypatch: pytest.MonkeyPatch) -> N
         "store_listing.orchestration.personal_design.search_commons",
         lambda query, client=None: note("commons"),
     )
+    monkeypatch.setattr(
+        "store_listing.orchestration.personal_design.search_wikidata",
+        lambda query, client=None: note("wikidata"),
+    )
 
     notes = search_personal("Judy Hopps")
 
-    assert seen == ["wikipedia", "duckduckgo", "commons"]
-    assert [note.title for note in notes] == ["wikipedia", "duckduckgo", "commons"]
+    assert seen == ["wikipedia", "duckduckgo", "commons", "wikidata"]
+    assert [note.title for note in notes] == ["wikipedia", "duckduckgo", "commons", "wikidata"]
 
 
 def test_a_reference_download_retries_a_rate_limit_and_rejects_a_logo(
@@ -937,3 +942,188 @@ def test_a_failed_look_stays_on_the_article() -> None:
 
     assert "roller coaster train" in design.prompt
     assert "steel roller coaster" in design.prompt
+
+
+# ---------------------------------------------------------------------------
+# Wikidata search (issue #344)
+# ---------------------------------------------------------------------------
+
+
+def _wikidata_handler(
+    *,
+    qid: str = "Q676555",
+    label: str = "Francis of Assisi",
+    description: str = "Italian Catholic saint and friar",
+    p18_filename: str | None = "StFrancis_part.jpg",
+) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        action = request.url.params.get("action")
+        if action == "wbsearchentities":
+            item: dict = {"id": qid, "label": label, "description": description}
+            return httpx.Response(200, json={"search": [item]})
+        if action == "wbgetentities":
+            claims: dict = {}
+            if p18_filename:
+                claims["P18"] = [{"mainsnak": {"datavalue": {"value": p18_filename}}}]
+            return httpx.Response(200, json={"entities": {qid: {"claims": claims}}})
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handler)
+
+
+def test_wikidata_returns_label_description_and_raster_image() -> None:
+    with httpx.Client(transport=_wikidata_handler()) as client:
+        notes = search_wikidata("Francis of Assisi", client=client)
+
+    assert len(notes) == 1
+    assert notes[0].title == "Francis of Assisi"
+    assert notes[0].text == "Italian Catholic saint and friar"
+    assert notes[0].image_url is not None
+    assert "StFrancis_part.jpg" in (notes[0].image_url or "")
+
+
+def test_wikidata_skips_svg_logo_image() -> None:
+    with httpx.Client(transport=_wikidata_handler(p18_filename="GreenBayPackers.svg")) as client:
+        notes = search_wikidata("Green Bay Packers", client=client)
+
+    assert len(notes) == 1
+    assert notes[0].image_url is None
+
+
+def test_wikidata_returns_description_only_when_no_p18() -> None:
+    with httpx.Client(transport=_wikidata_handler(p18_filename=None)) as client:
+        notes = search_wikidata("Green Bay Packers", client=client)
+
+    assert len(notes) == 1
+    assert notes[0].text == "Italian Catholic saint and friar"
+    assert notes[0].image_url is None
+
+
+def test_wikidata_empty_when_search_returns_no_results() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"search": []})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        notes = search_wikidata("xyzzy not a thing", client=client)
+
+    assert notes == []
+
+
+def test_wikidata_empty_when_items_lack_description() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        action = request.url.params.get("action")
+        if action == "wbsearchentities":
+            return httpx.Response(200, json={"search": [{"id": "Q1", "label": "Thing"}]})
+        return httpx.Response(200, json={"entities": {"Q1": {"claims": {}}}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        notes = search_wikidata("Thing", client=client)
+
+    assert notes == []
+
+
+def test_wikidata_empty_on_http_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        notes = search_wikidata("anything", client=client)
+
+    assert notes == []
+
+
+# ---------------------------------------------------------------------------
+# Seasonal/holiday context preservation (issue #343)
+# ---------------------------------------------------------------------------
+
+
+def test_thanksgiving_holiday_survives_into_prompt_when_llm_drops_it() -> None:
+    """When the LLM subjects omit a holiday the customer named, the prompt still contains it."""
+    design = research_personal_design(
+        "Thanksgiving in Disney's Magic Kingdom",
+        complete=_scripted_complete(
+            json.dumps({"queries": ["Magic Kingdom"]}),
+            json.dumps(
+                {
+                    "customer_line": None,
+                    "voice_found": False,
+                    "lettering": None,
+                    "subjects": "Cinderella Castle beside a balloon",
+                    "additions": None,
+                    "references": [],
+                }
+            ),
+        ),
+        search=lambda _query: [
+            SearchNote(
+                "Magic Kingdom",
+                "Magic Kingdom",
+                "Magic Kingdom is a Disney theme park featuring Cinderella Castle.",
+                None,
+            )
+        ],
+        seed=0,
+    )
+
+    assert "Thanksgiving" in design.prompt or "thanksgiving" in design.prompt.lower()
+
+
+def test_christmas_holiday_survives_into_prompt_when_llm_drops_it() -> None:
+    design = research_personal_design(
+        "Christmas at Rockefeller Center",
+        complete=_scripted_complete(
+            json.dumps({"queries": ["Rockefeller Center"]}),
+            json.dumps(
+                {
+                    "customer_line": None,
+                    "voice_found": False,
+                    "lettering": None,
+                    "subjects": "a tall tower in Manhattan",
+                    "additions": None,
+                    "references": [],
+                }
+            ),
+        ),
+        search=lambda _query: [
+            SearchNote(
+                "Rockefeller Center",
+                "Rockefeller Center",
+                "Rockefeller Center is a complex of buildings in midtown Manhattan.",
+                None,
+            )
+        ],
+        seed=0,
+    )
+
+    assert "Christmas" in design.prompt or "christmas" in design.prompt.lower()
+
+
+def test_no_duplicate_holiday_injection_when_subjects_already_name_it() -> None:
+    """When subjects already mention Thanksgiving, the fallback phrase is not injected."""
+    design = research_personal_design(
+        "Thanksgiving turkey design",
+        complete=_scripted_complete(
+            json.dumps({"queries": ["Thanksgiving turkey"]}),
+            json.dumps(
+                {
+                    "customer_line": None,
+                    "voice_found": False,
+                    "lettering": None,
+                    "subjects": "a Thanksgiving turkey with autumn leaves",
+                    "additions": None,
+                    "references": [],
+                }
+            ),
+        ),
+        search=lambda _query: [
+            SearchNote(
+                "Thanksgiving turkey",
+                "Turkey",
+                "A turkey is a traditional Thanksgiving dish.",
+                None,
+            )
+        ],
+        seed=0,
+    )
+
+    assert "The scene is Thanksgiving-themed" not in design.subjects
