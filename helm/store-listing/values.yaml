@@ -117,6 +117,7 @@ secrets:
   awsAccessKeyId: ""
   awsSecretAccessKey: ""
   visionLlmApiKey: ""
+  geminiApiKey: ""
 
 postgres:
   image: registry.access.redhat.com/hi/postgresql:latest
