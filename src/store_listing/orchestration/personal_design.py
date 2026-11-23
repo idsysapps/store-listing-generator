@@ -1381,7 +1381,7 @@ def search_gemini(
                     contents=_GEMINI_PROMPT.format(query=query),
                     config=types.GenerateContentConfig(
                         tools=[types.Tool(google_search=types.GoogleSearch())],
-                        max_output_tokens=200,
+                        max_output_tokens=1000,
                     ),
                 )
                 break
