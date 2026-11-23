@@ -283,6 +283,54 @@ class TestGenerateImagesForBriefs:
         lettering.validate.assert_not_called()
         lettering.validate_no_text.assert_not_called()
 
+    def test_a_quoted_personal_line_is_composited_and_not_asked_of_the_model(self) -> None:
+        from io import BytesIO
+
+        from PIL import Image
+
+        blank = BytesIO()
+        Image.new("RGB", (64, 80), (255, 0, 255)).save(blank, format="PNG")
+        db = _mock_db_client(
+            briefs=[
+                _brief(
+                    product_type="dtf_apparel",
+                    personal_use=True,
+                    copy_mode="caption",
+                    layout_type="text_top",
+                    headline_text="Get There Eventually",
+                    scene_description="Judy Hopps, isolated on magenta.",
+                    text_plan={
+                        "subjects": "Judy Hopps, drawn as that character.",
+                        "facts": [],
+                        "lettering": "Get There Eventually",
+                        "customer_lettering": True,
+                        "reference_urls": [],
+                    },
+                )
+            ]
+        )
+        comfyui = _comfyui_client()
+        comfyui.generate_flux2_image.return_value = ComfyUIResult(
+            image_bytes=blank.getvalue(), prompt_id="f"
+        )
+        s3 = MagicMock()
+
+        result = generate_images_for_briefs(
+            db_client=db,
+            comfyui_client=comfyui,
+            s3_client=s3,
+            bucket="test-bucket",
+        )
+
+        assert result["images_generated"] == 1
+        prompt = comfyui.generate_flux2_image.call_args.kwargs["prompt"]
+        assert "Get There Eventually" not in prompt
+        assert "Judy Hopps" in prompt
+        raw = s3.put_object.call_args_list[0].kwargs["Body"]
+        assert raw != blank.getvalue()
+        with Image.open(BytesIO(raw)) as opened:
+            assert opened.size == (64, 80)
+
     def test_a_background_removal_failure_still_uploads_the_raw_image(self) -> None:
         db = _mock_db_client(briefs=[_brief(product_type="dtf_apparel")])
         comfyui = _comfyui_client()

@@ -338,6 +338,9 @@ class DesignBrief:
     design_facts: tuple[str, ...] = ()
     design_subjects: str | None = None
     design_lettering: str | None = None
+    # Quoted shirt text is drawn by the compositor. A voice line is drawn by
+    # the image model.
+    customer_lettering: bool = False
 
     @property
     def garment_material(self) -> dict[str, Any] | None:

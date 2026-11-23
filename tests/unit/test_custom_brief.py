@@ -19,7 +19,7 @@ from store_listing.orchestration.llm_client import LLM_MAX_TOKENS
 def _no_live_search(monkeypatch: pytest.MonkeyPatch) -> None:
     """Personal research must not call Wikipedia from a unit test."""
     monkeypatch.setattr(
-        "store_listing.orchestration.custom_brief.search_wikipedia",
+        "store_listing.orchestration.custom_brief.search_personal",
         lambda _query: [],
     )
 
@@ -905,11 +905,43 @@ class TestLiteralCustomWords:
         assert stored["copy_mode"] == "no_text"
         assert stored["personal_use"] is True
         assert stored["text_plan"]["subjects"] == words
+        assert stored["text_plan"]["customer_lettering"] is False
+
+    def test_a_quoted_line_and_a_named_character_are_kept(self) -> None:
+        db = MagicMock()
+        db.insert_design_brief.return_value = 43
+        llm = MagicMock()
+        raw_response = MagicMock()
+        response = MagicMock()
+        choice = MagicMock()
+        choice.message.content = _brief_response(
+            concept="a rabbit",
+            headline_text="Slow",
+            scene_description="a generic rabbit and a tiger",
+        )
+        choice.finish_reason = "stop"
+        response.choices = [choice]
+        raw_response.parse.return_value = response
+        raw_response.headers = {}
+        llm.with_raw_response.create.return_value = raw_response
+        words = 'Judy Hopps character showing slow moving with text "Get There Eventually"'
+
+        result = create_custom_brief(db, llm, "model-x", words, "dtf_apparel", personal_use=True)
+
+        assert result["status"] == "success"
+        stored = db.insert_design_brief.call_args.kwargs
+        assert stored["headline_text"] == "Get There Eventually"
+        assert stored["copy_mode"] == "caption"
+        assert stored["layout_type"] != "full_bleed"
+        assert "Judy Hopps" in stored["scene_description"]
+        assert "Get There Eventually" not in stored["scene_description"]
+        assert stored["text_plan"]["customer_lettering"] is True
+        assert stored["text_plan"]["lettering"] == "Get There Eventually"
 
     def test_a_sellable_brief_does_not_research(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls: list[str] = []
         monkeypatch.setattr(
-            "store_listing.orchestration.custom_brief.search_wikipedia",
+            "store_listing.orchestration.custom_brief.search_personal",
             lambda query: calls.append(query) or [],
         )
         db = MagicMock()

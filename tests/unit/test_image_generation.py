@@ -556,6 +556,24 @@ class TestPersonalFlux2:
         assert call["prompt"].count("Mesa so very, very thankful!") == 1
         assert "Jar Jar speaks in a Gungan voice." in call["prompt"]
 
+    def test_a_quoted_personal_line_is_left_for_the_compositor(self) -> None:
+        client = _client()
+        client.generate_flux2_image.return_value = ComfyUIResult(image_bytes=b"raw", prompt_id="f")
+        brief = _make_brief(
+            personal_use=True,
+            product_type="sublimation",
+            design_subjects="Judy Hopps, drawn as that character and not a substitute.",
+            design_lettering="Get There Eventually",
+            customer_lettering=True,
+        )
+
+        generate_image(brief, comfyui_client=client, seed=2)
+
+        prompt = client.generate_flux2_image.call_args.kwargs["prompt"]
+        assert "Get There Eventually" not in prompt
+        assert "No lettering" in prompt
+        assert "Judy Hopps" in prompt
+
     def test_a_sellable_brief_stays_on_flux_schnell(self) -> None:
         client = _client()
 
