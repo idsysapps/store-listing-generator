@@ -70,6 +70,7 @@ from store_listing.orchestration.image_generation import (
     generate_image,
     is_dark_garment,
 )
+from store_listing.orchestration.image_progress import GenerationWatch, ImageStatus
 from store_listing.orchestration.image_storage import ImageStorageClient
 from store_listing.orchestration.label_plates import draw_label_plates, plates_from_value
 from store_listing.orchestration.model_text import (
@@ -466,6 +467,7 @@ def generate_images_for_briefs(
     hero_validator: StrictTextValidator | None = None,
     product_types: list[str] | None = None,
     brief_rewriter: BriefRewriter | None = None,
+    status_publisher: Callable[[ImageStatus], None] | None = None,
 ) -> dict[str, Any]:
     # A store that focuses on one production method does not spend GPU time
     # on the briefs of the others (issue #215).
@@ -491,6 +493,7 @@ def generate_images_for_briefs(
             db_client=db_client,
             brief_rewriter=brief_rewriter,
             rewritten_brief_ids=rewritten_brief_ids,
+            status_publisher=status_publisher,
         )
         if success:
             generated += 1
@@ -990,6 +993,7 @@ def _generate_single_brief(
     candidate_sink: Callable[[Candidate], None] | None = None,
     brief_rewriter: BriefRewriter | None = None,
     rewritten_brief_ids: set[int] | None = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> tuple[bool, str | None]:
     brief = _brief_for_render(brief_row)
     brief_id = brief_row["id"]
@@ -1098,6 +1102,7 @@ def _generate_single_brief(
             comfyui_client=comfyui_client,
             seed=base_seed + attempts - 1,
             extra_prompt=retry_hint,
+            on_progress=on_progress,
         )
 
         if result.image_bytes is None:
@@ -1357,6 +1362,7 @@ def _generate_best_candidate(
     hero_validator: StrictTextValidator | None = None,
     brief_rewriter: BriefRewriter | None = None,
     rewritten_brief_ids: set[int] | None = None,
+    status_publisher: Callable[[ImageStatus], None] | None = None,
 ) -> tuple[bool, str | None]:
     """Render N candidates, upload the one the deterministic gate likes best.
 
@@ -1364,6 +1370,22 @@ def _generate_best_candidate(
     the single-call behaviour.
     """
     brief = _brief_for_render(brief_row)
+    watch = (
+        GenerationWatch(
+            int(brief_row["id"]),
+            personal=brief.personal_use,
+            publish=status_publisher,
+        )
+        if status_publisher is not None
+        else None
+    )
+    on_progress = watch.phase if watch is not None else None
+
+    def finish(success: bool, error: str | None) -> tuple[bool, str | None]:
+        if watch is not None:
+            watch.phase("done" if success else "failed")
+        return success, error
+
     template = resolve_template(
         brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
     )
@@ -1383,7 +1405,7 @@ def _generate_best_candidate(
         or not (brief.scene_description or "").strip()
         or model_text_path
     ):
-        return _generate_single_brief(
+        success, error = _generate_single_brief(
             brief_row,
             storage=storage,
             comfyui_client=comfyui_client,
@@ -1394,7 +1416,9 @@ def _generate_best_candidate(
             db_client=db_client,
             brief_rewriter=brief_rewriter,
             rewritten_brief_ids=rewritten_ids,
+            on_progress=on_progress,
         )
+        return finish(success, error)
 
     candidates: list[Candidate] = []
     for _index in range(count):
@@ -1410,12 +1434,13 @@ def _generate_best_candidate(
             candidate_sink=candidates.append,
             brief_rewriter=brief_rewriter,
             rewritten_brief_ids=rewritten_ids,
+            on_progress=on_progress,
         )
         if not success:
-            return False, error
+            return finish(False, error)
 
     if not candidates:
-        return False, "no candidate was rendered"
+        return finish(False, "no candidate was rendered")
 
     best = choose_best(candidates)
     brief_id = brief_row["id"]
@@ -1446,7 +1471,7 @@ def _generate_best_candidate(
         image_key_raw=keys["raw"],
         image_key_transparent=keys.get("transparent"),
     )
-    return True, None
+    return finish(True, None)
 
 
 def generate_image_for_brief(
@@ -1462,6 +1487,7 @@ def generate_image_for_brief(
     artwork_text_validator: ArtworkTextValidator | None = None,
     hero_validator: StrictTextValidator | None = None,
     brief_rewriter: BriefRewriter | None = None,
+    status_publisher: Callable[[ImageStatus], None] | None = None,
 ) -> dict[str, Any]:
     brief_row = db_client.get_brief_by_id(brief_id)
     if brief_row is None:
@@ -1478,6 +1504,7 @@ def generate_image_for_brief(
         hero_validator=hero_validator,
         db_client=db_client,
         brief_rewriter=brief_rewriter,
+        status_publisher=status_publisher,
     )
     if success:
         return {"status": "success", "brief_id": brief_id}

@@ -682,6 +682,15 @@ def replan_design_briefs_task(batch_id: str, feedback: str | None = None) -> dic
     return result
 
 
+def _image_status_publisher() -> Any:
+    """Publish render progress on the Redis channel the GraphQL subscription reads."""
+    import redis
+
+    from store_listing.orchestration.image_progress import publishing
+
+    return publishing(redis.Redis.from_url(celery_redis_url()))
+
+
 @celery_app.task
 def generate_design_images_task() -> dict:
     """Generate images for design briefs via ComfyUI on the DGX, store in S3, update DB."""
@@ -732,6 +741,7 @@ def generate_design_images_task() -> dict:
         hero_validator=_build_hero_validator(),
         product_types=enabled_product_types(DatabaseClient()),
         brief_rewriter=_lettering_brief_rewriter(),
+        status_publisher=_image_status_publisher(),
     )
 
 
@@ -785,4 +795,5 @@ def generate_single_brief_image_task(brief_id: int) -> dict:
         artwork_text_validator=_build_artwork_text_validator(),
         hero_validator=_build_hero_validator(),
         brief_rewriter=_lettering_brief_rewriter(),
+        status_publisher=_image_status_publisher(),
     )

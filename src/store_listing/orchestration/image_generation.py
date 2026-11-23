@@ -7,6 +7,7 @@ calls were removed in #111: the self-hosted DGX is the only generation path.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from store_listing.orchestration.art_direction import (
@@ -483,12 +484,25 @@ def _reference_bytes(urls: tuple[str, ...]) -> list[bytes]:
     return images
 
 
+def _progress_tick(
+    on_progress: Callable[[str], None] | None, phase: str
+) -> Callable[[], None] | None:
+    if on_progress is None:
+        return None
+
+    def tick() -> None:
+        on_progress(phase)
+
+    return tick
+
+
 def generate_image(
     brief: DesignBrief,
     *,
     comfyui_client: ComfyUIClient,
     seed: int | None = None,
     extra_prompt: str = "",
+    on_progress: Callable[[str], None] | None = None,
 ) -> ImageResult:
     """Generate an image for a brief on the DGX.
 
@@ -517,12 +531,16 @@ def generate_image(
         brief.layout_type or "full_bleed", brief.headline_text, brief.tagline_text
     )
     width, height = canvas_size(template_id)
+    sampling = _progress_tick(on_progress, "sampling")
+    if on_progress is not None:
+        on_progress("sampling")
     try:
         if brief.personal_use:
             result = comfyui_client.generate_flux2_image(
                 prompt=prompt,
                 reference_images=_reference_bytes(brief.reference_urls),
                 seed=seed,
+                on_tick=sampling,
             )
         else:
             result = comfyui_client.generate_image(
@@ -531,6 +549,7 @@ def generate_image(
                 negative_prompt=negative_prompt,
                 width=width,
                 height=height,
+                on_tick=sampling,
             )
     except ComfyUIError as e:
         logger.warning("ComfyUI image generation failed: %s", e)
@@ -584,8 +603,11 @@ def generate_image(
         )
 
     if brief.product_type == "dtf_apparel":
+        cutting = _progress_tick(on_progress, "cutting")
+        if on_progress is not None:
+            on_progress("cutting")
         try:
-            transparent = comfyui_client.remove_background(raw_bytes)
+            transparent = comfyui_client.remove_background(raw_bytes, on_tick=cutting)
         except ComfyUIError as e:
             logger.warning("Background removal failed, returning raw image: %s", e)
         else:

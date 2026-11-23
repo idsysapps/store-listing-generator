@@ -466,7 +466,7 @@ class TestGenerateImage:
 
         assert result.raw_bytes == b"raw-bytes"
         assert result.image_bytes == b"transparent"
-        client.remove_background.assert_called_once_with(b"raw-bytes")
+        client.remove_background.assert_called_once_with(b"raw-bytes", on_tick=None)
 
     def test_non_dtf_brief_does_not_remove_the_background(self) -> None:
         client = _client(image_bytes=b"raw-bytes")
@@ -591,6 +591,30 @@ class TestPersonalFlux2:
 
         client.remove_background.assert_called_once()
         assert result.background_removed is True
+
+    def test_progress_names_sampling_and_then_the_cut(self) -> None:
+        client = _client()
+        phases: list[str] = []
+
+        def draw(**kwargs: object) -> ComfyUIResult:
+            tick = kwargs["on_tick"]
+            assert callable(tick)
+            tick()
+            return ComfyUIResult(image_bytes=b"raw", prompt_id="f")
+
+        def cut(image_bytes: bytes, **kwargs: object) -> ComfyUIResult:
+            tick = kwargs["on_tick"]
+            assert callable(tick)
+            tick()
+            return ComfyUIResult(image_bytes=b"cut", prompt_id="c")
+
+        client.generate_flux2_image.side_effect = draw
+        client.remove_background.side_effect = cut
+        brief = _make_brief(personal_use=True, scene_description="a tall Gungan on magenta")
+
+        generate_image(brief, comfyui_client=client, on_progress=phases.append)
+
+        assert phases == ["sampling", "sampling", "cutting", "cutting"]
 
     def test_the_seed_is_passed_through(self) -> None:
         client = _client()

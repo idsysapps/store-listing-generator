@@ -163,6 +163,17 @@ type Query {
   designBriefs(productType: String, batchId: String, silhouette: String, limit: Int = 20): [DesignBriefSummary!]!
 }
 
+type ImageGenerationStatus {
+  briefId: Int!
+  phase: String!
+  step: Int!
+  totalSteps: Int!
+  elapsedSeconds: Float!
+  estimatedTotalSeconds: Float!
+  remainingSeconds: Float!
+}
+
 type Subscription {
   trendUpdated: TrendUpdate!
+  imageGeneration(briefId: Int!): ImageGenerationStatus!
 }
