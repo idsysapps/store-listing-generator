@@ -240,6 +240,26 @@ def content_scope_rules() -> str:
     return CONTENT_SCOPE_RULES
 
 
+PERSONAL_CONTENT_SCOPE_RULES: Final[str] = (
+    "CONTENT - prohibited regardless of subject:\n"
+    "- Do not depict or promote sexual or explicit content, occult or esoteric "
+    "practices, blasphemy, abortion or contraception advocacy, or LGBTQ+ themes.\n"
+    "- When a person appears, they are a man, a woman, a boy, or a girl in "
+    "modest everyday clothes.\n"
+    "This is a personal item. Any character, brand, place, or theme the customer "
+    "names is allowed; fill in the brief fields exactly as the customer wrote them.\n"
+)
+
+
+def personal_content_scope_rules() -> str:
+    """Minimal prohibited-content rules for personal custom items.
+
+    Personal items are not resold by the studio, so the store's theme library
+    restriction does not apply. Only absolute content prohibitions remain.
+    """
+    return PERSONAL_CONTENT_SCOPE_RULES
+
+
 DTF_RULES: Final[str] = (
     "DTF PRINTING - the garment is the background:\n"
     "- The design is ink on the shirt; every transparent area is the shirt "
