@@ -475,6 +475,35 @@ def _missing_query_subjects(
     return missing
 
 
+def _query_lock_subjects(
+    queries: Sequence[str],
+    characters: Sequence[str],
+    sentence: str,
+) -> list[str]:
+    """Customer-named proper-noun queries not yet in the character lock.
+
+    The queries the LLM chose represent everything the customer named.
+    Adding them all to the lock ensures the image model receives an explicit
+    instruction to include every named subject, not just what deepen discovered.
+    Holiday terms and the sentence-as-fallback query are excluded.
+    """
+    char_keys = {c.lower() for c in characters}
+    sentence_lower = sentence.lower().strip()
+    result: list[str] = []
+    for query in queries:
+        q = query.strip()
+        q_lower = q.lower()
+        if not q or q_lower == sentence_lower:
+            continue
+        if any(holiday in q_lower for holiday in _HOLIDAY_TERMS):
+            continue
+        if q_lower in char_keys:
+            continue
+        if any(word[:1].isupper() for word in q.split()):
+            result.append(q)
+    return result
+
+
 def arrangement_line(seed: int) -> str:
     """One arrangement of the same facts. A new seed is a new arrangement."""
     return _ARRANGEMENTS[seed % len(_ARRANGEMENTS)]
@@ -797,6 +826,20 @@ def research_personal_design(
         if icon.lower() in character_keys:
             character_notes.extend(found)
         notes.extend(found)
+
+    # Lock every customer-named proper-noun query, not just what deepen discovered.
+    # The LLM chose the queries because the customer named those things; all of them
+    # belong in lock_characters so the image model receives an explicit instruction
+    # for each one. Notes already fetched for these queries are promoted to
+    # character_notes so their reference images are prioritised.
+    for extra in _query_lock_subjects(queries, characters, sentence):
+        characters.append(extra)
+        char_key = extra.lower()
+        for note in notes:
+            if note.query.lower() == char_key and note.image_url and note not in character_notes:
+                character_notes.append(note)
+    character_keys = {name.lower() for name in characters}
+    known = _known_names(sentence, characters)
 
     if look is not None:
         seen = _attach_looks(seen, look, fetch or fetch_reference)

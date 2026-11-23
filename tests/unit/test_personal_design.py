@@ -1425,3 +1425,72 @@ def test_max_queries_allows_more_than_four_searches() -> None:
     from store_listing.orchestration.personal_design import MAX_QUERIES
 
     assert MAX_QUERIES >= 6
+
+
+# ---------------------------------------------------------------------------
+# Lock all customer-named query subjects, not just deepen icons (issue #352)
+# ---------------------------------------------------------------------------
+
+
+def test_all_named_queries_appear_in_lock_instruction() -> None:
+    """When customer names Mickey Mouse, Tron, and Space Mountain, all three are locked."""
+    design = research_personal_design(
+        "Disney's Magic Kingdom - Mickey Mouse, Tron, Space Mountain",
+        complete=_scripted_complete(
+            json.dumps({"queries": ["Mickey Mouse", "Tron", "Space Mountain", "Magic Kingdom"]}),
+            json.dumps(
+                {
+                    "customer_line": None,
+                    "voice_found": False,
+                    "lettering": None,
+                    # LLM adds Cinderella Castle which triggers _guessed_names fallback
+                    "subjects": "Mickey Mouse at Cinderella Castle with Space Mountain behind",
+                    "additions": None,
+                    "references": [],
+                }
+            ),
+            deepen=["Mickey Mouse"],
+        ),
+        search=lambda q: [SearchNote(q, q, f"{q} is a thing.", None)],
+        seed=0,
+    )
+
+    subjects_lower = design.subjects.lower()
+    assert "mickey mouse" in subjects_lower
+    assert "tron" in subjects_lower
+    assert "space mountain" in subjects_lower
+    # All three should appear in the lock/draw instruction, not just Mickey Mouse
+    assert subjects_lower.count("draw") == 1
+    assert "mickey mouse" in subjects_lower[subjects_lower.index("draw") :]
+    assert "tron" in subjects_lower[subjects_lower.index("draw") :]
+    assert "space mountain" in subjects_lower[subjects_lower.index("draw") :]
+
+
+def test_guessed_names_fallback_still_locks_all_customer_named_elements() -> None:
+    """When _guessed_names fires, the lock still covers all customer-named subjects."""
+    design = research_personal_design(
+        "Mickey Mouse, Tron",
+        complete=_scripted_complete(
+            json.dumps({"queries": ["Mickey Mouse", "Tron"]}),
+            json.dumps(
+                {
+                    "customer_line": None,
+                    "voice_found": False,
+                    "lettering": None,
+                    # Cinderella Castle is not in the customer sentence → guessed
+                    "subjects": "Mickey Mouse and Cinderella Castle",
+                    "additions": None,
+                    "references": [],
+                }
+            ),
+        ),
+        search=lambda q: [SearchNote(q, q, f"{q} is a thing.", None)],
+        seed=0,
+    )
+
+    # _guessed_names triggers because Cinderella Castle is not in the sentence.
+    # The lock draw instruction must cover both Mickey Mouse AND Tron.
+    subjects_lower = design.subjects.lower()
+    draw_portion = subjects_lower[subjects_lower.index("draw") :]
+    assert "mickey mouse" in draw_portion
+    assert "tron" in draw_portion
