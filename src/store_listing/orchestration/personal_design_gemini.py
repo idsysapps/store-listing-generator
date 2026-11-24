@@ -185,6 +185,7 @@ def research_personal_design_gemini(
     genai_client: Any | None = None,
     apify_client_cls: Any | None = None,
     image_search: Callable[[str], list[SearchNote]] | None = None,
+    crop_subject: Callable[[bytes, str], bytes] | None = None,
 ) -> PersonalDesign | None:
     """Full-sentence research path: one Gemini call + targeted Apify image searches.
 
@@ -207,7 +208,7 @@ def research_personal_design_gemini(
     def _fetch_images(q: str) -> list[SearchNote]:
         if image_search is not None:
             return image_search(q)
-        return search_google_images(q, apify_client_cls=_apify)
+        return search_google_images(q, apify_client_cls=_apify, crop_subject=crop_subject)
 
     for subject in research.subjects:
         if len(reference_urls) >= MAX_REFERENCES:

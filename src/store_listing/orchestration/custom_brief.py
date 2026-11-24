@@ -593,6 +593,16 @@ def create_custom_brief(
             research_personal_design_gemini,
         )
 
+        def _crop_ref(image_data: bytes, subject: str) -> bytes:
+            from store_listing.orchestration.personal_design import _crop_to_subject
+
+            return _crop_to_subject(
+                image_data,
+                subject,
+                vision_client=get_vision_client(),
+                vision_model=get_vision_model(),
+            )
+
         words = generate_shirt_concept(
             words,
             complete=lambda msgs: _personal_answer(llm_completions, model, msgs),
@@ -601,7 +611,9 @@ def create_custom_brief(
             logger.info("Concept generation enriched brief %d: %r", brief_id, words)
 
         _watch_phase(watch, "researching")
-        design = research_personal_design_gemini(words, seed=_arrangement_seed(words))
+        design = research_personal_design_gemini(
+            words, seed=_arrangement_seed(words), crop_subject=_crop_ref
+        )
         if design is not None:
             logger.info(
                 "Personal brief %d researched via Gemini full-sentence path (%d subjects)",
@@ -730,6 +742,16 @@ def _research_personal(
     def _llm_complete(messages: list[dict[str, str]]) -> str:
         return _personal_answer(llm_completions, model, messages)
 
+    def _crop_ref(image_data: bytes, subject: str) -> bytes:
+        from store_listing.orchestration.personal_design import _crop_to_subject
+
+        return _crop_to_subject(
+            image_data,
+            subject,
+            vision_client=get_vision_client(),
+            vision_model=get_vision_model(),
+        )
+
     def search(query: str) -> list[Any]:
         searches["count"] += 1
         _watch_phase(
@@ -738,7 +760,9 @@ def _research_personal(
             searches["count"],
             max(searches["count"], MAX_QUERIES),
         )
-        return search_personal(query, complete=_llm_complete, look=_vision_look)
+        return search_personal(
+            query, complete=_llm_complete, look=_vision_look, crop_subject=_crop_ref
+        )
 
     def complete(messages: list[dict[str, str]]) -> str:
         reads["count"] += 1
