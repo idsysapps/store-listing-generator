@@ -268,3 +268,69 @@ def test_research_holiday_theme_in_scene(monkeypatch: pytest.MonkeyPatch) -> Non
         word in design.subjects.lower()
         for word in ["thanksgiving", "pilgrim", "harvest", "cornucopia", "autumn"]
     )
+
+
+def test_gemini_surfaces_theme_song_as_lettering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When Gemini finds the subject's theme song it becomes the design lettering."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("APIFY_API_TOKEN", "test-apify")
+
+    payload = {
+        "subjects": [
+            {
+                "name": "Mickey's Runaway Railway",
+                "description": "A cartoon-styled dark ride in the Paul Rudish aesthetic.",
+                "image_query": "Mickey's Runaway Railway Disney World ride vehicle cartoon",
+            }
+        ],
+        "scene": "Mickey Mouse at the wheel of his bright red runaway train car, zipping through a cartoon landscape.",
+        "customer_line": None,
+        "voice_found": True,
+        "lettering": "Nothing Can Stop Us Now",
+    }
+    client = _fake_genai_client(json.dumps(payload))
+
+    design = research_personal_design_gemini(
+        "Mickey's Runaway Railway",
+        seed=0,
+        genai_client=client,
+        apify_client_cls=_fake_apify_client([]),
+    )
+
+    assert design is not None
+    assert design.lettering == "Nothing Can Stop Us Now"
+    assert not design.customer_lettering
+
+
+def test_gemini_no_lettering_when_voice_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("APIFY_API_TOKEN", "test-apify")
+
+    payload = {
+        "subjects": [
+            {
+                "name": "Space Mountain",
+                "description": "A futuristic roller coaster.",
+                "image_query": "Space Mountain Disney roller coaster",
+            }
+        ],
+        "scene": "Space Mountain rocket car launches into a neon starfield.",
+        "customer_line": None,
+        "voice_found": False,
+        "lettering": None,
+    }
+    client = _fake_genai_client(json.dumps(payload))
+
+    design = research_personal_design_gemini(
+        "Space Mountain",
+        seed=0,
+        genai_client=client,
+        apify_client_cls=_fake_apify_client([]),
+    )
+
+    assert design is not None
+    assert design.lettering is None

@@ -52,8 +52,12 @@ _GEMINI_RESEARCH_SYSTEM = (
     "integrated — active verbs, all elements interacting, no sky, no ground, no crowd, "
     "no backdrop — isolated characters on a flat field), "
     "customer_line (phrase in double quotes from the sentence, copied exactly, or null), "
-    "voice_found (true only when results show how the subject speaks), "
-    "lettering (one short line in that voice that completes the design, or null)."
+    "voice_found (true when results reveal the subject's catchphrase, motto, theme song, "
+    "or signature line — search for it; for a ride or show look for its theme song or "
+    "opening lyric; for a character look for their catchphrase; only true when you find "
+    "actual words, not a general description), "
+    "lettering (the exact catchphrase, theme song line, or motto you found — copy it "
+    "verbatim, do not paraphrase; null when voice_found is false)."
 )
 _GEMINI_ATTEMPTS = 3
 
