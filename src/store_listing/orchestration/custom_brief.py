@@ -588,9 +588,17 @@ def create_custom_brief(
 
     design = None
     if personal_use:
+        from store_listing.orchestration.concept_generation import generate_shirt_concept
         from store_listing.orchestration.personal_design_gemini import (
             research_personal_design_gemini,
         )
+
+        words = generate_shirt_concept(
+            words,
+            complete=lambda msgs: _personal_answer(llm_completions, model, msgs),
+        )
+        if words != brief.concept:
+            logger.info("Concept generation enriched brief %d: %r", brief_id, words)
 
         _watch_phase(watch, "researching")
         design = research_personal_design_gemini(words, seed=_arrangement_seed(words))
