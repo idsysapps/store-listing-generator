@@ -1269,7 +1269,8 @@ def search_wikidata(query: str, *, client: httpx.Client | None = None) -> list[S
 
 
 _GOOGLE_IMAGES_ACTOR = "bvAQMqCbp6wE53JzK"
-_GOOGLE_IMAGES_RESULTS = 50
+_GOOGLE_IMAGES_RESULTS = 50  # minimum enforced by actor; we cap output to MAX_REFERENCES
+_GOOGLE_IMAGES_KEEP = MAX_REFERENCES  # only return this many to avoid flooding references
 
 
 def search_google_images(
@@ -1323,10 +1324,14 @@ def search_google_images(
         url = item.get("imageUrl")
         if not isinstance(url, str) or not _is_raster_url(url):
             continue
+        if len(notes) >= _GOOGLE_IMAGES_KEEP:
+            break
         title = str(item.get("title") or query).strip()
         source = str(item.get("source") or "").strip()
         text = f"{title} ({source})" if source else title
-        notes.append(SearchNote(query=query, title=title, text=text, image_url=url))
+        # Pre-fill look so _attach_looks skips the slow vision-LLM download step.
+        # Google Images results are already relevant; vision description adds no value.
+        notes.append(SearchNote(query=query, title=title, text=text, image_url=url, look=title))
     return notes
 
 
@@ -1542,7 +1547,7 @@ def _attach_looks(
     described = 0
     updated: list[SearchNote] = []
     for note in notes:
-        if described >= MAX_REFERENCES or not note.image_url:
+        if described >= MAX_REFERENCES or not note.image_url or note.look is not None:
             updated.append(note)
             continue
         described += 1
