@@ -588,12 +588,25 @@ def create_custom_brief(
 
     design = None
     if personal_use:
-        design = _research_personal(
-            words,
-            llm_completions=llm_completions,
-            model=model,
-            watch=watch,
+        from store_listing.orchestration.personal_design_gemini import (
+            research_personal_design_gemini,
         )
+
+        _watch_phase(watch, "researching")
+        design = research_personal_design_gemini(words, seed=_arrangement_seed(words))
+        if design is not None:
+            logger.info(
+                "Personal brief %d researched via Gemini full-sentence path (%d subjects)",
+                brief_id,
+                design.search_query_count,
+            )
+        else:
+            design = _research_personal(
+                words,
+                llm_completions=llm_completions,
+                model=model,
+                watch=watch,
+            )
         if not research_has_sources(design):
             logger.error(
                 "Personal research empty for brief %s (queries=%s notes=%s); retrying once",
