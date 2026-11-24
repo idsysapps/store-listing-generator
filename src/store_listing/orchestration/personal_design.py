@@ -1270,19 +1270,50 @@ def search_wikidata(query: str, *, client: httpx.Client | None = None) -> list[S
 
 _GOOGLE_IMAGES_ACTOR = "bvAQMqCbp6wE53JzK"
 _GOOGLE_IMAGES_RESULTS = 50  # minimum enforced by actor; we cap output to MAX_REFERENCES
-_GOOGLE_IMAGES_KEEP = MAX_REFERENCES  # only return this many to avoid flooding references
+_GOOGLE_IMAGES_KEEP = MAX_REFERENCES  # only keep this many to avoid flooding references
+_IMAGE_TITLE_CHECK_SYSTEM = (
+    "You check if an image title is relevant to a search query. "
+    'Return JSON only: {"accept": true} when the title describes the same '
+    "subject as the query, or "
+    '{"accept": false} when it is clearly a different subject. '
+    "A query for 'Tron Disney character' should accept Disney Tron art and "
+    "reject a Swedish historical painting that happens to be named Tron."
+)
+
+
+def _image_title_accepted(
+    query: str,
+    title: str,
+    complete: Callable[[list[dict[str, str]]], str],
+) -> bool:
+    """Whether the LLM thinks this image title matches the search query."""
+    raw = complete(
+        [
+            {"role": "system", "content": _IMAGE_TITLE_CHECK_SYSTEM},
+            {"role": "user", "content": f"Query: {query}\nTitle: {title}"},
+        ]
+    )
+    for obj in _first_object(raw), *(extract_json_objects(raw)):
+        if isinstance(obj, dict) and "accept" in obj:
+            return bool(obj["accept"])
+    return True  # default to accept when response cannot be parsed
 
 
 def search_google_images(
     query: str,
     *,
     apify_client_cls: Any | None = None,
+    complete: Callable[[list[dict[str, str]]], str] | None = None,
 ) -> list[SearchNote]:
     """Reference images from Google Image Search via Apify (johnvc/google-images-api).
 
     Fires only as a fallback when Wikimedia sources return no raster images.
     Cost: $0.0001/image × 50-image minimum = $0.005 per call.
     Returns an empty list when APIFY_API_TOKEN is not set or the call fails.
+
+    When ``complete`` is provided each candidate title is checked with the LLM
+    before the image is accepted. The function iterates through Apify results
+    lazily, stopping as soon as MAX_REFERENCES good images are found.
     """
     import os
 
@@ -1319,6 +1350,8 @@ def search_google_images(
 
     notes: list[SearchNote] = []
     for item in items or []:
+        if len(notes) >= _GOOGLE_IMAGES_KEEP:
+            break
         if not isinstance(item, dict):
             continue
         url = item.get("imageUrl")
@@ -1327,8 +1360,11 @@ def search_google_images(
         if len(notes) >= _GOOGLE_IMAGES_KEEP:
             break
         title = str(item.get("title") or query).strip()
+        if complete is not None and not _image_title_accepted(query, title, complete):
+            continue
         source = str(item.get("source") or "").strip()
         text = f"{title} ({source})" if source else title
+        # Pre-fill look so _attach_looks skips the slow vision-LLM download step.
         # Pre-fill look so _attach_looks skips the slow vision-LLM download step.
         # Google Images results are already relevant; vision description adds no value.
         notes.append(SearchNote(query=query, title=title, text=text, image_url=url, look=title))
@@ -1419,12 +1455,20 @@ def search_gemini(
         return []
 
 
-def search_personal(query: str, *, client: httpx.Client | None = None) -> list[SearchNote]:
+def search_personal(
+    query: str,
+    *,
+    client: httpx.Client | None = None,
+    complete: Callable[[list[dict[str, str]]], str] | None = None,
+) -> list[SearchNote]:
     """Wikipedia, Commons, Wikidata, Gemini, and Google Images notes for one query.
 
     Gemini with Google Search grounding supplies synthesised visual descriptions.
     Google Images via Apify fires only as a fallback when Wikimedia sources return
     no raster images, keeping cost within budget (~$0.005 per fallback call).
+
+    When ``complete`` is provided it is forwarded to search_google_images for
+    LLM-based title relevance checking of Apify results.
     """
     owns_client = client is None
     http = client or httpx.Client(timeout=10.0)
@@ -1434,7 +1478,7 @@ def search_personal(query: str, *, client: httpx.Client | None = None) -> list[S
             notes.extend(search(query, client=http))
         notes.extend(search_gemini(query))
         if not any(note.image_url for note in notes):
-            notes.extend(search_google_images(query))
+            notes.extend(search_google_images(query, complete=complete))
         return notes
     finally:
         if owns_client:

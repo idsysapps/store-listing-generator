@@ -719,6 +719,9 @@ def _research_personal(
     searches = {"count": 0}
     reads = {"count": 0}
 
+    def _llm_complete(messages: list[dict[str, str]]) -> str:
+        return _personal_answer(llm_completions, model, messages)
+
     def search(query: str) -> list[Any]:
         searches["count"] += 1
         _watch_phase(
@@ -727,7 +730,7 @@ def _research_personal(
             searches["count"],
             max(searches["count"], MAX_QUERIES),
         )
-        return search_personal(query)
+        return search_personal(query, complete=_llm_complete)
 
     def complete(messages: list[dict[str, str]]) -> str:
         reads["count"] += 1

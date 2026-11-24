@@ -742,7 +742,7 @@ def test_personal_search_asks_every_source(monkeypatch: pytest.MonkeyPatch) -> N
     )
     monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_google_images",
-        lambda query, apify_client_cls=None: [],
+        lambda query, apify_client_cls=None, complete=None: [],
     )
 
     notes = search_personal("Judy Hopps")
@@ -786,7 +786,7 @@ def test_google_images_fallback_fires_when_wikimedia_returns_no_images(
     )
     monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_google_images",
-        lambda query, apify_client_cls=None: (
+        lambda query, apify_client_cls=None, complete=None: (
             google_called.append(query)
             or [SearchNote(query, "Google result", "From google.", "https://example.com/img.jpg")]
         ),
@@ -823,7 +823,7 @@ def test_google_images_fallback_skipped_when_wikimedia_has_images(
     )
     monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_google_images",
-        lambda query, apify_client_cls=None: google_called.append(query) or [],
+        lambda query, apify_client_cls=None, complete=None: google_called.append(query) or [],
     )
 
     search_personal("Mickey Mouse")
@@ -1622,3 +1622,120 @@ def test_gemini_returns_empty_on_blank_response() -> None:
         del os.environ["GEMINI_API_KEY"]
 
     assert notes == []
+
+
+# ---------------------------------------------------------------------------
+# Apify image title check — LLM filters irrelevant results (issue #362+)
+# ---------------------------------------------------------------------------
+
+
+def _fake_apify_items(items: list) -> type:
+    """Apify client stub returning the given items."""
+
+    def _result(raw: list) -> Any:
+        return type("Result", (), {"items": raw})()
+
+    class _FakeDataset:
+        def list_items(self) -> Any:
+            return _result(items)
+
+    class _FakeRun:
+        default_dataset_id = "ds"
+
+    class _FakeActor:
+        def call(self, **kwargs: Any) -> _FakeRun:
+            return _FakeRun()
+
+    class _FakeClient:
+        def __init__(self, token: str) -> None:
+            pass
+
+        def actor(self, actor_id: str) -> _FakeActor:
+            return _FakeActor()
+
+        def dataset(self, dataset_id: str) -> _FakeDataset:
+            return _FakeDataset()
+
+    return _FakeClient
+
+
+def test_google_images_accepts_matching_title_and_skips_irrelevant() -> None:
+    """LLM title check accepts first relevant image and skips bad ones."""
+    checked: list[str] = []
+
+    def complete(messages: list) -> str:
+        title = messages[-1]["content"].split("Title: ")[-1].strip()
+        checked.append(title)
+        if "Swedish" in title or "painting" in title.lower():
+            return '{"accept": false}'
+        return '{"accept": true}'
+
+    items = [
+        {
+            "imageUrl": "https://example.com/painting.jpg",
+            "title": "Nicolas Dorigny Tron Swedish painting",
+        },
+        {
+            "imageUrl": "https://example.com/tron.jpg",
+            "title": "Tron Disney character neon blue suit",
+        },
+    ]
+
+    import os
+
+    os.environ["APIFY_API_TOKEN"] = "test-token"
+    try:
+        notes = search_google_images(
+            "Tron Disney character",
+            apify_client_cls=_fake_apify_items(items),
+            complete=complete,
+        )
+    finally:
+        del os.environ["APIFY_API_TOKEN"]
+
+    assert len(notes) == 1
+    assert notes[0].image_url == "https://example.com/tron.jpg"
+    assert "Nicolas Dorigny" in checked[0]
+
+
+def test_google_images_falls_through_all_if_none_accepted() -> None:
+    """When no image passes the title check, returns empty list."""
+    items = [
+        {"imageUrl": "https://example.com/a.jpg", "title": "Wrong subject A"},
+        {"imageUrl": "https://example.com/b.jpg", "title": "Wrong subject B"},
+    ]
+
+    import os
+
+    os.environ["APIFY_API_TOKEN"] = "test-token"
+    try:
+        notes = search_google_images(
+            "Mickey Mouse",
+            apify_client_cls=_fake_apify_items(items),
+            complete=lambda msgs: '{"accept": false}',
+        )
+    finally:
+        del os.environ["APIFY_API_TOKEN"]
+
+    assert notes == []
+
+
+def test_google_images_no_title_check_without_complete() -> None:
+    """Without complete function, images are accepted by title match only."""
+    items = [
+        {"imageUrl": "https://example.com/tron.jpg", "title": "Tron character"},
+        {"imageUrl": "https://example.com/swedish.jpg", "title": "Swedish painting"},
+    ]
+
+    import os
+
+    os.environ["APIFY_API_TOKEN"] = "test-token"
+    try:
+        notes = search_google_images(
+            "Tron",
+            apify_client_cls=_fake_apify_items(items),
+        )
+    finally:
+        del os.environ["APIFY_API_TOKEN"]
+
+    assert len(notes) >= 1
