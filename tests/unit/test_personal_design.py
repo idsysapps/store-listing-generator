@@ -742,7 +742,7 @@ def test_personal_search_asks_every_source(monkeypatch: pytest.MonkeyPatch) -> N
     )
     monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_google_images",
-        lambda query, apify_client_cls=None, complete=None: [],
+        lambda query, apify_client_cls=None, complete=None, look=None, fetch=None: [],
     )
 
     notes = search_personal("Judy Hopps")
@@ -786,7 +786,7 @@ def test_google_images_fallback_fires_when_wikimedia_returns_no_images(
     )
     monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_google_images",
-        lambda query, apify_client_cls=None, complete=None: (
+        lambda query, apify_client_cls=None, complete=None, look=None, fetch=None: (
             google_called.append(query)
             or [SearchNote(query, "Google result", "From google.", "https://example.com/img.jpg")]
         ),
@@ -823,7 +823,9 @@ def test_google_images_fallback_skipped_when_wikimedia_has_images(
     )
     monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_google_images",
-        lambda query, apify_client_cls=None, complete=None: google_called.append(query) or [],
+        lambda query, apify_client_cls=None, complete=None, look=None, fetch=None: (
+            google_called.append(query) or []
+        ),
     )
 
     search_personal("Mickey Mouse")
@@ -1739,3 +1741,69 @@ def test_google_images_no_title_check_without_complete() -> None:
         del os.environ["APIFY_API_TOKEN"]
 
     assert len(notes) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Vision gate on Apify images
+# ---------------------------------------------------------------------------
+
+
+def test_google_images_vision_gate_rejects_non_subject_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vision LLM rejects images that are not clean character art (logos, Etsy SVGs, etc.)."""
+    from store_listing.orchestration.personal_design import PhotoLook
+
+    items = [
+        {"imageUrl": "https://example.com/etsy_logo.jpg", "title": "Mickey Mouse SVG digital"},
+        {"imageUrl": "https://example.com/character.jpg", "title": "Mickey Mouse Disney art"},
+    ]
+
+    def look(image_data: bytes) -> PhotoLook:
+        # Reject first image (Etsy logo), accept second (character art)
+        if b"etsy" in image_data:
+            return PhotoLook("a decorative SVG logo", keep=False)
+        return PhotoLook("Mickey Mouse standing in his classic outfit", keep=True)
+
+    def fetch(url: str) -> bytes | None:
+        if "etsy" in url:
+            return b"etsy logo data"
+        return b"character art data"
+
+    import os
+
+    os.environ["APIFY_API_TOKEN"] = "test-token"
+    try:
+        notes = search_google_images(
+            "Mickey Mouse Disney",
+            apify_client_cls=_fake_apify_client(items),
+            look=look,
+            fetch=fetch,
+        )
+    finally:
+        del os.environ["APIFY_API_TOKEN"]
+
+    assert len(notes) == 1
+    assert notes[0].image_url == "https://example.com/character.jpg"
+
+
+def test_google_images_vision_gate_skipped_without_look(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a look function no vision gate runs — backward compatible."""
+    items = [
+        {"imageUrl": "https://example.com/any.jpg", "title": "Mickey Mouse"},
+    ]
+
+    import os
+
+    os.environ["APIFY_API_TOKEN"] = "test-token"
+    try:
+        notes = search_google_images(
+            "Mickey Mouse",
+            apify_client_cls=_fake_apify_client(items),
+        )
+    finally:
+        del os.environ["APIFY_API_TOKEN"]
+
+    assert len(notes) == 1

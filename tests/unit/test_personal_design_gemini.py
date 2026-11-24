@@ -334,3 +334,45 @@ def test_gemini_no_lettering_when_voice_not_found(
 
     assert design is not None
     assert design.lettering is None
+
+
+# ---------------------------------------------------------------------------
+# Pyramid composition + flat vector style (issue #12-ish)
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_scene_uses_pyramid_composition_language(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini prompt should produce scenes with one focal element and others radiating out."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    payload = {
+        "subjects": [
+            {
+                "name": "Mickey Mouse",
+                "description": "Disney's iconic mouse in safari gear.",
+                "image_query": "Mickey Mouse safari Disney Animal Kingdom flat cartoon",
+            },
+            {
+                "name": "Simba",
+                "description": "The Lion King protagonist as a young lion cub.",
+                "image_query": "Simba Lion King Disney cub official cartoon art",
+            },
+        ],
+        "scene": "Mickey Mouse in a safari hat anchors the center foreground holding binoculars, while Simba and Timon and Pumbaa radiate outward and upward above him in a pyramid cluster, monstera leaves framing the composition.",
+        "composition": "pyramid",
+        "customer_line": None,
+        "voice_found": False,
+        "lettering": None,
+    }
+    client = _fake_genai_client(json.dumps(payload))
+    result = gemini_research_sentence("Disney's Animal Kingdom", genai_client=client)
+
+    assert result is not None
+    # Scene should describe hierarchical/pyramid composition
+    scene_lower = result.scene.lower()
+    assert any(
+        word in scene_lower
+        for word in ["anchor", "center", "focal", "foreground", "pyramid", "radiat", "cluster"]
+    )

@@ -49,7 +49,7 @@ def _no_live_search(monkeypatch: pytest.MonkeyPatch) -> None:
     """Personal research must not call Wikipedia from a unit test."""
     from store_listing.orchestration.personal_design import PhotoLook, SearchNote
 
-    def fake_search(query: str, *, complete: Any = None) -> list[SearchNote]:
+    def fake_search(query: str, *, complete: Any = None, look: Any = None) -> list[SearchNote]:
         title = " ".join(str(query).split()[:4]) or "subject"
         return [
             SearchNote(
@@ -1062,7 +1062,7 @@ class TestLiteralCustomWords:
     def test_empty_personal_research_is_abandoned(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "store_listing.orchestration.custom_brief.search_personal",
-            lambda _query, complete=None: [],
+            lambda _query, complete=None, look=None: [],
         )
         db = MagicMock()
         db.insert_design_brief.return_value = 344
