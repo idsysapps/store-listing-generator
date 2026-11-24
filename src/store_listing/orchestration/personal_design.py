@@ -1273,6 +1273,88 @@ def search_wikidata(query: str, *, client: httpx.Client | None = None) -> list[S
             http.close()
 
 
+_SUBJECT_BBOX_PROMPT = (
+    "This image contains a character or subject named '{subject}'. "
+    "Find that subject's bounding box in the image. "
+    'Return JSON only: {{"bbox": [x1_pct, y1_pct, x2_pct, y2_pct]}} '
+    "where values are 0-100 percent of image dimensions from top-left. "
+    "Exclude background, letterbox bars, and any other characters. "
+    "If the subject is not clearly visible, return null."
+)
+
+
+def _crop_to_subject(
+    image_data: bytes,
+    subject: str,
+    *,
+    vision_client: Any,
+    vision_model: str,
+) -> bytes:
+    """Crop image_data to the bounding box of the named subject.
+
+    Uses the vision LLM to locate the subject. Returns the original bytes
+    when the subject cannot be found or the crop fails.
+    """
+    try:
+        from io import BytesIO
+
+        from PIL import Image  # type: ignore[import-not-found]
+
+        from store_listing.orchestration.text_validation import encode_image_for_vision
+
+        data_url = encode_image_for_vision(image_data)
+        prompt = _SUBJECT_BBOX_PROMPT.format(subject=subject)
+        response = vision_client.chat.completions.create(
+            model=vision_model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+        )
+        raw = response.choices[0].message.content or ""
+        bbox = _parse_bbox(raw)
+        if bbox is None:
+            return image_data
+        img = Image.open(BytesIO(image_data))
+        w, h = img.size
+        x1 = max(0, int(bbox[0] / 100 * w))
+        y1 = max(0, int(bbox[1] / 100 * h))
+        x2 = min(w, int(bbox[2] / 100 * w))
+        y2 = min(h, int(bbox[3] / 100 * h))
+        if x2 <= x1 or y2 <= y1:
+            return image_data
+        cropped = img.crop((x1, y1, x2, y2))
+        out = BytesIO()
+        cropped.save(out, format="PNG")
+        return out.getvalue()
+    except Exception:  # noqa: BLE001
+        return image_data
+
+
+def _parse_bbox(text: str) -> tuple[float, float, float, float] | None:
+    """Extract [x1, y1, x2, y2] percentages from a vision LLM response."""
+    import re
+
+    m = re.search(r"\[([0-9]+(?:\.[0-9]*)?(?:,\s*[0-9]+(?:\.[0-9]*)?){3})\]", text)
+    if not m:
+        return None
+    try:
+        vals = [float(v.strip()) for v in m.group(1).split(",")]
+        if len(vals) != 4:
+            return None
+        x1, y1, x2, y2 = vals
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return x1, y1, x2, y2
+    except ValueError:
+        return None
+
+
 _GOOGLE_IMAGES_ACTOR = "bvAQMqCbp6wE53JzK"
 _GOOGLE_IMAGES_RESULTS = 50  # minimum enforced by actor; we cap output to MAX_REFERENCES
 _GOOGLE_IMAGES_KEEP = MAX_REFERENCES  # only keep this many to avoid flooding references
@@ -1311,6 +1393,7 @@ def search_google_images(
     complete: Callable[[list[dict[str, str]]], str] | None = None,
     look: Callable[[bytes], PhotoLook] | None = None,
     fetch: Callable[[str], bytes | None] | None = None,
+    crop_subject: Callable[[bytes, str], bytes] | None = None,
 ) -> list[SearchNote]:
     """Reference images from Google Image Search via Apify (johnvc/google-images-api).
 
@@ -1326,6 +1409,11 @@ def search_google_images(
     vision LLM to verify it is a clean character-art reference (kind=subject),
     not a logo, poster, Etsy SVG, or unrelated photo. ``fetch`` defaults to
     ``fetch_reference`` when not supplied.
+
+    When ``crop_subject`` is provided each accepted image is cropped to the
+    bounding box of the named subject using the vision LLM, eliminating
+    background, letterbox bars, and other characters from the reference.
+    ``crop_subject(image_bytes, query)`` returns cropped bytes.
     """
     import os
 
@@ -1374,8 +1462,9 @@ def search_google_images(
         title = str(item.get("title") or query).strip()
         if complete is not None and not _image_title_accepted(query, title, complete):
             continue
+        _fetch = fetch if fetch is not None else fetch_reference
+        image_data: bytes | None = None
         if look is not None:
-            _fetch = fetch if fetch is not None else fetch_reference
             image_data = _fetch(url)
             if image_data is None:
                 continue
@@ -1386,6 +1475,14 @@ def search_google_images(
                 continue
             if not photo.keep:
                 continue
+        if crop_subject is not None:
+            if image_data is None:
+                image_data = _fetch(url)
+            if image_data is not None:
+                try:
+                    image_data = crop_subject(image_data, query)
+                except Exception:  # noqa: BLE001
+                    logger.warning("Subject crop failed for %r — using original", url)
         source = str(item.get("source") or "").strip()
         text = f"{title} ({source})" if source else title
         # Pre-fill look so _attach_looks skips the slow vision-LLM download step.
@@ -1484,6 +1581,7 @@ def search_personal(
     client: httpx.Client | None = None,
     complete: Callable[[list[dict[str, str]]], str] | None = None,
     look: Callable[[bytes], PhotoLook] | None = None,
+    crop_subject: Callable[[bytes, str], bytes] | None = None,
 ) -> list[SearchNote]:
     """Wikipedia, Commons, Wikidata, Gemini, and Google Images notes for one query.
 
@@ -1504,7 +1602,9 @@ def search_personal(
             notes.extend(search(query, client=http))
         notes.extend(search_gemini(query))
         if not any(note.image_url for note in notes):
-            notes.extend(search_google_images(query, complete=complete, look=look))
+            notes.extend(
+                search_google_images(query, complete=complete, look=look, crop_subject=crop_subject)
+            )
         return notes
     finally:
         if owns_client:

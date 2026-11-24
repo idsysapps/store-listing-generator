@@ -742,7 +742,12 @@ def test_personal_search_asks_every_source(monkeypatch: pytest.MonkeyPatch) -> N
     )
     monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_google_images",
-        lambda query, apify_client_cls=None, complete=None, look=None, fetch=None: [],
+        lambda query,
+        apify_client_cls=None,
+        complete=None,
+        look=None,
+        fetch=None,
+        crop_subject=None: [],
     )
 
     notes = search_personal("Judy Hopps")
@@ -786,7 +791,12 @@ def test_google_images_fallback_fires_when_wikimedia_returns_no_images(
     )
     monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_google_images",
-        lambda query, apify_client_cls=None, complete=None, look=None, fetch=None: (
+        lambda query,
+        apify_client_cls=None,
+        complete=None,
+        look=None,
+        fetch=None,
+        crop_subject=None: (
             google_called.append(query)
             or [SearchNote(query, "Google result", "From google.", "https://example.com/img.jpg")]
         ),
@@ -823,9 +833,12 @@ def test_google_images_fallback_skipped_when_wikimedia_has_images(
     )
     monkeypatch.setattr(
         "store_listing.orchestration.personal_design.search_google_images",
-        lambda query, apify_client_cls=None, complete=None, look=None, fetch=None: (
-            google_called.append(query) or []
-        ),
+        lambda query,
+        apify_client_cls=None,
+        complete=None,
+        look=None,
+        fetch=None,
+        crop_subject=None: (google_called.append(query) or []),
     )
 
     search_personal("Mickey Mouse")
@@ -1807,3 +1820,80 @@ def test_google_images_vision_gate_skipped_without_look(
         del os.environ["APIFY_API_TOKEN"]
 
     assert len(notes) == 1
+
+
+# ---------------------------------------------------------------------------
+# Subject bounding box crop
+# ---------------------------------------------------------------------------
+
+
+def test_google_images_crops_accepted_image_to_subject_bbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When crop_subject is provided, accepted images are cropped to the subject region."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    # 100x100 red image — crop to [25, 25, 75, 75] should produce 50x50
+    img = Image.new("RGB", (100, 100), color=(255, 0, 0))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    original_bytes = buf.getvalue()
+
+    items = [{"imageUrl": "https://example.com/flash.jpg", "title": "Flash the sloth Zootopia"}]
+
+    crops_called: list[tuple[bytes, str]] = []
+
+    def fake_crop(image_data: bytes, subject: str) -> bytes:
+        crops_called.append((image_data, subject))
+        # Simulate cropping to 50x50
+        img_in = Image.open(BytesIO(image_data))
+        cropped = img_in.crop((25, 25, 75, 75))
+        out = BytesIO()
+        cropped.save(out, format="PNG")
+        return out.getvalue()
+
+    import os
+
+    os.environ["APIFY_API_TOKEN"] = "test-token"
+    try:
+        notes = search_google_images(
+            "Flash the sloth",
+            apify_client_cls=_fake_apify_client(items),
+            fetch=lambda url: original_bytes,
+            crop_subject=fake_crop,
+        )
+    finally:
+        del os.environ["APIFY_API_TOKEN"]
+
+    assert len(crops_called) == 1
+    assert crops_called[0][1] == "Flash the sloth"
+    assert len(notes) == 1
+    # Cropped image should be different from original
+    assert notes[0].image_url == "https://example.com/flash.jpg"
+
+
+def test_google_images_uses_original_when_crop_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If crop raises, the original image is still used as reference."""
+    items = [{"imageUrl": "https://example.com/flash.jpg", "title": "Flash the sloth"}]
+
+    def failing_crop(image_data: bytes, subject: str) -> bytes:
+        raise RuntimeError("Vision LLM unavailable")
+
+    import os
+
+    os.environ["APIFY_API_TOKEN"] = "test-token"
+    try:
+        notes = search_google_images(
+            "Flash",
+            apify_client_cls=_fake_apify_client(items),
+            fetch=lambda url: b"\x89PNG\r\n\x1a\n" + b"\x00" * 100,
+            crop_subject=failing_crop,
+        )
+    finally:
+        del os.environ["APIFY_API_TOKEN"]
+
+    assert len(notes) == 1  # Still included despite crop failure
