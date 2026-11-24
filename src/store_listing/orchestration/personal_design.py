@@ -83,8 +83,13 @@ _LOOK_PROMPT = (
     "Describe this one reference photo for a shirt graphic. Return JSON only: "
     '{"look": "the main thing in the frame, then the rest", '
     '"kind": "subject" or "logo" or "poster" or "crowd" or "unrelated"}. '
-    "kind is logo for a logo or a wordmark, poster for a poster or a title card, "
-    "crowd when the frame is full of people, and unrelated when it is not the subject."
+    "kind is subject when one character, animal, or object is the clear focus — "
+    "including movie or animation scenes where one character is prominent "
+    "(cinematic bars and CGI quality do not change this); "
+    "kind is logo for a logo or wordmark; "
+    "kind is poster for a promotional poster, advertisement, or title card with text; "
+    "kind is crowd when no single subject stands out; "
+    "kind is unrelated when the image has nothing to do with the query."
 )
 
 _PAGE_SYSTEM = (
