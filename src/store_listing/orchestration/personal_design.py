@@ -36,16 +36,16 @@ _ARRANGEMENTS: tuple[str, ...] = (
 
 _QUERY_SYSTEM = (
     "You choose web searches for one shirt design. The customer's sentence is the "
-    'request. Return JSON only: {"queries": ["..."]}. Search for the places, '
-    "rides, shows, and objects, and for how a named speaker talks. Give each "
-    "place, ride, show, and character its own query, and search a character by "
-    "that character's name alone. A named place such as Magic Kingdom must be "
-    "searched by that place name so the article can name the icons that belong "
-    "there. A place or a ride is not a movie. Do not merge two names into one "
-    "search. At most four queries. Do not guess a name. Search the role the "
-    "customer wrote, and do not search a character you are naming from memory. "
-    "If the sentence names a holiday or seasonal event such as Thanksgiving or "
-    "Christmas, give that holiday its own search query so its imagery appears "
+    'request. Return JSON only: {"queries": ["..."]}. '
+    "Search for NAMED CHARACTERS AND CREATURES only — do NOT search for parks, "
+    "theme parks, rides, or attractions by name; they provide thematic context but "
+    "are not drawn; e.g. for 'Disney Animal Kingdom safari - Mickey, Simba' search "
+    "for 'Mickey Mouse' and 'Simba Lion King', NOT 'Animal Kingdom' or 'Kilimanjaro "
+    "Safaris'. Search a character by that character's name alone. Do not merge two "
+    "names into one search. At most six queries. Do not guess a name. Search the "
+    "role the customer wrote, and do not search a character you are naming from "
+    "memory. If the sentence names a holiday or seasonal event such as Thanksgiving "
+    "or Christmas, give that holiday its own search query so its imagery appears "
     "in the notes."
 )
 
