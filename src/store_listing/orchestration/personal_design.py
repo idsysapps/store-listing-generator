@@ -36,16 +36,16 @@ _ARRANGEMENTS: tuple[str, ...] = (
 
 _QUERY_SYSTEM = (
     "You choose web searches for one shirt design. The customer's sentence is the "
-    'request. Return JSON only: {"queries": ["..."]}. Search for the places, '
-    "rides, shows, and objects, and for how a named speaker talks. Give each "
-    "place, ride, show, and character its own query, and search a character by "
-    "that character's name alone. A named place such as Magic Kingdom must be "
-    "searched by that place name so the article can name the icons that belong "
-    "there. A place or a ride is not a movie. Do not merge two names into one "
-    "search. At most four queries. Do not guess a name. Search the role the "
-    "customer wrote, and do not search a character you are naming from memory. "
-    "If the sentence names a holiday or seasonal event such as Thanksgiving or "
-    "Christmas, give that holiday its own search query so its imagery appears "
+    'request. Return JSON only: {"queries": ["..."]}. '
+    "Search for NAMED CHARACTERS AND CREATURES only — do NOT search for parks, "
+    "theme parks, rides, or attractions by name; they provide thematic context but "
+    "are not drawn; e.g. for 'Disney Animal Kingdom safari - Mickey, Simba' search "
+    "for 'Mickey Mouse' and 'Simba Lion King', NOT 'Animal Kingdom' or 'Kilimanjaro "
+    "Safaris'. Search a character by that character's name alone. Do not merge two "
+    "names into one search. At most six queries. Do not guess a name. Search the "
+    "role the customer wrote, and do not search a character you are naming from "
+    "memory. If the sentence names a holiday or seasonal event such as Thanksgiving "
+    "or Christmas, give that holiday its own search query so its imagery appears "
     "in the notes."
 )
 
@@ -1358,6 +1358,10 @@ def _parse_bbox(text: str) -> tuple[float, float, float, float] | None:
 _GOOGLE_IMAGES_ACTOR = "bvAQMqCbp6wE53JzK"
 _GOOGLE_IMAGES_RESULTS = 50  # minimum enforced by actor; we cap output to MAX_REFERENCES
 _GOOGLE_IMAGES_KEEP = MAX_REFERENCES  # only keep this many to avoid flooding references
+# Stop vision-gate checking after this many consecutive rejections. Real park photos
+# (Kilimanjaro Safari trucks, etc.) all fail the gate — without this limit the pipeline
+# would spend hours downloading and classifying 50 obviously-wrong images.
+_GOOGLE_IMAGES_MAX_VISION_REJECTIONS = 8
 _IMAGE_TITLE_CHECK_SYSTEM = (
     "You check if an image title is relevant to a search query. "
     'Return JSON only: {"accept": true} when the title describes the same '
@@ -1449,16 +1453,23 @@ def search_google_images(
         return []
 
     notes: list[SearchNote] = []
+    vision_rejections = 0
     for item in items or []:
         if len(notes) >= _GOOGLE_IMAGES_KEEP:
+            break
+        if look is not None and vision_rejections >= _GOOGLE_IMAGES_MAX_VISION_REJECTIONS:
+            logger.warning(
+                "Vision gate gave up for %r after %d consecutive rejections — "
+                "query likely returns real photos not character art",
+                query,
+                vision_rejections,
+            )
             break
         if not isinstance(item, dict):
             continue
         url = item.get("imageUrl")
         if not isinstance(url, str) or not _is_raster_url(url):
             continue
-        if len(notes) >= _GOOGLE_IMAGES_KEEP:
-            break
         title = str(item.get("title") or query).strip()
         if complete is not None and not _image_title_accepted(query, title, complete):
             continue
@@ -1467,14 +1478,18 @@ def search_google_images(
         if look is not None:
             image_data = _fetch(url)
             if image_data is None:
+                vision_rejections += 1
                 continue
             try:
                 photo = look(image_data)
             except Exception:  # noqa: BLE001
                 logger.warning("Vision gate failed for %r", url)
+                vision_rejections += 1
                 continue
             if not photo.keep:
+                vision_rejections += 1
                 continue
+            vision_rejections = 0  # reset on acceptance
         if crop_subject is not None:
             if image_data is None:
                 image_data = _fetch(url)
