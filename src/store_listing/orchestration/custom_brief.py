@@ -730,7 +730,7 @@ def _research_personal(
             searches["count"],
             max(searches["count"], MAX_QUERIES),
         )
-        return search_personal(query, complete=_llm_complete)
+        return search_personal(query, complete=_llm_complete, look=_vision_look)
 
     def complete(messages: list[dict[str, str]]) -> str:
         reads["count"] += 1
@@ -739,6 +739,9 @@ def _research_personal(
         else:
             _watch_phase(watch, "researching")
         return _personal_answer(llm_completions, model, messages)
+
+    def _vision_look(image: bytes) -> Any:
+        return look_at_reference(image, client=get_vision_client(), model=get_vision_model())
 
     def look(image: bytes) -> Any:
         _watch_phase(watch, "studying")

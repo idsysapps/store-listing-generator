@@ -55,15 +55,15 @@ _DESIGN_SYSTEM = (
     "a list of names is not a line), "
     "voice_found (true only when the notes show how the subject speaks), "
     "lettering (one short line that completes the idea in that voice, or null), "
-    "subjects (a creative brief written as an illustrator instruction — one or two "
-    "sentences of active-voice scene direction: name what each element is doing, "
-    "how elements relate or interact, and how the holiday or seasonal theme is "
-    "woven into the scene rather than added on top; write as if directing an "
-    "illustrator, not describing a photo; use action verbs; every named character, "
-    "ride, and place must be doing something in the scene together; do not describe "
-    "what the reference photos show and do not include explanatory phrases like "
-    "'the photos only show' or 'as the notes indicate'; no sky, no ground, no "
-    "crowd, no backdrop — isolated characters and elements on a flat field; "
+    "subjects (a creative brief in flat 2D cartoon vector style — bold outlines, "
+    "clean color fills, no photorealism; direct the illustrator in one or two "
+    "active-voice sentences: one primary character or element is the focal point "
+    "anchoring the center foreground, supporting characters radiate outward and "
+    "upward in a pyramid or cluster composition; name what each element is doing "
+    "and how they interact; weave any holiday or seasonal theme into costume or "
+    "props rather than adding it on top; write as a director not a photo caption; "
+    "do not include phrases like 'the photos only show' or 'as the notes indicate'; "
+    "no sky, no ground, no crowd, no backdrop — isolated elements on a flat field; "
     "keep a character the customer named in those exact words), "
     "additions (what the sentence asks for that the notes do not cover, or null), "
     'and references (up to six objects {"url", "keep"}). '
@@ -1304,6 +1304,8 @@ def search_google_images(
     *,
     apify_client_cls: Any | None = None,
     complete: Callable[[list[dict[str, str]]], str] | None = None,
+    look: Callable[[bytes], PhotoLook] | None = None,
+    fetch: Callable[[str], bytes | None] | None = None,
 ) -> list[SearchNote]:
     """Reference images from Google Image Search via Apify (johnvc/google-images-api).
 
@@ -1314,6 +1316,11 @@ def search_google_images(
     When ``complete`` is provided each candidate title is checked with the LLM
     before the image is accepted. The function iterates through Apify results
     lazily, stopping as soon as MAX_REFERENCES good images are found.
+
+    When ``look`` is provided each image is downloaded and checked with the
+    vision LLM to verify it is a clean character-art reference (kind=subject),
+    not a logo, poster, Etsy SVG, or unrelated photo. ``fetch`` defaults to
+    ``fetch_reference`` when not supplied.
     """
     import os
 
@@ -1362,11 +1369,22 @@ def search_google_images(
         title = str(item.get("title") or query).strip()
         if complete is not None and not _image_title_accepted(query, title, complete):
             continue
+        if look is not None:
+            _fetch = fetch if fetch is not None else fetch_reference
+            image_data = _fetch(url)
+            if image_data is None:
+                continue
+            try:
+                photo = look(image_data)
+            except Exception:  # noqa: BLE001
+                logger.warning("Vision gate failed for %r", url)
+                continue
+            if not photo.keep:
+                continue
         source = str(item.get("source") or "").strip()
         text = f"{title} ({source})" if source else title
         # Pre-fill look so _attach_looks skips the slow vision-LLM download step.
-        # Pre-fill look so _attach_looks skips the slow vision-LLM download step.
-        # Google Images results are already relevant; vision description adds no value.
+        # Google Images results are pre-validated; vision description adds no value.
         notes.append(SearchNote(query=query, title=title, text=text, image_url=url, look=title))
     return notes
 
@@ -1460,6 +1478,7 @@ def search_personal(
     *,
     client: httpx.Client | None = None,
     complete: Callable[[list[dict[str, str]]], str] | None = None,
+    look: Callable[[bytes], PhotoLook] | None = None,
 ) -> list[SearchNote]:
     """Wikipedia, Commons, Wikidata, Gemini, and Google Images notes for one query.
 
@@ -1469,6 +1488,8 @@ def search_personal(
 
     When ``complete`` is provided it is forwarded to search_google_images for
     LLM-based title relevance checking of Apify results.
+    When ``look`` is provided it is used as a vision gate to validate that
+    each Apify image is a clean character-art reference.
     """
     owns_client = client is None
     http = client or httpx.Client(timeout=10.0)
@@ -1478,7 +1499,7 @@ def search_personal(
             notes.extend(search(query, client=http))
         notes.extend(search_gemini(query))
         if not any(note.image_url for note in notes):
-            notes.extend(search_google_images(query, complete=complete))
+            notes.extend(search_google_images(query, complete=complete, look=look))
         return notes
     finally:
         if owns_client:
